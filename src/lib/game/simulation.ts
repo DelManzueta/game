@@ -1,0 +1,682 @@
+import {
+  DEV_FIELDS,
+  FIELD_TECH_WEIGHT,
+  SIZE_STATS,
+  getGenre,
+  getPlatform,
+  getTopic,
+  matchScore,
+  computeGenreFit,
+  genreFitModifier,
+  topicGenreTier,
+} from "./data";
+import {
+  applyDevWeekExperience,
+  generateWeekPoints,
+  hashSeed,
+  scoreProject,
+  USE_ALGORITHM_V2,
+  type ScoreBreakdown,
+} from "./scoring";
+import { scoreCriticsV2, generateSalesPlanV2, normalizeStageAllocations } from "./scoring/algorithmV2";
+import { SeededRng } from "./scoring/rng";
+import { STAGE_FIELDS } from "./data";
+
+import type {
+  AudienceId,
+  DevField,
+  DevPhase,
+  GameProject,
+  GameSize,
+  GenreId,
+  MatchTier,
+  ReleasedGame,
+  StaffMember,
+} from "./types";
+
+export function uid(prefix = "id") {
+  return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+export function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
+
+export function rand(min: number, max: number) {
+  return min + Math.random() * (max - min);
+}
+
+export function pick<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)]!;
+}
+
+export function formatCash(n: number): string {
+  const abs = Math.abs(n);
+  const sign = n < 0 ? "-" : "";
+  if (abs >= 1_000_000_000) return `${sign}$${(abs / 1_000_000_000).toFixed(2)}B`;
+  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(2)}M`;
+  if (abs >= 10_000) return `${sign}$${(abs / 1_000).toFixed(1)}K`;
+  return `${sign}$${Math.round(abs).toLocaleString()}`;
+}
+
+export function formatFans(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 10_000) return `${(n / 1_000).toFixed(1)}K`;
+  return Math.round(n).toLocaleString();
+}
+
+export function weekToDate(week: number, startYear: number) {
+  const year = startYear + Math.floor(week / 48);
+  const weekInYear = week % 48;
+  const month = Math.floor(weekInYear / 4) + 1;
+  const w = (weekInYear % 4) + 1;
+  return { year, month, weekOfMonth: w };
+}
+
+export function evaluateCombo(opts: {
+  topicId: string;
+  genreId: GenreId;
+  genre2Id?: GenreId | null;
+  platformId: string;
+  audience: AudienceId;
+  analytics?: boolean;
+  genres?: GenreId[];
+  capacityTier?: 1 | 2 | 3 | 4;
+}) {
+  const genres: GenreId[] = opts.genres?.length
+    ? opts.genres
+    : opts.genre2Id
+      ? [opts.genreId, opts.genre2Id]
+      : [opts.genreId];
+  const genreFit = computeGenreFit({
+    topicId: opts.topicId,
+    genres,
+    capacityTier: opts.capacityTier,
+  });
+  const tg = topicGenreTier(opts.topicId, opts.genreId);
+  const tg2 = opts.genre2Id ? topicGenreTier(opts.topicId, opts.genre2Id) : null;
+  const platform = getPlatform(opts.platformId);
+  const pg = platform.genreAffinity[opts.genreId] ?? "ok";
+  const pa = platform.audienceAffinity[opts.audience] ?? "ok";
+
+  let mult = genreFitModifier(genreFit) * matchScore(pg) * matchScore(pa);
+  // normalize platform×audience around ~0.8*0.8
+  mult = mult / 0.64;
+
+  return {
+    topicGenre: tg,
+    topicGenre2: tg2,
+    platformGenre: pg,
+    platformAudience: pa,
+    genreFit,
+    multiplier: mult,
+    label:
+      mult >= 1.15
+        ? "Excellent"
+        : mult >= 1.05
+          ? "Strong"
+          : mult >= 0.95
+            ? "Average"
+            : mult >= 0.85
+              ? "Weak"
+              : "Risky",
+  };
+}
+
+export function recommendedFocus(genreId: GenreId, stage: 1 | 2 | 3): DevField[] {
+  return getGenre(genreId).stageFocus[stage];
+}
+
+/** @deprecated Prefer quality-engine priority; kept for UI hints. */
+export function sliderQuality(project: GameProject, stage: 1 | 2 | 3): number {
+  const genre = getGenre(project.genreId);
+  const focus = new Set(genre.stageFocus[stage]);
+  const avoid = new Set(genre.avoid);
+  if (project.genre2Id) {
+    const g2 = getGenre(project.genre2Id);
+    for (const f of g2.stageFocus[stage]) focus.add(f);
+  }
+
+  let score = 1;
+  let total = 0;
+  let weightSum = 0;
+  for (const f of DEV_FIELDS) {
+    const v = project.sliders[f] ?? 40;
+    total += v;
+    weightSum += 1;
+    if (focus.has(f)) {
+      if (v >= 60) score += 0.04;
+      else if (v < 30) score -= 0.05;
+    }
+    if (avoid.has(f) && v > 50) score -= 0.04;
+  }
+  const avg = total / weightSum;
+  if (avg < 25 || avg > 85) score -= 0.03;
+  return clamp(score, 0.7, 1.2);
+}
+
+export function teamPower(staff: StaffMember[]) {
+  if (staff.length === 0) return { design: 40, tech: 40, speed: 1 };
+  const design = staff.reduce((s, m) => s + m.design, 0) / staff.length;
+  const tech = staff.reduce((s, m) => s + m.tech, 0) / staff.length;
+  const speed = staff.reduce((s, m) => s + m.speed, 0) / staff.length;
+  return { design, tech, speed: 0.7 + speed / 100 };
+}
+
+/**
+ * One development week: GDT-style time shares + point generation.
+ * Also returns staff with weekly experience applied (caller should store).
+ */
+export function developWeek(
+  project: GameProject,
+  staff: StaffMember[],
+  extras: { designBoost: number; techBoost: number; qa: boolean },
+): { project: GameProject; staff: StaffMember[]; stageJustFinished: boolean } {
+  const phase = project.devPhase;
+  if (
+    phase === "STAGE_1_CONFIG" ||
+    phase === "STAGE_2_CONFIG" ||
+    phase === "STAGE_3_CONFIG" ||
+    phase === "READY_TO_RELEASE" ||
+    project.stage === "done"
+  ) {
+    return { project, staff, stageJustFinished: false };
+  }
+
+  const isPolish = phase === "POLISHING";
+  const stage: 1 | 2 | 3 =
+    phase === "STAGE_1_RUNNING"
+      ? 1
+      : phase === "STAGE_2_RUNNING"
+        ? 2
+        : phase === "STAGE_3_RUNNING"
+          ? 3
+          : 3;
+
+  const seed = hashSeed(
+    project.rngSeed ?? project.id,
+    project.weeksDev,
+    stage,
+    project.designPoints,
+    project.techPoints,
+  );
+
+  const gen = generateWeekPoints({
+    staff,
+    stage,
+    genreId: project.genreId,
+    sliders: project.sliders,
+    size: project.size,
+    engineFeatures: project.features,
+    designBoost: extras.designBoost,
+    techBoost: extras.techBoost,
+    seed,
+  });
+
+  let designGain = gen.designGain;
+  let techGain = gen.techGain;
+  let bugs = project.bugs + gen.bugsGained;
+  let progressRate = gen.progressRate;
+
+  if (isPolish) {
+    // Polish: slow point gains, active bug fixing (deterministic from project seed)
+    designGain *= 0.25;
+    techGain *= 0.25;
+    progressRate = 0; // polish has no stage progress
+    const polishRng = new SeededRng(hashSeed(seed, "polish-fix", project.bugs, extras.qa));
+    const fix = extras.qa ? 2 + polishRng.int(0, 1) : 1 + polishRng.int(0, 1);
+    bugs = Math.max(0, bugs - fix - gen.bugsGained); // cancel new bugs + fix
+  } else if (extras.qa && gen.bugsGained > 0) {
+    const qaRng = new SeededRng(hashSeed(seed, "qa-mitigate", gen.bugsGained));
+    if (qaRng.next() < 0.45) {
+      bugs = Math.max(project.bugs, bugs - 1);
+    }
+  }
+
+  let stageProgress = project.stageProgress + (isPolish ? 0 : progressRate);
+  let nextPhase: DevPhase = phase;
+  let nextStage: GameProject["stage"] = stage;
+  let stageJustFinished = false;
+
+  if (!isPolish && stageProgress >= 1) {
+    stageProgress = 0;
+    stageJustFinished = true;
+    if (phase === "STAGE_1_RUNNING") {
+      nextPhase = "STAGE_2_CONFIG";
+      nextStage = 2;
+    } else if (phase === "STAGE_2_RUNNING") {
+      nextPhase = "STAGE_3_CONFIG";
+      nextStage = 3;
+    } else if (phase === "STAGE_3_RUNNING") {
+      nextPhase = "POLISHING";
+      nextStage = 3;
+    }
+  }
+
+  const accum = { ...(project.stageShareAccum ?? {}) };
+  if (!isPolish) {
+    for (const [f, v] of Object.entries(gen.shares)) {
+      accum[f as DevField] = (accum[f as DevField] ?? 0) + (v ?? 0);
+    }
+  }
+  const samples = (project.stageShareSamples ?? 0) + (isPolish ? 0 : 1);
+
+  const researchGain = isPolish ? 0.15 : 0.4 + staff.length * 0.15;
+
+  const updated: GameProject = {
+    ...project,
+    stage: nextStage,
+    stageProgress: nextPhase === "POLISHING" ? 1 : stageProgress,
+    devPhase: nextPhase,
+    designPoints: project.designPoints + designGain,
+    techPoints: project.techPoints + techGain,
+    researchEarned: (project.researchEarned ?? 0) + researchGain,
+    bugs,
+    weeksDev: project.weeksDev + 1,
+    stageShareAccum: accum,
+    stageShareSamples: samples,
+  };
+
+  const trained = applyDevWeekExperience(staff, {
+    genreId: project.genreId,
+    stage,
+  });
+
+  return { project: updated, staff: trained, stageJustFinished };
+}
+
+export interface ReviewContext {
+  targetHighScore: number;
+  previousHighBaseScore: number;
+  office: number;
+  fans: number;
+  graphicsLevel: number;
+  specialistCount: number;
+  gameYearIndex: number;
+  previousGame?: ReleasedGame | null;
+  engines?: { id: string; techBonus: number; designBonus: number }[];
+  matchesTrend?: boolean;
+  strangeTrend?: boolean;
+  isMmo?: boolean;
+  multiPlatformTech?: number[];
+  useMovingTarget?: boolean;
+  /** Weeks between sequel and original (if known). */
+  sequelWeeksSinceOriginal?: number | null;
+  /** V2 fields */
+  staff?: import("./types").StaffMember[];
+  platformMarket?: number;
+  platformTechCeiling?: number;
+  reputation?: number;
+  previousAvgReview?: number;
+  designBoost?: number;
+  techBoost?: number;
+  campaignSeed?: number;
+  week?: number;
+}
+
+/**
+ * Full GDT-style review scoring. Returns critic scores + breakdown.
+ * Sales must use `hiddenFinalScore`, not `avg`.
+ */
+export function computeReviews(
+  project: GameProject,
+  ctx: ReviewContext,
+): {
+  scores: number[];
+  avg: number;
+  quality: number;
+  breakdown: ScoreBreakdown;
+} {
+  if (USE_ALGORITHM_V2) {
+    return computeReviewsV2(project, ctx);
+  }
+
+  // Priority uses slider intent (what the player set), not diluted stage averages.
+  // Stage-time shares still drive weekly Design/Tech point generation.
+  const focusFieldShares: Partial<Record<DevField, number>> = {};
+  const sliderSum =
+    (["engine","gameplay","story","dialogue","level","ai","world","graphics","sound"] as DevField[])
+      .reduce((a, f) => a + (project.sliders[f] || 0), 0) || 1;
+  for (const f of ["engine","gameplay","story","dialogue","level","ai","world","graphics","sound"] as DevField[]) {
+    focusFieldShares[f] = (project.sliders[f] || 0) / sliderSum;
+  }
+
+  // Patch sequel weeks into a synthetic previous if needed
+  let previous = ctx.previousGame ?? null;
+  if (project.isSequel && project.sequelOf && !previous) {
+    previous = null;
+  }
+
+  const breakdown = scoreProject({
+    project,
+    designPoints: project.designPoints,
+    techPoints: project.techPoints,
+    bugs: project.bugs,
+    focusFieldShares,
+    previousGame: previous,
+    engines: ctx.engines,
+    targetHighScore: ctx.targetHighScore,
+    previousHighBaseScore: ctx.previousHighBaseScore,
+    office: ctx.office,
+    fans: ctx.fans,
+    graphicsLevel: ctx.graphicsLevel,
+    specialistCount: ctx.specialistCount,
+    gameYearIndex: ctx.gameYearIndex,
+    matchesTrend: ctx.matchesTrend,
+    strangeTrend: ctx.strangeTrend,
+    isMmo: ctx.isMmo,
+    multiPlatformTech: ctx.multiPlatformTech,
+    useMovingTarget: ctx.useMovingTarget,
+    sequelWeeksSinceOriginal: ctx.sequelWeeksSinceOriginal ?? null,
+    seed: hashSeed(project.id, "review", project.designPoints, project.techPoints, project.bugs),
+  });
+
+  // Apply sequel timing penalty if we know weeks (scoreProject defaulted to 0)
+  // Re-score path: if sequel too soon and not already penalized much — quality engine
+  // already applies when isSequel; weeks default 0 means always "too soon" for sequels.
+  // Fix: pass weeks via temporary mutation of breakdown if sequelWeeks provided and > 40
+  // For accuracy, re-call with flags... handled in store by setting previousGame correctly.
+
+  return {
+    scores: breakdown.fourCriticScores,
+    avg: breakdown.displayedAverage,
+    quality: project.designPoints + project.techPoints,
+    breakdown,
+  };
+}
+
+/**
+ * Sales use the **hidden** final score (not critic average).
+ */
+
+function computeReviewsV2(
+  project: GameProject,
+  ctx: ReviewContext,
+): {
+  scores: number[];
+  avg: number;
+  quality: number;
+  breakdown: ScoreBreakdown;
+  productQuality: number;
+  criticReviews: { name: string; score: number; comment: string }[];
+  qualityBreakdownV2: Record<string, number>;
+} {
+  const result = scoreCriticsV2({
+    project,
+    staff: ctx.staff ?? [],
+    platformMarket: ctx.platformMarket ?? 1,
+    platformTechCeiling: ctx.platformTechCeiling ?? 1,
+    reputation: ctx.reputation ?? 50,
+    previousAvgReview: ctx.previousAvgReview,
+    designBoost: ctx.designBoost,
+    techBoost: ctx.techBoost,
+    campaignSeed: ctx.campaignSeed ?? hashSeed(project.id),
+    week: ctx.week ?? 0,
+  });
+  const b = result.breakdown;
+  // Adapt to ScoreBreakdown-shaped object for store compatibility
+  const breakdown = {
+    generatedTech: b.generatedTech,
+    generatedDesign: b.generatedDesign,
+    actualSliderShares: {},
+    balanceDeviation: 1 - b.designTechBalance,
+    balanceModifier: b.designTechBalance,
+    priorityModifier: b.focusAlignment,
+    repetitionModifier: 1,
+    sequelModifier: 1,
+    compatibilityModifiers: { topicGenre: b.conceptFit, platformGenre: 1, platformAudience: 1 },
+    bugRatio: Math.max(0, 1 - b.bugPenalty / 40),
+    trendModifier: 1,
+    expertiseModifier: b.teamExecution,
+    baseScore: b.productQuality,
+    targetHighScore: 0,
+    intermediateScore: b.finalQuality,
+    hiddenFinalScore: Math.max(1, Math.min(10, b.productQuality / 10)),
+    fourCriticScores: result.scores,
+    displayedAverage: result.avg,
+    nextTargetHighScore: 0,
+    nextHighBaseScore: b.productQuality,
+    qualityFactor: b.craftQuality,
+  } as ScoreBreakdown;
+  return {
+    scores: result.scores,
+    avg: result.avg,
+    quality: b.productQuality,
+    breakdown,
+    productQuality: b.productQuality,
+    criticReviews: result.reviews.map((r) => ({
+      name: r.name,
+      score: r.score,
+      comment: r.comment,
+    })),
+    qualityBreakdownV2: {
+      execution: b.execution,
+      focusAlignment: b.focusAlignment,
+      designTechBalance: b.designTechBalance,
+      featureCoherence: b.featureCoherence,
+      innovation: b.innovation,
+      polish: b.polish,
+      teamExecution: b.teamExecution,
+      conceptFit: b.conceptFit,
+      bugPenalty: b.bugPenalty,
+      expectationModifier: b.expectationModifier,
+      finalQuality: b.finalQuality,
+      craftQuality: b.craftQuality,
+      productQuality: b.productQuality,
+    },
+  };
+}
+
+export function computeSalesCurve(
+  hiddenFinalScore: number,
+  opts: {
+    size: GameSize;
+    platformMarket: number;
+    fans: number;
+    hype: number;
+    marketingSpend: number;
+    pirateMode: boolean;
+    liveOps: boolean;
+    comboMult: number;
+    seed?: number;
+    // V2
+    productQuality?: number;
+    avgReview?: number;
+    hiddenAsQuality?: number;
+    platformAgeYears?: number;
+    genreId?: GenreId;
+    topicRepetition?: number;
+    campaignSeed?: number;
+    gameId?: string;
+    releaseWeek?: number;
+    studioReputation?: number;
+  },
+): {
+  weeks: number[];
+  totalUnits: number;
+  revenue: number;
+  fansGained: number;
+  history?: import("./types").WeeklySalePoint[];
+  price?: number;
+} {
+  if (USE_ALGORITHM_V2 && opts.campaignSeed != null && opts.gameId) {
+    const plan = generateSalesPlanV2({
+      productQuality: opts.productQuality ?? (opts.hiddenAsQuality ?? 50),
+      avgReview: opts.avgReview ?? 5,
+      size: opts.size,
+      platformMarket: opts.platformMarket,
+      platformAgeYears: opts.platformAgeYears ?? 0,
+      fans: opts.fans,
+      hype: opts.hype,
+      marketingSpend: opts.marketingSpend,
+      genreId: opts.genreId ?? "action",
+      topicRepetition: opts.topicRepetition ?? 0,
+      pirateMode: opts.pirateMode,
+      liveOps: opts.liveOps,
+      campaignSeed: opts.campaignSeed,
+      gameId: opts.gameId,
+      releaseWeek: opts.releaseWeek ?? 0,
+      studioReputation: opts.studioReputation ?? 50,
+    });
+    return {
+      weeks: plan.weeks,
+      totalUnits: plan.totalUnits,
+      revenue: plan.revenue,
+      fansGained: plan.fansGained,
+      history: plan.history,
+      price: plan.price,
+    };
+  }
+
+  const size = SIZE_STATS[opts.size];
+  const reviewFactor = Math.pow(clamp(hiddenFinalScore, 1, 10) / 10, 1.55);
+  const fanBase = 800 + opts.fans * 0.08;
+  const hypeBoost = 1 + opts.hype / 100 + opts.marketingSpend / 200000;
+  const jitter = opts.seed != null ? 0.95 + ((opts.seed % 100) / 100) * 0.1 : rand(0.9, 1.1);
+  const peak =
+    fanBase *
+    reviewFactor *
+    size.salesMult *
+    opts.platformMarket *
+    hypeBoost *
+    opts.comboMult *
+    jitter;
+
+  const duration = opts.liveOps ? 16 : 12;
+  const weeks: number[] = [];
+  let total = 0;
+  for (let w = 0; w < duration; w++) {
+    const decay = Math.pow(0.72, w);
+    let units = peak * decay * (w === 0 ? 1.15 : 1);
+    if (opts.pirateMode) units *= 0.78 - Math.min(0.2, w * 0.01);
+    units = Math.max(0, Math.round(units));
+    weeks.push(units);
+    total += units;
+  }
+  const price =
+    opts.size === "aaa" ? 60 : opts.size === "large" ? 50 : opts.size === "medium" ? 40 : 25;
+  const revenue = total * price * 0.7;
+  const fansGained = Math.round(total * (0.02 + hiddenFinalScore / 400));
+  return { weeks, totalUnits: total, revenue, fansGained };
+}
+
+export function generateGameTitle(topic: string, genre: string): string {
+  const topicName = getTopic(topic)?.name ?? "Unknown";
+  const genreName = getGenre(genre as GenreId)?.name ?? "Game";
+  const templates = [
+    `${topicName} ${genreName}`,
+    `${topicName} Legacy`,
+    `Project ${topicName}`,
+    `${topicName} Online`,
+    `Chronicles of ${topicName}`,
+    `${topicName} Force`,
+    `Ultra ${topicName}`,
+    `${topicName} Quest`,
+    `The ${topicName} Effect`,
+    `${topicName} Infinity`,
+  ];
+  return pick(templates);
+}
+
+export function generateStaff(levelBias = 1): StaffMember {
+  const first = pick([
+    "Alex", "Sam", "Jordan", "Riley", "Casey", "Morgan", "Quinn", "Avery",
+    "Jamie", "Taylor", "Kai", "Nova", "Remy", "Sage", "Drew", "Parker",
+  ]);
+  const last = pick([
+    "Chen", "Okada", "Reyes", "Singh", "Novak", "Baker", "Ito", "Mensah",
+    "Costa", "Nguyen", "Petrov", "Walsh", "Kim", "Hassan", "Berg", "Diaz",
+  ]);
+  const design = Math.round(rand(25, 55) * levelBias);
+  const tech = Math.round(rand(25, 55) * levelBias);
+  const speed = Math.round(rand(30, 60) * levelBias);
+  const salary = Math.round((design + tech + speed) * 18 + 400);
+  return {
+    id: uid("staff"),
+    energy: 100,
+    name: `${first} ${last}`,
+    design: clamp(design, 15, 100),
+    tech: clamp(tech, 15, 100),
+    speed: clamp(speed, 20, 100),
+    salary,
+    specialization: null,
+    level: 1,
+    xp: 0,
+    fieldExperience: {},
+    busy: false,
+  };
+}
+
+export function generateContracts(count: number, year: number): import("./types").ContractOffer[] {
+  const list: import("./types").ContractOffer[] = [];
+  const titles = [
+    "Port classic title",
+    "UI kit for publisher",
+    "Arcade mini-game",
+    "Advergame promo",
+    "Engine middleware demo",
+    "Serious games training module",
+    "Mobile prototype",
+    "Jam collab pack",
+  ];
+  for (let i = 0; i < count; i++) {
+    const hard = 0.8 + (year - 1982) * 0.02;
+    list.push({
+      id: uid("contract"),
+      title: pick(titles),
+      description: "Complete on time for cash and research points.",
+      reward: Math.round(rand(6000, 25000) * hard),
+      researchReward: Math.round(rand(8, 25)),
+      weeks: Math.round(rand(3, 8)),
+      progress: 0,
+      designReq: Math.round(rand(20, 50) * hard),
+      techReq: Math.round(rand(20, 50) * hard),
+      active: false,
+    });
+  }
+  return list;
+}
+
+export function toReleased(
+  project: GameProject,
+  reviews: { scores: number[]; avg: number; breakdown: ScoreBreakdown },
+  sales: { weeks: number[]; totalUnits: number; revenue: number; fansGained: number },
+  week: number,
+  year: number,
+): ReleasedGame {
+  return {
+    id: project.id,
+    title: project.title,
+    topicId: project.topicId,
+    genreId: project.genreId,
+    genre2Id: project.genre2Id,
+    platformId: project.platformId,
+    audience: project.audience,
+    size: project.size,
+    engineId: project.engineId,
+    designPoints: project.designPoints,
+    techPoints: project.techPoints,
+    bugs: project.bugs,
+    reviewScores: reviews.scores,
+    avgReview: reviews.avg,
+    sales: sales.totalUnits,
+    revenue: 0,
+    fansGained: sales.fansGained,
+    weekReleased: week,
+    yearReleased: year,
+    marketingSpend: project.marketingSpend,
+    developmentCost: project.developmentCost ?? 0,
+    hype: project.hype,
+    residualWeeks: sales.weeks.length,
+    weeklySalesLeft: [...sales.weeks],
+    weeklyHistory: [],
+    isSequel: project.isSequel,
+    isExpansion: project.isExpansion,
+    hiddenFinalScore: reviews.breakdown.hiddenFinalScore,
+    baseScore: reviews.breakdown.baseScore,
+    weeksOnMarket: 0,
+    onSale: true,
+    reportDone: false,
+  };
+}
+
