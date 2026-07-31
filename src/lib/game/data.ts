@@ -29,8 +29,8 @@ import {
 export const START_YEAR = 1982;
 export const WEEKS_PER_MONTH = 4;
 export const WEEKS_PER_YEAR = 48;
-export const SAVE_KEY = "studio-empire-save-v4";
-export const SAVE_VERSION = 4;
+export const SAVE_KEY = "studio-empire-save-v5";
+export const SAVE_VERSION = 5;
 
 export const STAGE_FIELDS: Record<1 | 2 | 3, DevField[]> = {
   1: ["engine", "gameplay", "story"],
@@ -122,7 +122,7 @@ export const AUDIENCES: { id: AudienceId; name: string }[] = [
 /** Canonical 132 topics — single source of truth. */
 export const TOPICS: TopicDef[] = CANONICAL_TOPICS;
 
-/** Exactly six top-level genres. */
+/** Exactly six top-level genres — all free at campaign start (no genre research). */
 export const GENRES: GenreDef[] = [
   {
     id: "action",
@@ -154,10 +154,10 @@ export const GENRES: GenreDef[] = [
     id: "rpg",
     name: "RPG",
     techBias: 0.6,
-    researchCost: 50,
-    startUnlocked: false,
+    researchCost: 0,
+    startUnlocked: true,
     stageFocus: {
-      1: ["story", "engine"],
+      1: ["story", "gameplay"],
       2: ["dialogue", "level"],
       3: ["world", "graphics"],
     },
@@ -167,8 +167,8 @@ export const GENRES: GenreDef[] = [
     id: "simulation",
     name: "Simulation",
     techBias: 1.6,
-    researchCost: 55,
-    startUnlocked: false,
+    researchCost: 0,
+    startUnlocked: true,
     stageFocus: {
       1: ["engine", "gameplay"],
       2: ["ai", "level"],
@@ -180,12 +180,12 @@ export const GENRES: GenreDef[] = [
     id: "strategy",
     name: "Strategy",
     techBias: 1.4,
-    researchCost: 60,
-    startUnlocked: false,
+    researchCost: 0,
+    startUnlocked: true,
     stageFocus: {
       1: ["engine", "gameplay"],
       2: ["ai", "level"],
-      3: ["graphics", "sound"],
+      3: ["world", "sound"],
     },
     avoid: ["dialogue"],
   },
@@ -193,10 +193,10 @@ export const GENRES: GenreDef[] = [
     id: "casual",
     name: "Casual",
     techBias: 0.5,
-    researchCost: 40,
-    startUnlocked: false,
+    researchCost: 0,
+    startUnlocked: true,
     stageFocus: {
-      1: ["gameplay", "graphics"],
+      1: ["gameplay", "story"],
       2: ["level", "sound"],
       3: ["graphics", "sound"],
     },
@@ -222,19 +222,16 @@ export const PLATFORMS: PlatformDef[] = CANONICAL_PLATFORMS;
 export { CUSTOM_CONSOLE, ENGINE_COMPONENTS, STARTING_ENGINE_COMPONENT_ID, startingEngineFeatures };
 export { topicGenreCompatibility, computeGenreFit, genreFitModifier, contentTopicGenreTier as topicGenreTierFromContent };
 
-/** Studio + size research (non-engine). Engine features derived from ENGINE_COMPONENTS. */
+/** Studio + size research (non-engine). No genre unlock research — all 6 genres free. */
 const STUDIO_RESEARCH: ResearchItem[] = [
-  { id: "medium_games", name: "Medium Games", category: "Studio", cost: 80, description: "Larger projects and bigger teams.", unlocksSize: "medium", weeks: 4 },
+  { id: "medium_games", name: "Medium Games", category: "Studio", cost: 80, description: "Larger projects. Requires first office and a hired teammate before you can start one.", unlocksSize: "medium", weeks: 4 },
   { id: "large_games", name: "Large Games", category: "Studio", cost: 200, description: "Ambitious multi-year productions.", unlocksSize: "large", requires: ["medium_games"], weeks: 6 },
   { id: "aaa_games", name: "AAA Production", category: "Studio", cost: 500, description: "Blockbuster scale.", unlocksSize: "aaa", requires: ["large_games"], weeks: 8, minYear: 2005 },
-  { id: "casual_games", name: "Casual Genre", category: "Genre", cost: 40, description: "Unlock Casual as a primary genre." },
-  { id: "rpg_genre", name: "RPG Genre", category: "Genre", cost: 50, description: "Unlock RPG." },
-  { id: "sim_genre", name: "Simulation Genre", category: "Genre", cost: 55, description: "Unlock Simulation." },
-  { id: "strategy_genre", name: "Strategy Genre", category: "Genre", cost: 60, description: "Unlock Strategy." },
   { id: "target_audience", name: "Target Audience", category: "Studio", cost: 45, description: "Market to Young, Everyone, or Mature.", unlocksAudience: true },
   { id: "marketing", name: "Marketing 101", category: "Studio", cost: 60, description: "Spend on hype before release.", unlocksMarketing: true },
   { id: "contracts", name: "Contract Work", category: "Studio", cost: 50, description: "Take freelance contracts for cash & RP.", unlocksContracts: true },
-  { id: "sequels", name: "Sequels", category: "Production", cost: 100, description: "Develop sequels to past hits.", unlocksSequel: true },
+  { id: "sequels", name: "Series Continuity", category: "Production", cost: 100, description: "Sequels after past hits (~15 RP). Unlocks sequel projects early.", unlocksSequel: true, weeks: 3 },
+  { id: "series_continuity", name: "Series Continuity (legacy)", category: "Production", cost: 15, description: "Alias research node for continuity.", unlocksSequel: true, weeks: 2, requires: ["sequels"] },
   { id: "multi_genre", name: "Multi-Genre", category: "Production", cost: 160, description: "Combine genres on one title (capacity tier 2+).", unlocksMultiGenre: true },
 ];
 
@@ -244,7 +241,7 @@ function engineResearchItems(): ResearchItem[] {
     name: c.name,
     category: c.category,
     cost: c.researchCost,
-    description: `Engine component: ${c.name}.`,
+    description: `Engine component: ${c.name}. Assemble in Engines workshop.`,
     requires: c.requires,
     engineFeature: c.engineFeature ?? c.name,
     designBoost: c.category.includes("Story") || c.category === "Dialogue" || c.category === "Gameplay" ? 3 : undefined,
@@ -255,12 +252,8 @@ function engineResearchItems(): ResearchItem[] {
 
 export const RESEARCH: ResearchItem[] = [...STUDIO_RESEARCH, ...engineResearchItems()];
 
-export const GENRE_RESEARCH_MAP: Record<string, GenreId> = {
-  casual_games: "casual",
-  rpg_genre: "rpg",
-  sim_genre: "simulation",
-  strategy_genre: "strategy",
-};
+/** Empty — genres are free; kept for save migration only. */
+export const GENRE_RESEARCH_MAP: Record<string, GenreId> = {};
 
 export const STAFF_FIRST = [
   "Alex", "Sam", "Jordan", "Riley", "Casey", "Morgan", "Quinn", "Avery",
@@ -281,20 +274,22 @@ export const OFFICE_INFO = {
     name: "Garage",
     rent: 0,
     capacity: 1,
-    upgradeCost: 250000,
-    fanRequirement: 25000,
-    gamesRequirement: 3,
-    cashRequirement: 300000,
+    upgradeCost: 1_000_000,
+    fanRequirement: 25_000,
+    gamesRequirement: 5,
+    cashRequirement: 1_000_000,
+    /** Earliest calendar: Year 2 Month 10 (pacing floor only). */
+    minYear: 1983,
+    minMonth: 10,
   },
-  2: { name: "Small Office", rent: 2000, capacity: 4, upgradeCost: 1200000, fanRequirement: 0, gamesRequirement: 0, cashRequirement: 0 },
-  3: { name: "Downtown Studio", rent: 8000, capacity: 8, upgradeCost: 5000000, fanRequirement: 0, gamesRequirement: 0, cashRequirement: 0 },
+  2: { name: "Small Office", rent: 2000, capacity: 4, upgradeCost: 1_200_000, fanRequirement: 0, gamesRequirement: 0, cashRequirement: 0 },
+  3: { name: "Downtown Studio", rent: 8000, capacity: 8, upgradeCost: 5_000_000, fanRequirement: 0, gamesRequirement: 0, cashRequirement: 0 },
   4: { name: "HQ Campus", rent: 25000, capacity: 14, upgradeCost: 0, fanRequirement: 0, gamesRequirement: 0, cashRequirement: 0 },
 } as const;
 
 /** Map compatibility rank / MatchTier → 0.6–1.0 product space. */
 export function matchScore(tier: MatchTier | undefined | number): number {
   if (typeof tier === "number") {
-    // CompatibilityValue 15–100 → 0.76–1.10 range via genreFitModifier-ish
     return 0.7 + (tier / 100) * 0.4;
   }
   switch (tier) {
@@ -346,4 +341,25 @@ export function defaultSliders(genreId: GenreId): Record<DevField, number> {
 
 export function topicGenreTier(topicId: string, genreId: GenreId): MatchTier {
   return contentTopicGenreTier(topicId, genreId);
+}
+
+/** Base size cost scaled by platform tech/market (and small license friction). */
+export function projectDevelopmentCost(
+  size: keyof typeof SIZE_STATS,
+  platformId: string,
+  marketingSpend = 0,
+): number {
+  const base = SIZE_STATS[size].cost;
+  const p = getPlatform(platformId);
+  if (!p) return base + marketingSpend;
+  const mult = 0.72 + p.techCeiling * 0.38 + p.marketSize * 0.12;
+  const platformFriction = Math.round(p.licenseCost * 0.04);
+  return Math.round(base * mult) + platformFriction + marketingSpend;
+}
+
+/** Human-readable platform cost multiplier for UI. */
+export function platformCostMultiplier(platformId: string): number {
+  const p = getPlatform(platformId);
+  if (!p) return 1;
+  return Math.round((0.72 + p.techCeiling * 0.38 + p.marketSize * 0.12) * 100) / 100;
 }

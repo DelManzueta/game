@@ -185,8 +185,8 @@ describe("garage content slice", () => {
     assert.equal(isGarageTopic("mecha"), false);
   });
 
-  it("schema version is 3", () => {
-    assert.equal(SCHEMA_VERSION, 4);
+  it("schema version is 5", () => {
+    assert.equal(SCHEMA_VERSION, 5);
   });
 
   it("campaign seed is deterministic from company name", () => {

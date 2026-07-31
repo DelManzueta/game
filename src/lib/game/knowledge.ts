@@ -115,6 +115,53 @@ export function buildReportInsights(
     });
   }
 
+  // Layered commercial report (when present)
+  const cx = game.commercialExplain ?? game.outcomeTrace?.commercial?.explain;
+  if (cx) {
+    const awarenessLow =
+      (game.awarenessAtLaunch ?? game.outcomeTrace?.commercial?.awareness ?? 1) < 0.28;
+    const qualityHigh = avg >= 7.5;
+    const marketingHeavy = game.marketingSpend >= 40000;
+    if (qualityHigh && awarenessLow) {
+      entries.push({
+        key: `${keyBase}:low_awareness`,
+        kind: "lesson",
+        label: "Good game, low awareness",
+        detail: `${cx.qualityDemand} ${cx.awareness} Reach limited sales despite quality.`,
+        confidence: 0.82,
+        sourceGameId: game.id,
+        weekLearned: week,
+      });
+    }
+    if (marketingHeavy && avg < 5.5 && game.sales > 0) {
+      entries.push({
+        key: `${keyBase}:marketed_flop`,
+        kind: "weakness",
+        label: "Visibility without conversion",
+        detail: `${cx.awareness} Marketing exposed a weak product. Exposure ≠ sales.`,
+        confidence: 0.88,
+        sourceGameId: game.id,
+        weekLearned: week,
+      });
+    }
+    entries.push({
+      key: `${keyBase}:commercial`,
+      kind: "lesson",
+      label: "Commercial breakdown",
+      detail: [
+        cx.marketPotential,
+        cx.qualityDemand,
+        cx.awareness,
+        cx.priceFit,
+        cx.distribution,
+        cx.lifecycle,
+      ].join(" "),
+      confidence: 0.7,
+      sourceGameId: game.id,
+      weekLearned: week,
+    });
+  }
+
   if (avg < 5) {
     entries.push({
       key: `${keyBase}:flop`,

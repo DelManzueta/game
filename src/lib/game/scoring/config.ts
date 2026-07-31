@@ -87,10 +87,13 @@ export const QUALITY = {
   importantLowEachPenalty: -0.15,
   unimportantTwoPlusPenalty: -0.2,
   sameTopicGenrePenalty: -0.4,
-  sequelTooSoonWeeks: 40,
-  sequelTooSoonPenalty: -0.4,
-  sequelSameEnginePenalty: -0.1,
-  sequelImprovedEngineBonus: 0.2,
+  sequelTooSoonWeeks: 20,
+  /** Additive quality knobs (commercial uses exact mults in commercial/sequels). */
+  sequelTooSoonPenalty: -0.25,
+  sequelEarlyPenalty: -0.08,
+  sequelSameEnginePenalty: -0.05,
+  sequelImprovedEngineBonus: 0.12,
+  sequelProperBonus: 0.08,
   mmoBadMatchPenalty: -0.15,
   mmoSliderPenaltyScale: 2,
 } as const;
@@ -168,26 +171,26 @@ export const DEV_POINTS = {
 /** Staff experience while developing (slow growth). */
 export const EXPERIENCE = {
   /** XP per staff per development week. */
-  xpPerDevWeek: 2.2,
+  xpPerDevWeek: 14,
   /** Bonus XP when focusing on specialized field. */
-  specializationBonus: 0.8,
-  /** Field experience gain per week on worked fields. */
-  fieldXpPerWeek: 1.1,
-  fieldXpCap: 100,
-  /** Level curve: xpToLevel = base + level * perLevel (slow). */
-  xpBase: 50,
+  specializationBonus: 4,
+  /** Field experience gain per week on worked fields (cap 1100 = god-tier). */
+  fieldXpPerWeek: 12,
+  fieldXpCap: 1100,
+  /** Level curve: 10 levels total. xpToNext = base + level * perLevel. */
+  xpBase: 90,
   xpPerLevel: 35,
-  /** Stat gains on level-up (capped at 100). */
-  designOnLevel: 1,
-  techOnLevel: 1,
-  speedOnLevel: 1,
+  /** Stat gains on level-up (capped at 1100 god-tier). */
+  designOnLevel: 18,
+  techOnLevel: 18,
+  speedOnLevel: 14,
   /** Occasional second point every N levels. */
-  bonusStatEveryLevels: 5,
-  /** Release XP (small, on top of weekly). */
-  xpOnReleaseBase: 6,
-  xpOnReleasePerScore: 1.2,
-  maxStat: 100,
-  maxLevel: 40,
+  bonusStatEveryLevels: 2,
+  /** Release XP (on top of weekly). */
+  xpOnReleaseBase: 25,
+  xpOnReleasePerScore: 4,
+  maxStat: 1100,
+  maxLevel: 10,
 } as const;
 
 /** Topic × audience defaults when not in table. */

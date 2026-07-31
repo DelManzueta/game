@@ -2,7 +2,8 @@
  * Algorithm V2 balancing — configuration only.
  * Not GDT moving-target: past hits do not secretly punish the next game.
  */
-import type { DevField, GenreId } from "../../types";
+import type { DevField, GameSize, GenreId } from "../../types";
+import { WEEKS_PER_MONTH } from "../../data";
 
 export const STAGE_EFFORT_TOTAL = 100;
 
@@ -154,6 +155,24 @@ export const WORK_FACTORS = {
 
 export const EXPECTATION_CAP = 5; // quality points ±
 
+/**
+ * Shelf life on the market by game size (months of sim time).
+ * Better review scores land toward the high end of the range.
+ * Calendar: WEEKS_PER_MONTH = 4.
+ */
+export const MARKET_LONGEVITY_MONTHS: Record<
+  GameSize,
+  { minMonths: number; maxMonths: number }
+> = {
+  small: { minMonths: 7, maxMonths: 10 },
+  medium: { minMonths: 10, maxMonths: 18 },
+  large: { minMonths: 18, maxMonths: 24 },
+  aaa: { minMonths: 24, maxMonths: 30 },
+};
+
+/** Live-ops / ongoing support extends shelf life past the size max. */
+export const LIVE_OPS_EXTRA_MONTHS = 3;
+
 export const SALES = {
   basePlatformUsers: {
     small: 40_000,
@@ -162,6 +181,26 @@ export const SALES = {
     aaa: 320_000,
   } as Record<string, number>,
   priceBySize: { small: 25, medium: 40, large: 50, aaa: 60 } as Record<string, number>,
-  defaultWeeks: 14,
-  liveOpsWeeks: 18,
+  /** @deprecated use marketWeeksOnSale — kept for callers that only need a mid-range small default */
+  defaultWeeks: MARKET_LONGEVITY_MONTHS.small.minMonths * WEEKS_PER_MONTH,
+  liveOpsWeeks:
+    (MARKET_LONGEVITY_MONTHS.small.maxMonths + LIVE_OPS_EXTRA_MONTHS) * WEEKS_PER_MONTH,
 };
+
+/**
+ * Weeks a released game stays on sale.
+ * Score (avg review 1–10) interpolates within the size band; better games last longest.
+ */
+export function marketWeeksOnSale(
+  size: GameSize,
+  avgReview: number,
+  liveOps = false,
+): number {
+  const band = MARKET_LONGEVITY_MONTHS[size] ?? MARKET_LONGEVITY_MONTHS.small;
+  // Map critic score into [0, 1]. Floor of ~2.0 and cap at 9.5 so
+  // truly bad games still get a short run and near-perfect hits hit the max.
+  const t = Math.max(0, Math.min(1, (avgReview - 2) / 7.5));
+  let months = band.minMonths + t * (band.maxMonths - band.minMonths);
+  if (liveOps) months += LIVE_OPS_EXTRA_MONTHS;
+  return Math.round(months * WEEKS_PER_MONTH);
+}

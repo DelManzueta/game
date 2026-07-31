@@ -1,7 +1,7 @@
 import { c as HeadContent, d as Outlet, f as lazyRouteComponent, g as require_jsx_runtime, m as createRootRoute, p as createFileRoute, s as Scripts, u as createRouter } from "../_libs/@tanstack/react-router+[...].mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/router-Chlk8ebH.js
+//#region node_modules/.nitro/vite/services/ssr/assets/router-D4kOz11Q.js
 var import_jsx_runtime = require_jsx_runtime();
-var styles_default = "/assets/styles-B8SExnS7.css";
+var styles_default = "/assets/styles-FjBanGjL.css";
 var Route$2 = createRootRoute({
 	head: () => ({
 		meta: [

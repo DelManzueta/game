@@ -36,7 +36,14 @@ export const GARAGE_GENRE_IDS: GenreId[] = [
 
 /** Four starting topics — do not dump the full catalog. */
 export const GARAGE_START_TOPICS = ["space", "fantasy", "racing", "dungeon"] as const;
-export const GARAGE_START_GENRES: GenreId[] = ["action", "adventure"];
+export const GARAGE_START_GENRES: GenreId[] = [
+  "action",
+  "adventure",
+  "rpg",
+  "simulation",
+  "strategy",
+  "casual",
+];
 /** Three meaningful early platforms: PC, Commodore, early console. */
 export const GARAGE_START_PLATFORMS = ["pc", "commodore", "tes"] as const;
 

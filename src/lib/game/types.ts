@@ -66,7 +66,8 @@ export type ModalId =
   | "confirmMenu"
   | "event"
   | "report"
-  | "loopGuide";
+  | "loopGuide"
+  | "notifications";
 
 export type UnlockId =
   | "research"
@@ -258,6 +259,13 @@ export interface GameProject {
   launchPrice?: number;
   /** True when project was cancelled (for knowledge only). */
   cancelled?: boolean;
+  /** Publishing deal id accepted for this project (optional). */
+  publisherDealId?: string | null;
+  distributionType?: "self" | "publisher";
+  /** ALGORITHM 1 production state machine (persisted). */
+  production?: import("./production/algorithm").ProductionState;
+  /** Quality calculated after candidate build (not reviews). */
+  qualityResult?: import("./quality/algorithm").QualityResult;
 }
 
 export interface WeeklySalePoint {
@@ -301,7 +309,12 @@ export interface ReleasedGame {
   weeklyHistory: WeeklySalePoint[];
   isSequel?: boolean;
   isExpansion?: boolean;
+  /** Parent title id when this is a sequel. */
+  sequelOf?: string;
+  seriesId?: string;
+  sequelIndex?: number;
   hiddenFinalScore?: number;
+
   baseScore?: number;
   weeksOnMarket: number;
   onSale: boolean;
@@ -313,6 +326,63 @@ export interface ReleasedGame {
   /** Frozen at release — load must not recompute. */
   outcomeTrace?: import("./contracts").OutcomeTrace;
   launchPrice?: number;
+  /** Commercial spine (Phase commercial build). */
+  distributionType?: "self" | "publisher";
+  publisherId?: string | null;
+  publisherRoyalty?: number;
+  awarenessAtLaunch?: number;
+  hypeAtLaunch?: number;
+  fanBaseAtLaunch?: number;
+  salesPhase?: import("./commercial/config").SalesPhase;
+  dormant?: boolean;
+  delisted?: boolean;
+  lowSalesStreak?: number;
+  marketWeeksPlanned?: number;
+  commercialExplain?: {
+    marketPotential: string;
+    qualityDemand: string;
+    awareness: string;
+    hype: string;
+    priceFit: string;
+    distribution: string;
+    lifecycle: string;
+  };
+  fanHistory?: { week: number; delta: number; reason: string }[];
+  /**
+   * Live weekly sales engine (v3). When set, residual weeks use calculateWeeklySales
+   * instead of consuming precomputed weeklySalesLeft.
+   */
+  salesEngine?: "plan_v2" | "weekly_v3";
+  /** Frozen commercial inputs for live weekly sales (set at release). */
+  salesSnapshot?: {
+    platformInstalledBase: number;
+    platformLifecycle: number;
+    platformAvailability: number;
+    audienceDemand: number;
+    topicDemand: number;
+    genreDemand: number;
+    platformGenreFit: number;
+    competitionModifier: number;
+    trendModifier: number;
+    organicAwarenessPoints: number;
+    publisherAwarenessPoints: number;
+    distributionMultiplier: number;
+    referencePrice: number;
+    platformFeeRate: number;
+    /** 1 - studio royalty share when published. */
+    publisherCutRate: number;
+    marketCapacityRate: number;
+  };
+  /** Per-title marketing state (campaigns, awareness, hype). */
+  marketingState?: import("./commercial/marketing").MarketingState;
+  /** Immutable weekly results from live sales engine. */
+  weeklySalesResults?: import("./commercial/weeklySales").WeeklySalesResult[];
+  marketDays?: number;
+  /** ALGORITHM 2 frozen quality + reviews (never re-roll). */
+  qualityResult?: import("./quality/algorithm").QualityResult;
+  reviewResult?: import("./quality/algorithm").ReviewResult;
+  /** ALGORITHM 3 platform snapshot at release. */
+  platformSnapshotAtRelease?: import("./platforms/lifecycle").PlatformWeekSnapshot;
 }
 
 
@@ -341,6 +411,8 @@ export interface Notification {
   text: string;
   tone: "info" | "good" | "warn" | "bad";
   week: number;
+  /** False until player opens the inbox. */
+  read?: boolean;
 }
 
 export interface ResearchJob {
@@ -350,6 +422,11 @@ export interface ResearchJob {
   name: string;
   weeksLeft: number;
   totalWeeks: number;
+  /** Staff member currently running this job. */
+  assigneeId?: string;
+  assigneeName?: string;
+  /** Design/tech or a DevField the job prefers. */
+  focusField?: DevField | "design" | "tech";
 }
 
 export interface GameSettings {
@@ -358,6 +435,10 @@ export interface GameSettings {
   reducedMotion: boolean;
   infoMode: "classic" | "assisted" | "analyst";
   disableBankruptcy: boolean;
+  /** QA: force 10.0 reviews on next releases (toggle). */
+  forcePerfectScore?: boolean;
+  /** QA: force ~2.0 reviews on next releases (toggle). */
+  forceBadScore?: boolean;
 }
 
 export interface GameState {
@@ -390,7 +471,12 @@ export interface GameState {
   activeSales: ReleasedGame[];
   contracts: ContractOffer[];
   activeContract: ContractOffer | null;
+  /** @deprecated Prefer activeResearchJobs — kept in sync as jobs[0] for older UI. */
   activeResearch: ResearchJob | null;
+  /** Concurrent research jobs (one per free specialist when team exists). */
+  activeResearchJobs: ResearchJob[];
+  /** Paid research waiting for a free specialist. */
+  researchQueue: ResearchJob[];
   notifications: Notification[];
   lastReviewGameId: string | null;
   selectedGameId: string | null;
@@ -437,6 +523,16 @@ export interface GameState {
   knowledge: import("./contracts").CampaignKnowledge;
   /** Garage slice mode: restrict content to verified small set. */
   garageSlice: boolean;
+  /** Publishing board (late garage). Null until unlocked. */
+  publishingBoard?: import("./commercial/publishing").PublishingBoardState | null;
+  /** Active deal id accepted for current / next project. */
+  activePublisherDealId?: string | null;
+  /** Fractional RP accumulator (founder activity + market). */
+  researchPointsFrac?: number;
+  /** Series franchise reputation map. */
+  seriesRecords?: Record<string, import("./commercial/sequels").SeriesRecord>;
+  /** Append-only finance ledger (mirrors cash). */
+  ledger?: import("./finance/ledger").FinanceLedger;
 }
 
 

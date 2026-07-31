@@ -219,13 +219,30 @@ export function developWeek(
   let progressRate = gen.progressRate;
 
   if (isPolish) {
-    // Polish: slow point gains, active bug fixing (deterministic from project seed)
-    designGain *= 0.25;
-    techGain *= 0.25;
-    progressRate = 0; // polish has no stage progress
-    const polishRng = new SeededRng(hashSeed(seed, "polish-fix", project.bugs, extras.qa));
-    const fix = extras.qa ? 2 + polishRng.int(0, 1) : 1 + polishRng.int(0, 1);
-    bugs = Math.max(0, bugs - fix - gen.bugsGained); // cancel new bugs + fix
+    // Polish: slow point gains, active bug fixing (deterministic from project seed + team)
+    designGain *= 0.2;
+    techGain *= 0.2;
+    progressRate = 0;
+    const avgTech = staff.reduce((s, m) => s + m.tech, 0) / Math.max(1, staff.length);
+    const avgSpeed = staff.reduce((s, m) => s + m.speed, 0) / Math.max(1, staff.length);
+    const avgDesign = staff.reduce((s, m) => s + m.design, 0) / Math.max(1, staff.length);
+    const polishRng = new SeededRng(
+      hashSeed(seed, "polish-fix", project.bugs, extras.qa, Math.floor(avgTech)),
+    );
+    // Team skill drives real progress — was 1–3/week and felt broken on high bug counts
+    let baseFix =
+      2 +
+      Math.floor(avgTech / 35) +
+      Math.floor(avgSpeed / 45) +
+      Math.floor(avgDesign / 80) +
+      Math.min(3, staff.length - 1);
+    if (extras.qa) baseFix += 2;
+    // Slight variance ±1, and catch-up when bug pile is huge
+    const variance = polishRng.int(0, 2);
+    const backlogBoost = project.bugs >= 20 ? 3 : project.bugs >= 12 ? 2 : project.bugs >= 6 ? 1 : 0;
+    const fix = Math.min(14, Math.max(2, baseFix + variance + backlogBoost));
+    // Cancel any new bugs from generation, then apply fixes
+    bugs = Math.max(0, project.bugs - fix);
   } else if (extras.qa && gen.bugsGained > 0) {
     const qaRng = new SeededRng(hashSeed(seed, "qa-mitigate", gen.bugsGained));
     if (qaRng.next() < 0.45) {
@@ -490,6 +507,13 @@ export function computeSalesCurve(
     gameId?: string;
     releaseWeek?: number;
     studioReputation?: number;
+    launchPrice?: number;
+    distributionType?: "self" | "publisher";
+    publisherReachMult?: number;
+    publisherAwarenessMult?: number;
+    publisherRoyalty?: number;
+    sequelFanAwarenessMult?: number;
+    sequelCommercialMult?: number;
   },
 ): {
   weeks: number[];
@@ -498,6 +522,10 @@ export function computeSalesCurve(
   fansGained: number;
   history?: import("./types").WeeklySalePoint[];
   price?: number;
+  layers?: import("./commercial").CommercialLayers;
+  revenueShare?: number;
+  distributionType?: "self" | "publisher";
+  marketWeeks?: number;
 } {
   if (USE_ALGORITHM_V2 && opts.campaignSeed != null && opts.gameId) {
     const plan = generateSalesPlanV2({
@@ -517,6 +545,13 @@ export function computeSalesCurve(
       gameId: opts.gameId,
       releaseWeek: opts.releaseWeek ?? 0,
       studioReputation: opts.studioReputation ?? 50,
+      launchPrice: opts.launchPrice,
+      distributionType: opts.distributionType,
+      publisherReachMult: opts.publisherReachMult,
+      publisherAwarenessMult: opts.publisherAwarenessMult,
+      publisherRoyalty: opts.publisherRoyalty,
+      sequelFanAwarenessMult: opts.sequelFanAwarenessMult,
+      sequelCommercialMult: opts.sequelCommercialMult,
     });
     return {
       weeks: plan.weeks,
@@ -525,6 +560,10 @@ export function computeSalesCurve(
       fansGained: plan.fansGained,
       history: plan.history,
       price: plan.price,
+      layers: plan.layers,
+      revenueShare: plan.revenueShare,
+      distributionType: plan.distributionType,
+      marketWeeks: plan.marketWeeks,
     };
   }
 
@@ -618,19 +657,28 @@ export function generateContracts(count: number, year: number): import("./types"
     "Serious games training module",
     "Mobile prototype",
     "Jam collab pack",
+    "Museum interactive kiosk",
+    "TV bumper pack",
+    "Hardware launch demo",
+    "Educational quiz engine",
+    "Sports broadcast overlay",
+    "Festival booth game",
   ];
-  for (let i = 0; i < count; i++) {
+  const n = Math.max(count, 1);
+  for (let i = 0; i < n; i++) {
     const hard = 0.8 + (year - 1982) * 0.02;
+    const designReq = Math.round(rand(18, 48) * hard);
+    const techReq = Math.round(rand(18, 48) * hard);
     list.push({
       id: uid("contract"),
       title: pick(titles),
-      description: "Complete on time for cash and research points.",
-      reward: Math.round(rand(6000, 25000) * hard),
-      researchReward: Math.round(rand(8, 25)),
-      weeks: Math.round(rand(3, 8)),
+      description: `Client wants D${designReq}+ / T${techReq}+. Finish within the deadline for cash and RP.`,
+      reward: Math.round(rand(9000, 32000) * hard),
+      researchReward: Math.round(rand(10, 30)),
+      weeks: Math.round(rand(4, 10)),
       progress: 0,
-      designReq: Math.round(rand(20, 50) * hard),
-      techReq: Math.round(rand(20, 50) * hard),
+      designReq,
+      techReq,
       active: false,
     });
   }
@@ -672,6 +720,9 @@ export function toReleased(
     weeklyHistory: [],
     isSequel: project.isSequel,
     isExpansion: project.isExpansion,
+    sequelOf: project.sequelOf,
+    seriesId: project.sequelOf ? `series_${project.sequelOf}` : undefined,
+    sequelIndex: project.isSequel ? 2 : 1,
     hiddenFinalScore: reviews.breakdown.hiddenFinalScore,
     baseScore: reviews.breakdown.baseScore,
     weeksOnMarket: 0,

@@ -1,13 +1,13 @@
 import type { GameState, ScreenId, UnlockState } from "../types";
 
-const STARTING_OWNED = new Set(["research"]);
+const STARTING_OWNED = new Set(["research", "engines"]);
 
-/** Fresh campaign unlock map — only Research owned; rest hidden. */
+/** Fresh campaign unlock map — research + engines owned; rest hidden. */
 export function initialUnlocks(): Record<string, UnlockState> {
   const u: Record<string, UnlockState> = {
     research: "owned",
     reports: "hidden",
-    engines: "hidden",
+    engines: "owned",
     hiring: "hidden",
     training: "hidden",
     medium_games: "hidden",
@@ -35,7 +35,7 @@ export function initialUnlocks(): Record<string, UnlockState> {
 
 export function isOwned(state: GameState, id: string): boolean {
   const s = state.unlocks?.[id];
-  return s === "owned" || STARTING_OWNED.has(id) && !state.unlocks;
+  return s === "owned" || (STARTING_OWNED.has(id) && !state.unlocks);
 }
 
 /** Evaluate progression after meaningful events (release, office, etc.). */
@@ -55,32 +55,39 @@ export function evaluateProgression(state: GameState): {
     if (unlocks[id] === "hidden" || !unlocks[id]) unlocks[id] = "discovered";
   };
 
-  // After first release: reports
+  // Always reinforce garage systems
+  own("research", "Research desk is open.");
+  own("engines", "Engine workshop available in the garage.");
+
+  // After first release: reports, market, contracts, publishing board
   if (state.gamesPublished >= 1) {
-    own("market", "Market overview unlocked — watch platforms and rivals.");
+    own("market", "Market overview unlocked — watch sales, platforms, and rivals.");
     own("reports", "Game Reports unlocked — review what you learned.");
+    own("contracts", "Contract board open under Money — slow refresh, 5 offers.");
+    own("publishing", "Publishing board open — reach vs margin deals.");
   }
-  // After 2 releases: contracts
-  if (state.gamesPublished >= 2) {
-    own("contracts", "Contract work is available for emergency cash.");
+  if (state.fans >= 500) {
+    own("publishing", "Publishing board open — fan base qualifies.");
   }
-  // After 3 releases: engines path
-  if (state.gamesPublished >= 3) {
-    own("engines", "Custom engines can now be researched and built.");
-  }
+
   // Office 2+: hiring
   if (state.office >= 2) {
     own("hiring", "Hiring unlocked with your new office.");
     own("training", "Staff training is available.");
   }
-  // Medium path
-  if (state.office >= 2 && state.staff.length >= 2 && state.engines.some((e) => e.custom)) {
+  // Medium path: office + team (2+) + research — research alone is not enough
+  if (state.office >= 2 && state.staff.length >= 2) {
     discover("medium_games");
-    if (state.researched.includes("medium_games")) own("medium_games", "Medium games researched.");
   }
-  if (state.researched.includes("medium_games")) {
-    own("medium_games", "Medium Games available.");
-    own("publishing", "Publishing deals unlocked.");
+  if (
+    state.researched.includes("medium_games") &&
+    state.office >= 2 &&
+    state.staff.length >= 2
+  ) {
+    own("medium_games", "Medium games unlocked — office, team, and research ready.");
+  } else if (state.researched.includes("medium_games") && state.staff.length < 2) {
+    discover("medium_games");
+    // keep not owned until team exists
   }
   // Audience / marketing
   if (state.gamesPublished >= 4 || state.fans >= 5000) {
@@ -91,13 +98,15 @@ export function evaluateProgression(state: GameState): {
     own("audience", "Target audiences unlocked.");
   }
   if (state.flags.marketing) own("marketing", "Marketing unlocked.");
-  // Sequels
-  if (state.releasedGames.some((g) => g.avgReview >= 8)) {
+  // Sequels: after 2 releases OR research / flag
+  if (state.gamesPublished >= 2) {
     discover("sequels");
-    if (state.flags.sequels || state.researched.includes("sequels")) {
-      own("sequels", "Sequels unlocked.");
-    }
+    own("sequels", "Sequels unlocked — ship a follow-up from Games → Released.");
   }
+  if (state.flags.sequels || state.researched.includes("sequels") || state.researched.includes("series_continuity")) {
+    own("sequels", "Sequels unlocked (Series Continuity).");
+  }
+
   // Large
   if (state.office >= 3 && state.fans >= 100000) {
     discover("large_games");
@@ -105,29 +114,30 @@ export function evaluateProgression(state: GameState): {
   if (state.researched.includes("large_games")) own("large_games", "Large Games available.");
   if (state.flags.multiGenre) own("multi_genre", "Multi-genre unlocked.");
 
-  // Late systems stay hidden unless explicitly owned via cheats/research
   return { unlocks, notes };
 }
 
 export function visibleScreens(state: GameState): ScreenId[] {
-  const base: ScreenId[] = ["studio", "develop", "settings"];
   const u = state.unlocks ?? initialUnlocks();
-  if (u.reports === "owned" || state.gamesPublished > 0) base.splice(2, 0, "games");
-  if (u.research === "owned" || (state.researched?.length ?? 0) >= 0) {
-    // research always available once campaign started (spec: already unlocked)
-    if (!base.includes("research")) base.splice(-1, 0, "research");
+  // Garage day-one: studio, develop, engines, staff (founder), research, platforms, finances, settings
+  const base: ScreenId[] = [
+    "studio",
+    "develop",
+    "engines",
+    "staff",
+    "research",
+    "platforms",
+    "finances",
+    "settings",
+  ];
+  if (u.reports === "owned" || state.gamesPublished > 0) {
+    base.splice(2, 0, "games");
   }
-  if (u.hiring === "owned" || state.office >= 2) base.splice(-1, 0, "staff");
-  if (u.engines === "owned" || state.engines.some((e) => e.custom) || state.gamesPublished >= 3) {
-    if (!base.includes("engines")) base.splice(-1, 0, "engines");
-  }
-  base.splice(-1, 0, "platforms");
-  base.splice(-1, 0, "finances");
   if (u.market === "owned" || state.gamesPublished >= 1) {
-    if (!base.includes("market")) base.splice(-1, 0, "market");
+    // before settings
+    const si = base.indexOf("settings");
+    base.splice(si, 0, "market");
   }
-
-  // unique preserve order
   return [...new Set(base)];
 }
 
@@ -140,12 +150,10 @@ export function isTechVisible(
   if (item.minYear && state.year < item.minYear - 2) return "hidden";
   if (item.minYear && state.year < item.minYear) return "teased";
   if (item.requires?.some((r) => !state.researched.includes(r))) {
-    // if only one req missing and close, tease
     const missing = item.requires.filter((r) => !state.researched.includes(r));
     if (missing.length === 1) return "teased";
     return "hidden";
   }
-  // chain: hide if previous in chain not owned
   if (item.chain && item.chainOrder && item.chainOrder > 1) {
     // available only if lower orders done — simplified: if requires met
   }
@@ -155,13 +163,16 @@ export function isTechVisible(
 export function migrateUnlocks(raw: Partial<GameState>): Record<string, UnlockState> {
   const base = initialUnlocks();
   if (raw.unlocks && typeof raw.unlocks === "object") {
-    return { ...base, ...raw.unlocks };
+    return { ...base, ...raw.unlocks, engines: "owned", research: "owned" };
   }
-  // Infer from old save
   base.research = "owned";
-  if ((raw.gamesPublished ?? 0) >= 1) base.reports = "owned";
-  if ((raw.gamesPublished ?? 0) >= 2) base.contracts = "owned";
-  if ((raw.gamesPublished ?? 0) >= 3) base.engines = "owned";
+  base.engines = "owned";
+  if ((raw.gamesPublished ?? 0) >= 1) {
+    base.reports = "owned";
+    base.contracts = "owned";
+    base.market = "owned";
+  }
+  if ((raw.gamesPublished ?? 0) >= 2) base.sequels = "owned";
   if ((raw.office ?? 1) >= 2) {
     base.hiring = "owned";
     base.training = "owned";
@@ -171,7 +182,15 @@ export function migrateUnlocks(raw: Partial<GameState>): Record<string, UnlockSt
   if (raw.flags?.sequels) base.sequels = "owned";
   if (raw.flags?.multiGenre) base.multi_genre = "owned";
   if (raw.flags?.contracts) base.contracts = "owned";
-  if ((raw.researched ?? []).includes("medium_games")) base.medium_games = "owned";
-  if ((raw.researched ?? []).includes("large_games")) base.large_games = "owned";
+  if (
+    (raw.researched ?? []).includes("medium_games") &&
+    (raw.office ?? 1) >= 2 &&
+    ((raw.staff as { length?: number } | undefined)?.length ?? 1) >= 2
+  ) {
+    base.medium_games = "owned";
+  }
+  if ((raw.researched ?? []).includes("large_games") && (raw.office ?? 1) >= 3) {
+    base.large_games = "owned";
+  }
   return base;
 }

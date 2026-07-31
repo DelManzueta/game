@@ -365,11 +365,13 @@ export function computeQualityFactor(input: QualityFactorInput): QualityFactorRe
   }
 
   if (input.isSequel) {
-    if (
-      input.sequelWeeksSinceOriginal != null &&
-      input.sequelWeeksSinceOriginal < QUALITY.sequelTooSoonWeeks
-    ) {
+    const weeks = input.sequelWeeksSinceOriginal;
+    if (weeks != null && weeks < 20) {
       sequelModifier += QUALITY.sequelTooSoonPenalty;
+    } else if (weeks != null && weeks < 40) {
+      sequelModifier += QUALITY.sequelEarlyPenalty ?? -0.08;
+    } else if (weeks != null && weeks >= 40) {
+      sequelModifier += QUALITY.sequelProperBonus ?? 0.08;
     }
     if (input.sequelSameEngine) sequelModifier += QUALITY.sequelSameEnginePenalty;
     if (input.sequelImprovedEngine) sequelModifier += QUALITY.sequelImprovedEngineBonus;

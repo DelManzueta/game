@@ -1,15 +1,16 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { STAGE_FIELDS } from "../data";
+import { STAGE_FIELDS, WEEKS_PER_MONTH, defaultSliders } from "../data";
 import {
   normalizeStageAllocations,
   stageAllocationTotal,
   computeCraftAndQuality,
   scoreCriticsV2,
   generateSalesPlanV2,
+  marketWeeksOnSale,
+  MARKET_LONGEVITY_MONTHS,
 } from "../scoring/algorithmV2";
 import type { GameProject, StaffMember } from "../types";
-import { defaultSliders } from "../data";
 
 function baseProject(over: Partial<GameProject> = {}): GameProject {
   const sliders = defaultSliders("action");
@@ -264,4 +265,91 @@ describe("algorithm V2", () => {
       assert.ok(rev.comment.length > 10);
     }
   });
+
+  it("market longevity matches size bands; better scores last longer", () => {
+    assert.equal(
+      marketWeeksOnSale("small", 2),
+      MARKET_LONGEVITY_MONTHS.small.minMonths * WEEKS_PER_MONTH,
+    );
+    assert.equal(
+      marketWeeksOnSale("small", 9.5),
+      MARKET_LONGEVITY_MONTHS.small.maxMonths * WEEKS_PER_MONTH,
+    );
+    assert.equal(
+      marketWeeksOnSale("medium", 2),
+      MARKET_LONGEVITY_MONTHS.medium.minMonths * WEEKS_PER_MONTH,
+    );
+    assert.equal(
+      marketWeeksOnSale("medium", 9.5),
+      MARKET_LONGEVITY_MONTHS.medium.maxMonths * WEEKS_PER_MONTH,
+    );
+    assert.equal(
+      marketWeeksOnSale("large", 2),
+      MARKET_LONGEVITY_MONTHS.large.minMonths * WEEKS_PER_MONTH,
+    );
+    assert.equal(
+      marketWeeksOnSale("large", 9.5),
+      MARKET_LONGEVITY_MONTHS.large.maxMonths * WEEKS_PER_MONTH,
+    );
+    assert.equal(
+      marketWeeksOnSale("aaa", 2),
+      MARKET_LONGEVITY_MONTHS.aaa.minMonths * WEEKS_PER_MONTH,
+    );
+    assert.equal(
+      marketWeeksOnSale("aaa", 9.5),
+      MARKET_LONGEVITY_MONTHS.aaa.maxMonths * WEEKS_PER_MONTH,
+    );
+
+    assert.ok(marketWeeksOnSale("small", 8) > marketWeeksOnSale("small", 4));
+    assert.ok(marketWeeksOnSale("medium", 8) > marketWeeksOnSale("medium", 5));
+    assert.ok(marketWeeksOnSale("aaa", 9) > marketWeeksOnSale("large", 9));
+    assert.ok(marketWeeksOnSale("large", 7) > marketWeeksOnSale("medium", 7));
+  });
+
+  it("sales plan length follows size + score market longevity", () => {
+    const hit = generateSalesPlanV2({
+      productQuality: 90,
+      avgReview: 9,
+      size: "aaa",
+      platformMarket: 1,
+      platformAgeYears: 1,
+      fans: 5000,
+      hype: 40,
+      marketingSpend: 20000,
+      genreId: "action",
+      topicRepetition: 0,
+      pirateMode: false,
+      liveOps: false,
+      campaignSeed: 1,
+      gameId: "aaa-hit",
+      releaseWeek: 0,
+      studioReputation: 50,
+    });
+    const flop = generateSalesPlanV2({
+      productQuality: 30,
+      avgReview: 3,
+      size: "small",
+      platformMarket: 1,
+      platformAgeYears: 1,
+      fans: 100,
+      hype: 5,
+      marketingSpend: 0,
+      genreId: "action",
+      topicRepetition: 0,
+      pirateMode: false,
+      liveOps: false,
+      campaignSeed: 1,
+      gameId: "small-flop",
+      releaseWeek: 0,
+      studioReputation: 20,
+    });
+    assert.ok(hit.weeks.length >= 24 * WEEKS_PER_MONTH);
+    assert.ok(hit.weeks.length <= 30 * WEEKS_PER_MONTH);
+    assert.ok(flop.weeks.length >= 7 * WEEKS_PER_MONTH);
+    assert.ok(flop.weeks.length <= 10 * WEEKS_PER_MONTH);
+    assert.ok(hit.weeks.length > flop.weeks.length);
+    const late = hit.weeks.slice(20).reduce((s, u) => s + u, 0);
+    assert.ok(late > 0, "AAA hit should still sell after month 5");
+  });
+
 });
