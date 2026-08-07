@@ -14,8 +14,8 @@
   --color-paper: #fffaf2;
   --color-paper-muted: #d4c8b4;
   --color-fg: #2a241c;
-  --color-muted: #6b6154;
-  --color-subtle: #9a8f80;
+  --color-muted: #5a5248;
+  --color-subtle: #756b5e;
   --color-border: #d4c8b4;
   --color-border-strong: #b8a890;
   --color-accent: #e8941a;
@@ -202,6 +202,7 @@
 .room-void {
   background:
     radial-gradient(ellipse 80% 60% at 50% 40%, #f7efe0 0%, #efe4d0 55%, #e6d9c2 100%);
+  color: var(--color-fg);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -209,4 +210,83 @@
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+
+/* ─── Era progression (office tier) ─── */
+[data-era="garage"] {
+  --color-bg: #f0e6d4;
+  --color-bg-deep: #e8dcc8;
+  --color-surface: #fff8ee;
+  --color-elevated: #fffaf2;
+  --color-panel: #e8dfd0;
+  --color-fg: #2a241c;
+  --color-muted: #5c5348;
+  --color-subtle: #7a7064;
+  --shadow-lamp: 0 0 40px rgba(232, 148, 26, 0.18);
+}
+[data-era="office"] {
+  --color-bg: #ebe4d6;
+  --color-bg-deep: #ddd4c4;
+  --color-surface: #f7f1e6;
+  --color-elevated: #fffcf6;
+  --color-panel: #e0d7c8;
+  --color-fg: #242018;
+  --color-muted: #564e44;
+  --color-subtle: #72685c;
+  --color-accent: #d88918;
+}
+[data-era="studio"] {
+  --color-bg: #e4e0d6;
+  --color-bg-deep: #d2cdc2;
+  --color-surface: #f4f1ea;
+  --color-elevated: #fbfaf7;
+  --color-panel: #d8d3c8;
+  --color-fg: #1c1a16;
+  --color-muted: #4a453c;
+  --color-subtle: #6a6458;
+  --color-accent: #c97a12;
+  --color-border: #c4bdb0;
+}
+[data-era="empire"] {
+  --color-bg: #dcd8d0;
+  --color-bg-deep: #c8c3b8;
+  --color-surface: #f0ede6;
+  --color-elevated: #faf9f6;
+  --color-panel: #ccc7bc;
+  --color-fg: #161410;
+  --color-muted: #3f3b34;
+  --color-subtle: #5c574c;
+  --color-accent: #b86e0e;
+  --color-border: #b0a99c;
+}
+
+/* Readable chrome: never light-on-light or dark-on-dark for body copy */
+.hud-chip {
+  background: color-mix(in oklab, var(--color-paper) 92%, white);
+  border: 1px solid var(--color-border);
+  color: var(--color-fg);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+}
+.screen-panel {
+  background: var(--color-surface);
+  color: var(--color-fg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+/* Dark inset panels always use light ink for body */
+.panel-ink {
+  background: #2a241c;
+  color: #f5efe4;
+}
+.panel-ink .text-muted,
+.panel-ink .text-subtle {
+  color: #c9bfb0 !important;
+}
+
+/* Responsive shell: rearrange, don't shrink type below readable */
+@media (max-width: 390px) {
+  body { font-size: 15px; }
+  .hud-chip { font-size: 12px; }
 }

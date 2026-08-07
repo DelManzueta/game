@@ -108,7 +108,7 @@ export type SalesPhase =
 
 /** Dormant when weekly units stay below floor for this many consecutive weeks. */
 export const DORMANT_FLOOR_UNITS = 15;
-export const DORMANT_STREAK_WEEKS = 6;
+export const DORMANT_STREAK_WEEKS = 10;
 
 /** Quality demand curve: 9 >> 6, but 6 still sells with reach. */
 export function qualityDemandFromReview(avgReview: number): number {

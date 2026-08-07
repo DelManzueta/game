@@ -107,11 +107,11 @@ export type ProductionBalance = {
 };
 
 export const DEFAULT_PRODUCTION_BALANCE: ProductionBalance = {
-  // Multi-week stages (garage feel). ~180 SWU/day × allocation × capability ≈ 45–55/discipline/day.
-  // Stage 1 base 2800 → ~4 weeks at focused founder pace; scope/mismatch can stretch further.
-  stageBaseSwu: { 1: 2800, 2: 3200, 3: 3000 },
+  // Longer multi-week stages. ~180 SWU/day; base targets ~6–7 weeks/stage for focused founder.
+  // (Was ~4 weeks — felt too short for the campaign fantasy.)
+  stageBaseSwu: { 1: 4200, 2: 4800, 3: 4500 },
   dailyWorkUnits: 180,
-  dailyCashCost: 75,
+  dailyCashCost: 95,
   scopeSwuMultiplier: 0.2,
   scopeCostMultiplier: 0.35,
   scopeBugMultiplier: 0.5,
@@ -122,9 +122,9 @@ export const DEFAULT_PRODUCTION_BALANCE: ProductionBalance = {
   bugFixWorkPerSeverity: 100,
   bugFixWorkPerDay: 90,
   bugFixDailyCost: 60,
-  polishRequiredWork: 450,
-  polishWorkPerDay: 110,
-  polishDailyCost: 65,
+  polishRequiredWork: 720,
+  polishWorkPerDay: 100,
+  polishDailyCost: 80,
 };
 
 export function normalizedDistribution(

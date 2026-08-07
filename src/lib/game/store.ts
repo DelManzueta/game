@@ -333,69 +333,199 @@ function applyUnlockNotes(next: GameState): GameState {
   return next;
 }
 
-function tryFireEvent(next: GameState): GameState {
-  // Deterministic-ish events from campaign seed + week
-  const roll = hashSeed(next.campaignSeed, next.week, "event") % 100;
-  if (roll > 12) return next;
-  const pool: Array<{
-    key: string;
-    title: string;
-    body: string;
-    cd: number;
+type EventDef = {
+  key: string;
+  title: string;
+  body: string;
+  cd: number;
+  choices: Array<{
+    label: string;
+    effect: string;
     apply: (s: GameState) => void;
-  }> = [
-    {
-      key: "trade_mag",
-      title: "Trade magazine",
-      body: "A trade magazine covers indie studios. Hype rises.",
-      cd: 24,
-      apply: (s) => {
-        s.hype += 8;
+  }>;
+};
+
+const EVENT_POOL: EventDef[] = [
+  {
+    key: "trade_mag",
+    title: "Trade magazine",
+    body: "A trade magazine offers coverage of indie studios. How do you respond?",
+    cd: 28,
+    choices: [
+      {
+        label: "Send a press kit",
+        effect: "+hype, small cost",
+        apply: (s) => {
+          s.hype += 10;
+          s.cash -= 500;
+        },
       },
-    },
-    {
-      key: "hardware_short",
-      title: "Hardware shortage",
-      body: "Component prices spike. Unexpected costs this week.",
-      cd: 36,
-      apply: (s) => {
-        s.cash -= 2000;
+      {
+        label: "Stay quiet",
+        effect: "tiny organic buzz",
+        apply: (s) => {
+          s.hype += 3;
+        },
       },
-    },
-    {
-      key: "fan_club",
-      title: "Fan club forms",
-      body: "Enthusiasts start a club around your last title.",
-      cd: 30,
-      apply: (s) => {
-        s.fans += 120;
+    ],
+  },
+  {
+    key: "hardware_short",
+    title: "Hardware shortage",
+    body: "Component prices spike industry-wide. Absorb the cost or delay purchases?",
+    cd: 40,
+    choices: [
+      {
+        label: "Pay the premium",
+        effect: "−$3,000",
+        apply: (s) => {
+          s.cash -= 3000;
+        },
       },
-    },
-    {
-      key: "dev_meetup",
-      title: "Dev meetup",
-      body: "Local developers share tips. Small research boost.",
-      cd: 20,
-      apply: (s) => {
-        s.researchPoints += 4;
+      {
+        label: "Wait it out",
+        effect: "−hype, save cash",
+        apply: (s) => {
+          s.hype = Math.max(0, s.hype - 4);
+        },
       },
-    },
-  ];
-  const eligible = pool.filter((e) => {
+    ],
+  },
+  {
+    key: "fan_club",
+    title: "Fan club forms",
+    body: "Enthusiasts want to start a club around your last title.",
+    cd: 32,
+    choices: [
+      {
+        label: "Sponsor them",
+        effect: "+fans, −$1,000",
+        apply: (s) => {
+          s.fans += 280;
+          s.cash -= 1000;
+        },
+      },
+      {
+        label: "Send merch files",
+        effect: "+fans free",
+        apply: (s) => {
+          s.fans += 90;
+        },
+      },
+    ],
+  },
+  {
+    key: "dev_meetup",
+    title: "Dev meetup",
+    body: "Local developers invite you to share tips.",
+    cd: 24,
+    choices: [
+      {
+        label: "Speak & network",
+        effect: "+RP, +hype",
+        apply: (s) => {
+          s.researchPoints += 6;
+          s.hype += 4;
+        },
+      },
+      {
+        label: "Skip — ship instead",
+        effect: "focus on product",
+        apply: (s) => {
+          s.researchPoints += 1;
+        },
+      },
+    ],
+  },
+  {
+    key: "magazine_ad_offer",
+    title: "Magazine ad slot",
+    body: "A leftover ad page is available at a discount this week only.",
+    cd: 36,
+    choices: [
+      {
+        label: "Buy the slot",
+        effect: "−$4,000, +hype",
+        apply: (s) => {
+          s.cash -= 4000;
+          s.hype += 14;
+        },
+      },
+      {
+        label: "Pass",
+        effect: "no change",
+        apply: () => {},
+      },
+    ],
+  },
+];
+
+function tryFireEvent(next: GameState): GameState {
+  // Never stack events — unfinished decisions must be resolved first
+  if (next.pendingEvent) return next;
+  // Don't interrupt critical modals mid-decision
+  if (
+    next.modal === "reviews" ||
+    next.modal === "report" ||
+    next.modal === "newGame" ||
+    next.modal === "event"
+  ) {
+    return next;
+  }
+
+  const roll = hashSeed(next.campaignSeed, next.week, "event") % 100;
+  if (roll > 10) return next;
+
+  const eligible = EVENT_POOL.filter((e) => {
     const until = next.eventCooldowns[e.key] ?? 0;
     if (next.week < until) return false;
     if (next.recentEventKeys[0] === e.key) return false;
     return true;
   });
   if (!eligible.length) return next;
+
   const idx = hashSeed(next.campaignSeed, next.week, "eventpick") % eligible.length;
   const ev = eligible[idx]!;
-  ev.apply(next);
+  // Cooldown reserved when event is *presented* so save/load cannot re-roll forever
   next.eventCooldowns = { ...next.eventCooldowns, [ev.key]: next.week + ev.cd };
   next.recentEventKeys = [ev.key, ...next.recentEventKeys].slice(0, 8);
-  next.notifications = pushNote(next, `${ev.title}: ${ev.body}`, "info");
+  next.pendingEvent = {
+    id: ev.key,
+    title: ev.title,
+    body: ev.body,
+    choices: ev.choices.map((c) => ({ label: c.label, effect: c.effect })),
+  };
+  next.modal = "event";
+  next.speed = 0;
+  next.notifications = pushNote(next, `Decision: ${ev.title}`, "warn");
   return next;
 }
+
+function applyEventChoice(state: GameState, choiceIndex: number): GameState {
+  const pe = state.pendingEvent;
+  if (!pe) return state;
+  const def = EVENT_POOL.find((e) => e.key === pe.id);
+  const choice = def?.choices[choiceIndex] ?? def?.choices[0];
+  let next: GameState = {
+    ...state,
+    pendingEvent: null,
+    modal: null,
+    dirty: true,
+    flags: { ...state.flags },
+  };
+  if (choice) {
+    choice.apply(next);
+    next.notifications = pushNote(
+      next,
+      `${pe.title} — ${choice.label}`,
+      "info",
+    );
+  } else {
+    next.notifications = pushNote(next, `${pe.title} dismissed.`, "info");
+  }
+  return next;
+}
+
 
 function releaseProject(next: GameState, project: GameProject): GameState {
   // Idempotent: already released
@@ -937,6 +1067,7 @@ interface Actions {
   completeReport: (id: string) => void;
   startTitleCampaign: (gameId: string, campaignId: string) => string | null;
   applyCheat: (cheat: string, arg?: string | number) => void;
+  resolveEvent: (choiceIndex: number) => void;
   exportSave: () => string;
   importSave: (raw: string) => boolean;
 }
@@ -1023,7 +1154,13 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         ...data,
         version: SAVE_VERSION,
         phase: "playing",
-        modal: null,
+        modal:
+          data.pendingEvent != null
+            ? "event"
+            : data.modal === "reviews" || data.modal === "report"
+              ? (data.modal as GameState["modal"])
+              : null,
+        pendingEvent: data.pendingEvent ?? null,
         screen: (data.screen as ScreenId) ?? "studio",
         speed: 0,
         staff,
@@ -1057,13 +1194,23 @@ export const useGame = create<GameState & Actions>((set, get) => ({
   saveGame: () => {
     const state = get();
     try {
+      // Preserve pendingEvent + event modal so mid-decision saves do not kill the event system
+      const modalToStore =
+        state.pendingEvent != null
+          ? "event"
+          : state.modal === "reviews" || state.modal === "report"
+            ? state.modal
+            : null;
       const payload = {
         ...state,
         version: SAVE_VERSION,
-        modal: null,
+        modal: modalToStore,
         speed: 0,
         dirty: false,
         lastSavedWeek: state.week,
+        pendingEvent: state.pendingEvent,
+        eventCooldowns: state.eventCooldowns,
+        recentEventKeys: state.recentEventKeys,
       };
       localStorage.setItem(SAVE_KEY, JSON.stringify(payload));
       lastSaveAt = Date.now();
@@ -1148,6 +1295,12 @@ export const useGame = create<GameState & Actions>((set, get) => ({
   tick: () => {
     const state = get();
     if (state.phase !== "playing" || state.speed === 0) return;
+    // Open decision must be resolved before time advances (and after save/load)
+    if (state.pendingEvent) {
+      if (state.modal !== "event") set({ modal: "event", speed: 0 });
+      else set({ speed: 0 });
+      return;
+    }
 
     const p0 = state.currentProject;
     if (
@@ -1985,6 +2138,12 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     }
   },
 
+  resolveEvent: (choiceIndex) => {
+    const state = get();
+    if (!state.pendingEvent) return;
+    set(applyEventChoice(state, choiceIndex));
+  },
+
   applyCheat: (cheat, arg) => {
     const state = get();
     const logEntry = (action: string, detail?: string) =>
@@ -2457,7 +2616,13 @@ export const useGame = create<GameState & Actions>((set, get) => ({
 
   exportSave: () => {
     const state = get();
-    return JSON.stringify({ ...state, modal: null, speed: 0, version: SAVE_VERSION });
+    return JSON.stringify({
+      ...state,
+      modal: state.pendingEvent ? "event" : null,
+      speed: 0,
+      version: SAVE_VERSION,
+      pendingEvent: state.pendingEvent,
+    });
   },
 
   importSave: (raw) => {

@@ -173,6 +173,9 @@ function GameOverScreen() {
 
 function PlayingShell() {
   const screen = useGame((s) => s.screen);
+  const office = useGame((s) => s.office);
+  const era =
+    office >= 4 ? "empire" : office >= 3 ? "studio" : office >= 2 ? "office" : "garage";
   const project = useGame((s) => s.currentProject);
   const phase = projectPhaseLabel(project);
   const forcePause = phase.needsPlayerInput && !!project;
@@ -181,7 +184,7 @@ function PlayingShell() {
   const showRoom = screen === "studio" || screen === "develop";
 
   return (
-    <div className="room-void flex min-h-[100dvh] flex-col">
+    <div className="room-void flex min-h-[100dvh] flex-col text-fg" data-era={era}>
       <GdtTopChrome forcePause={forcePause} />
       <main className="relative flex-1 overflow-y-auto pb-20">
         {showRoom && <GarageRoomView />}
@@ -236,14 +239,15 @@ function GdtTopChrome({ forcePause }: { forcePause: boolean }) {
         {/* Menu */}
         <button
           type="button"
-          className="hud-chip flex h-10 items-center gap-1.5 px-3 text-xs font-bold uppercase tracking-wide text-muted"
+          className="hud-chip flex h-10 items-center gap-1.5 px-3 text-xs font-bold uppercase tracking-wide text-fg"
           onClick={() => {
             saveGame();
             setModal("pauseMenu");
           }}
+          aria-label="Menu"
         >
-          <Menu className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">{company}</span>
+          <Menu className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span className="max-w-[7rem] truncate">{company || "Menu"}</span>
         </button>
 
         {/* Project HUD — GDT top-center orbs */}
@@ -293,8 +297,8 @@ function GdtTopChrome({ forcePause }: { forcePause: boolean }) {
               [
                 [0, Pause, "Pause"],
                 [1, Play, "Play"],
-                [2, FastForward, "2×"],
-                [4, FastForward, "4×"],
+                [2, FastForward, "Faster"],
+                [4, FastForward, "Fastest"],
               ] as const
             ).map(([s, Icon, label]) => (
               <button
@@ -305,23 +309,26 @@ function GdtTopChrome({ forcePause }: { forcePause: boolean }) {
                 aria-label={label}
                 onClick={() => setSpeed(s as 0 | 1 | 2 | 4)}
                 className={cnJoin(
-                  "flex h-9 w-9 items-center justify-center rounded-lg border transition-colors",
+                  "flex h-9 min-w-9 flex-col items-center justify-center gap-0 rounded-lg border px-1.5 transition-colors sm:min-w-[3.25rem] sm:flex-row sm:gap-1 sm:px-2",
                   speed === s
                     ? "border-accent bg-accent text-accent-fg"
-                    : "border-border bg-elevated text-muted hover:text-fg",
+                    : "border-border bg-paper text-fg hover:border-border-strong",
                   forcePause && s !== 0 && "opacity-35",
                 )}
               >
-                <Icon className="h-3.5 w-3.5" />
+                <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                <span className="text-[9px] font-bold leading-none sm:text-[10px]">{label}</span>
               </button>
             ))}
             <button
               type="button"
-              className="relative flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-elevated text-muted hover:text-fg"
+              className="relative flex h-9 min-w-9 flex-col items-center justify-center gap-0 rounded-lg border border-border bg-paper px-1.5 text-fg hover:border-border-strong sm:min-w-[3.75rem] sm:flex-row sm:gap-1 sm:px-2"
               aria-label={unread ? `Notifications, ${unread} unread` : "Notifications"}
+              title="Notifications"
               onClick={() => setModal("notifications")}
             >
-              <Bell className="h-3.5 w-3.5" />
+              <Bell className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span className="text-[9px] font-bold leading-none sm:text-[10px]">Inbox</span>
               {unread > 0 && (
                 <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-accent-fg">
                   {unread > 9 ? "9+" : unread}
@@ -365,10 +372,9 @@ function Orb({
       >
         {show ? value : "—"}
       </div>
-      <span className="mt-0.5 hidden text-[9px] font-bold uppercase tracking-wide text-subtle sm:block">
+      <span className="mt-0.5 max-w-[3.5rem] truncate text-center text-[9px] font-bold uppercase tracking-wide text-fg">
         {label}
       </span>
-      <Icon className="mt-0.5 h-3 w-3 opacity-40 sm:hidden" style={{ color }} />
     </div>
   );
 }
@@ -603,7 +609,7 @@ function DevelopPanel() {
       <h2 className="text-center text-xl font-bold">
         {isConfig ? `Development Stage ${stageNum}` : isRunning ? `Developing — Stage ${stageNum}` : phase.title}
       </h2>
-      <div className="mx-auto mt-1 h-px w-[80%] bg-[#3a6ea5]/45" />
+      <div className="mx-auto mt-1 h-px w-[80%] bg-border-strong" />
       <p className="mt-2 text-center text-sm font-semibold">{project.title}</p>
       <p className="text-center text-xs text-muted">
         {getTopic(project.topicId)?.name}/{getGenre(project.genreId).name} · {getPlatform(project.platformId)?.name}
@@ -837,7 +843,7 @@ function GamesScreen() {
   return (
     <div className="mx-auto w-full max-w-3xl px-3 pb-8 pt-4">
       <h2 className="text-center text-2xl font-bold">Game History</h2>
-      <div className="mx-auto mt-1 h-px w-40 bg-[#3a6ea5]/45" />
+      <div className="mx-auto mt-1 h-px w-40 bg-border-strong" />
       {!rows.length && <p className="mt-8 text-center text-muted">No releases yet.</p>}
       <ul className="mt-4 space-y-2">
         {rows.map((r) => (
@@ -886,7 +892,7 @@ function ResearchScreen() {
   return (
     <div className="mx-auto max-w-3xl px-3 pb-8 pt-4">
       <h2 className="text-center text-2xl font-bold">Research</h2>
-      <div className="mx-auto mt-1 h-px w-32 bg-[#3a6ea5]/45" />
+      <div className="mx-auto mt-1 h-px w-32 bg-border-strong" />
       <p className="mt-2 text-center text-sm text-muted">
         {Math.floor(researchPoints)} RP{active ? ` · ${active.name}` : ""}
       </p>
@@ -1044,7 +1050,7 @@ function SettingsScreen() {
   return (
     <div className="mx-auto max-w-lg px-3 pb-8 pt-4">
       <h2 className="text-center text-2xl font-bold">More</h2>
-      <div className="mx-auto mt-1 h-px w-24 bg-[#3a6ea5]/45" />
+      <div className="mx-auto mt-1 h-px w-24 bg-border-strong" />
       <div className="mt-4 space-y-2">
         <Button className="w-full" variant="secondary" onClick={() => saveGame()}>
           Save campaign
@@ -1708,13 +1714,37 @@ function CheatsModal() {
 
 function EventModal() {
   const modal = useGame((s) => s.modal);
-  const setModal = useGame((s) => s.setModal);
+  const pending = useGame((s) => s.pendingEvent);
+  const resolveEvent = useGame((s) => s.resolveEvent);
+  const open = modal === "event" && !!pending;
+  if (!pending) return null;
   return (
-    <Modal open={modal === "event"} onClose={() => setModal(null)} title="Event">
-      <p className="text-sm text-muted">Open the bell for studio messages.</p>
-      <Button className="mt-3 w-full" onClick={() => setModal(null)}>
-        OK
-      </Button>
+    <Modal
+      open={open}
+      onClose={() => {
+        /* Must choose — closing without choice defaults to first option */
+        resolveEvent(0);
+      }}
+      title={pending.title}
+    >
+      <p className="text-sm leading-relaxed text-fg">{pending.body}</p>
+      <div className="mt-4 flex flex-col gap-2">
+        {(pending.choices ?? [{ label: "Continue", effect: "Dismiss" }]).map((c, i) => (
+          <Button
+            key={`${c.label}-${i}`}
+            className="w-full justify-start text-left"
+            variant={i === 0 ? "primary" : "secondary"}
+            onClick={() => resolveEvent(i)}
+          >
+            <span className="flex w-full flex-col items-start gap-0.5">
+              <span>{c.label}</span>
+              {c.effect ? (
+                <span className="text-[11px] font-medium opacity-80">{c.effect}</span>
+              ) : null}
+            </span>
+          </Button>
+        ))}
+      </div>
     </Modal>
   );
 }
