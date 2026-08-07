@@ -623,7 +623,7 @@ export function scoreProject(input: ScoreProjectInput): ScoreBreakdown {
     input.previousGame.topicId === p.topicId &&
     input.previousGame.genreId === p.genreId;
 
-  let sequelWeeks: number | null = input.sequelWeeksSinceOriginal ?? null;
+  const sequelWeeks: number | null = input.sequelWeeksSinceOriginal ?? null;
   let sequelSameEngine = false;
   let sequelImprovedEngine = false;
   if (p.isSequel && input.previousGame) {

@@ -38,16 +38,17 @@ Remaining topics unlock via research from the full 132 catalog. Platforms unlock
 Configured on `OFFICE_INFO[1]`:
 
 - Fans: 25,000  
-- Games released: 3  
-- Cash on hand: $300,000  
-- Move cost: $250,000  
+- Games released: 5
+- Cash on hand: $1,000,000
+- Earliest move: Year 2, Month 10
+- Move cost: $1,000,000
 
 UI shows progress + **Move to Office** when met. Employees / office interior not built.
 
 ## Save schema
 
-- `SAVE_VERSION` / `SCHEMA_VERSION` = **4**
-- Key: `studio-empire-save-v4` (loads v3/v2/v1 if present)
+- `SAVE_VERSION` / `SCHEMA_VERSION` = **5**
+- Key: `studio-empire-save-v5` (loads v4/v3/v2/v1 if present)
 
 ## Validation
 

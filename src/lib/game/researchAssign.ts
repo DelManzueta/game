@@ -130,7 +130,7 @@ export function promoteQueue(
   staff: StaffMember[],
 ): { queue: ResearchJob[]; active: ResearchJob[]; started: ResearchJob[] } {
   let q = [...queue];
-  let a = [...active];
+  const a = [...active];
   const started: ResearchJob[] = [];
   while (q.length) {
     const next = q[0]!;

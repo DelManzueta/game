@@ -116,6 +116,7 @@ import type {
   StaffMember,
   UnlockState,
 } from "./types";
+import { findSave, parseSaveCandidate, removeAllSaves } from "./save";
 
 function founder(): StaffMember {
   return {
@@ -200,12 +201,7 @@ export function availableSizes(
 
 export function hasSave(): boolean {
   try {
-    return !!(
-      localStorage.getItem(SAVE_KEY) ||
-      localStorage.getItem("studio-empire-save-v3") ||
-      localStorage.getItem("studio-empire-save-v2") ||
-      localStorage.getItem("studio-empire-save-v1")
-    );
+    return findSave(localStorage) != null;
   } catch {
     return false;
   }
@@ -969,12 +965,7 @@ function migrateReleased(g: GameState["releasedGames"][0]): GameState["releasedG
 
 function readSaveRaw(): string | null {
   try {
-    return (
-      localStorage.getItem(SAVE_KEY) ||
-      localStorage.getItem("studio-empire-save-v3") ||
-      localStorage.getItem("studio-empire-save-v2") ||
-      localStorage.getItem("studio-empire-save-v1")
-    );
+    return findSave(localStorage)?.raw ?? null;
   } catch {
     return null;
   }
@@ -1013,7 +1004,9 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     try {
       const raw = readSaveRaw();
       if (!raw) return false;
-      const data = JSON.parse(raw) as Partial<GameState>;
+      const parsed = parseSaveCandidate(raw);
+      if (!parsed) return false;
+      const data = parsed as Partial<GameState>;
       const base = initialState();
       const staff = (data.staff ?? base.staff).map((m) => ({
         ...m,
@@ -1077,9 +1070,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
 
   deleteSave: () => {
     try {
-      localStorage.removeItem(SAVE_KEY);
-      localStorage.removeItem("studio-empire-save-v1");
-      localStorage.removeItem("studio-empire-save-v2");
+      removeAllSaves(localStorage);
     } catch {
       /* */
     }
@@ -1520,7 +1511,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       staff: state.staff,
       startDay: p.production?.asOfDay ?? day,
     });
-    let next: GameState = {
+    const next: GameState = {
       ...state,
       week: w,
       year: d.year,
@@ -2136,8 +2127,8 @@ export const useGame = create<GameState & Actions>((set, get) => ({
 
   importSave: (raw) => {
     try {
-      const data = JSON.parse(raw) as Partial<GameState>;
-      if (!data || typeof data !== "object") return false;
+      const data = parseSaveCandidate(raw);
+      if (!data) return false;
       localStorage.setItem(SAVE_KEY, raw);
       return get().loadGame();
     } catch {

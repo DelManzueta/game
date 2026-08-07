@@ -28,7 +28,7 @@ import {
 } from "@/lib/game/viewModels";
 import { disciplineProgress } from "@/lib/game/production/bridge";
 import type { AudienceId, DevField, GameSize, GenreId, ScreenId } from "@/lib/game/types";
-import { Badge, Button, Input, Modal, cnJoin } from "@/components/ui/primitives";
+import { Badge, Button, Input, Modal, SearchField, cnJoin } from "@/components/ui/primitives";
 import { GarageLoopFlowchart, ScoringPipelineFlow } from "@/components/game/LoopFlowchart";
 import {
   FlaskConical,
@@ -1108,6 +1108,10 @@ function NewGameModal() {
   const [marketing, setMarketing] = useState(0);
   const [err, setErr] = useState("");
   const [step, setStep] = useState<"topic" | "genre" | "details">("topic");
+  const [topicQuery, setTopicQuery] = useState("");
+  const visibleTopics = topics.filter((topic) =>
+    topic.name.toLocaleLowerCase().includes(topicQuery.trim().toLocaleLowerCase()),
+  );
 
   useEffect(() => {
     if (modal === "newGame") {
@@ -1120,6 +1124,7 @@ function NewGameModal() {
       setMarketing(0);
       setErr("");
       setStep("topic");
+      setTopicQuery("");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modal]);
@@ -1131,8 +1136,15 @@ function NewGameModal() {
     <Modal open={modal === "newGame"} onClose={() => setModal(null)} title={step === "topic" ? "Pick Topic" : step === "genre" ? "Pick Genre" : "New Game"} wide>
       {step === "topic" && (
         <div>
+          <SearchField
+            value={topicQuery}
+            onChange={(event) => setTopicQuery(event.target.value)}
+            placeholder="Search topics…"
+            aria-label="Search topics"
+            className="mb-3"
+          />
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {topics.map((t) => (
+            {visibleTopics.map((t) => (
               <button
                 key={t.id}
                 type="button"
@@ -1149,6 +1161,14 @@ function NewGameModal() {
               </button>
             ))}
           </div>
+          {visibleTopics.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center">
+              <p className="font-semibold text-text-primary">No topics found</p>
+              <p className="mt-1 text-sm text-text-secondary">
+                Try another name or clear your search.
+              </p>
+            </div>
+          ) : null}
         </div>
       )}
       {step === "genre" && (

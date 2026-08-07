@@ -158,7 +158,7 @@ export function tickReleasedSales(
   ) => GameState["notifications"],
 ): GameState {
   if (!state.activeSales.length) return state;
-  let next = { ...state };
+  const next = { ...state };
   const still: ReleasedGame[] = [];
 
   for (const g of next.activeSales) {
@@ -174,7 +174,7 @@ export function tickReleasedSales(
     const useLive = g.salesEngine === "weekly_v3" && g.salesSnapshot != null;
     let units = 0;
     let rev = 0;
-    let nextG: ReleasedGame = {
+    const nextG: ReleasedGame = {
       ...g,
       marketDays: (g.marketDays ?? g.weeksOnMarket * 7) + 7,
       weeklySalesLeft: [...(g.weeklySalesLeft ?? [])],

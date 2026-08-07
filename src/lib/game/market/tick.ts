@@ -42,7 +42,7 @@ export function tickMarket(opts: {
   let cRival = market.rngCounters.rival;
   let cTrend = market.rngCounters.trend;
   let cPlat = market.rngCounters.platform;
-  let cNews = market.rngCounters.news;
+  const cNews = market.rngCounters.news;
 
   // 1–2 platforms
   market = {
