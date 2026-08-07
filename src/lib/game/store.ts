@@ -231,6 +231,10 @@ function initialState(): GameState {
       disableBankruptcy: false,
       forcePerfectScore: false,
       forceBadScore: false,
+      noBugsMode: false,
+      fastResearchMode: false,
+      showAllHints: false,
+      noVacationMode: false,
     },
     unlockedTopics: [...GARAGE_START_TOPICS],
     unlockedGenres: [...GARAGE_START_GENRES],
@@ -276,6 +280,7 @@ function initialState(): GameState {
     consecutiveSameCombo: 0,
     tutorialStep: 0,
     cheatsEnabled: false,
+    cheatLog: [],
     dirty: false,
     lastSavedWeek: 0,
     campaignSeed: 1,
@@ -1178,7 +1183,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
 
     // Founder never drains energy
     next.staff = next.staff.map((m) => {
-      if (m.id === "founder") return { ...m, energy: 100 };
+      if (m.id === "founder" || next.settings.noVacationMode) return { ...m, energy: 100 };
       let energy = m.energy ?? 100;
       if (next.currentProject && next.currentProject.devPhase.includes("RUNNING")) {
         energy = Math.max(10, energy - 3);
@@ -1217,7 +1222,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     }
 
     if (next.activeResearch) {
-      const job = { ...next.activeResearch, weeksLeft: next.activeResearch.weeksLeft - 1 };
+      const job = { ...next.activeResearch, weeksLeft: next.activeResearch.weeksLeft - (next.settings.fastResearchMode ? 99 : 1) };
       if (job.weeksLeft <= 0) {
         if (job.kind === "tech") {
           const item = RESEARCH.find((r) => r.id === job.targetId);
@@ -1256,6 +1261,9 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         startDay: next.currentProject.production?.asOfDay ?? day,
       });
       next.currentProject = adv.project;
+      if (next.settings.noBugsMode && next.currentProject) {
+        next.currentProject = { ...next.currentProject, bugs: 0 };
+      }
       if (adv.cashCost > 0) {
         next.cash -= adv.cashCost;
         next.ledger = applyLedger(next.ledger, {
@@ -1516,7 +1524,9 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       week: w,
       year: d.year,
       month: d.month,
-      currentProject: adv.project,
+      currentProject: state.settings.noBugsMode
+        ? { ...adv.project, bugs: 0 }
+        : adv.project,
       dirty: true,
     };
     if (adv.cashCost > 0) {
@@ -1977,51 +1987,203 @@ export const useGame = create<GameState & Actions>((set, get) => ({
 
   applyCheat: (cheat, arg) => {
     const state = get();
+    const logEntry = (action: string, detail?: string) =>
+      [{ week: get().week, action, detail }, ...(get().cheatLog ?? [])].slice(0, 80);
+
     let next: GameState = {
       ...state,
       cheatsEnabled: true,
       dirty: true,
+      settings: { ...state.settings },
+      staff: state.staff.map((m) => ({ ...m })),
+      unlockedTopics: [...state.unlockedTopics],
+      unlockedPlatforms: [...state.unlockedPlatforms],
+      unlockedGenres: [...state.unlockedGenres],
+      researched: [...state.researched],
+      flags: { ...state.flags },
+      unlocks: { ...state.unlocks },
+      cheatLog: state.cheatLog ?? [],
     };
+
+    const ledgerCash = (amount: number, label: string) => {
+      next.cash += amount;
+      next.ledger = applyLedger(next.ledger, {
+        week: next.week,
+        amount,
+        category: "cheat",
+        label,
+        ref: `cheat-${label}-${next.week}-${Date.now()}`,
+      });
+    };
+
+    const DREAM = [
+      "Ava Chen", "Marcus Cole", "Sofia Reyes", "Jin Park", "Nora Blake",
+      "Eli Vargas", "Priya Nair", "Theo Lang", "Mira Okonkwo", "Sam Okada",
+      "Lena Frost", "Owen Hart", "Yuri Volkov", "Amara Diallo",
+    ];
+
+    const fillTeam = (tier: "dream" | "b") => {
+      const cap = OFFICE_INFO[next.office].capacity;
+      const design = tier === "dream" ? 95 : 70;
+      const tech = tier === "dream" ? 95 : 70;
+      const speed = tier === "dream" ? 90 : 65;
+      const salary = tier === "dream" ? 4000 : 2200;
+      let added = 0;
+      while (next.staff.length < cap) {
+        const name = DREAM[next.staff.length % DREAM.length]!;
+        next.staff.push({
+          id: uid("staff"),
+          name: tier === "dream" ? `${name} ★` : name,
+          design,
+          tech,
+          speed,
+          salary,
+          level: tier === "dream" ? 7 : 4,
+          xp: 0,
+          busy: false,
+          energy: 100,
+          specialization: null,
+        });
+        added++;
+      }
+      next.staff = next.staff.map((m) =>
+        m.id === "founder" || m.name === "You"
+          ? m
+          : {
+              ...m,
+              design: Math.max(m.design, design),
+              tech: Math.max(m.tech, tech),
+              speed: Math.max(m.speed, speed),
+              energy: 100,
+            },
+      );
+      next.notifications = [
+        {
+          id: uid("note"),
+          text: added
+            ? `CheatMod: hired ${added} ${tier === "dream" ? "1337" : "B-Team"} staff.`
+            : `CheatMod: team full (cap ${cap}); stats boosted.`,
+          tone: "warn" as const,
+          week: next.week,
+          read: false,
+        },
+        ...next.notifications,
+      ].slice(0, 40);
+    };
+
     switch (cheat) {
       case "cash":
       case "cash_100k":
-        next.cash += Number(arg) || 100_000;
-        next.ledger = applyLedger(next.ledger, {
-          week: next.week,
-          amount: Number(arg) || 100_000,
-          category: "cheat",
-          label: "Cheat cash",
-          ref: `cheat-cash-${next.week}-${Date.now()}`,
-        });
+        ledgerCash(Number(arg) || 100_000, "Cheat +100k");
         break;
       case "cash_10k":
-        next.cash += 10_000;
-        next.ledger = applyLedger(next.ledger, {
-          week: next.week,
-          amount: 10_000,
-          category: "cheat",
-          label: "Cheat +10k",
-          ref: `cheat-10k-${next.week}-${Date.now()}`,
-        });
+        ledgerCash(10_000, "Cheat +10k");
         break;
       case "cash_1m":
-        next.cash += 1_000_000;
-        next.ledger = applyLedger(next.ledger, {
-          week: next.week,
-          amount: 1_000_000,
-          category: "cheat",
-          label: "Cheat +1M",
-          ref: `cheat-1m-${next.week}-${Date.now()}`,
-        });
+        ledgerCash(1_000_000, "Cheat +1M");
         break;
+      case "cash_10m":
+        ledgerCash(10_000_000, "Cheat +10M");
+        break;
+      case "cash_100m":
+        ledgerCash(100_000_000, "Cheat +100M");
+        break;
+      case "cash_1b":
+        ledgerCash(1_000_000_000, "Cheat +1B");
+        break;
+      case "set_cash": {
+        const v = Number(arg);
+        if (Number.isFinite(v) && v >= 0) {
+          const delta = Math.floor(v) - next.cash;
+          ledgerCash(delta, "Cheat set cash");
+        }
+        break;
+      }
       case "fans":
-        next.fans += Number(arg) || 10000;
+        next.fans += Number(arg) || 10_000;
         break;
+      case "fans_1m":
+        next.fans += 1_000_000;
+        break;
+      case "fans_10m":
+        next.fans += 10_000_000;
+        break;
+      case "fans_100m":
+        next.fans += 100_000_000;
+        break;
+      case "set_fans": {
+        const v = Number(arg);
+        if (Number.isFinite(v) && v >= 0) next.fans = Math.floor(v);
+        break;
+      }
       case "rp":
-        next.researchPoints += Number(arg) || 50;
+      case "rp_100":
+        next.researchPoints += Number(arg) || 100;
+        break;
+      case "hype":
+      case "hype_10":
+        next.hype = Math.min(200, next.hype + (Number(arg) || 10));
+        break;
+      case "hype_50":
+        next.hype = Math.min(200, next.hype + 50);
+        break;
+      case "hype_100":
+        next.hype = Math.min(200, next.hype + 100);
         break;
       case "bugs":
         if (next.currentProject) next.currentProject = { ...next.currentProject, bugs: 0 };
+        break;
+      case "add_bugs":
+        if (next.currentProject) {
+          next.currentProject = {
+            ...next.currentProject,
+            bugs: (next.currentProject.bugs ?? 0) + (Number(arg) || 5),
+          };
+        }
+        break;
+      case "design_10":
+      case "add_design":
+        if (next.currentProject) {
+          next.currentProject = {
+            ...next.currentProject,
+            designPoints: (next.currentProject.designPoints ?? 0) + (Number(arg) || 10),
+          };
+        }
+        break;
+      case "design_100":
+        if (next.currentProject) {
+          next.currentProject = {
+            ...next.currentProject,
+            designPoints: (next.currentProject.designPoints ?? 0) + 100,
+          };
+        }
+        break;
+      case "tech_10":
+      case "add_tech":
+        if (next.currentProject) {
+          next.currentProject = {
+            ...next.currentProject,
+            techPoints: (next.currentProject.techPoints ?? 0) + (Number(arg) || 10),
+          };
+        }
+        break;
+      case "tech_100":
+        if (next.currentProject) {
+          next.currentProject = {
+            ...next.currentProject,
+            techPoints: (next.currentProject.techPoints ?? 0) + 100,
+          };
+        }
+        break;
+      case "max_points":
+        if (next.currentProject) {
+          next.currentProject = {
+            ...next.currentProject,
+            designPoints: (next.currentProject.designPoints ?? 0) + 200,
+            techPoints: (next.currentProject.techPoints ?? 0) + 200,
+            bugs: 0,
+          };
+        }
         break;
       case "energy":
         next.staff = next.staff.map((m) => ({ ...m, energy: 100 }));
@@ -2034,21 +2196,80 @@ export const useGame = create<GameState & Actions>((set, get) => ({
             next.unlockedTopics = [...next.unlockedTopics, job.targetId];
           }
           next.activeResearch = null;
+          next.activeResearchJobs = [];
+        }
+        break;
+      case "finish_stage":
+        if (next.currentProject) {
+          // Soft advance: mark ready-ish via high progress fields if present
+          const p = next.currentProject as GameProject & {
+            stageProgress?: number;
+            devPhase?: string;
+            bugs?: number;
+          };
+          next.currentProject = {
+            ...p,
+            bugs: 0,
+            designPoints: (p.designPoints ?? 0) + 40,
+            techPoints: (p.techPoints ?? 0) + 40,
+            stageProgress: 1,
+          } as typeof next.currentProject;
+          next.speed = 0;
+        }
+        break;
+      case "force_release_ready":
+        if (next.currentProject) {
+          next.currentProject = {
+            ...next.currentProject,
+            bugs: 0,
+            designPoints: Math.max(next.currentProject.designPoints ?? 0, 120),
+            techPoints: Math.max(next.currentProject.techPoints ?? 0, 120),
+          };
+          next.speed = 0;
         }
         break;
       case "toggle_perfect_score":
-        next.settings = {
-          ...next.settings,
-          forcePerfectScore: !next.settings.forcePerfectScore,
-          forceBadScore: false,
-        };
+      case "perfect_scores":
+        next.settings.forcePerfectScore = !next.settings.forcePerfectScore;
+        next.settings.forceBadScore = false;
         break;
       case "toggle_bad_score":
-        next.settings = {
-          ...next.settings,
-          forceBadScore: !next.settings.forceBadScore,
-          forcePerfectScore: false,
-        };
+        next.settings.forceBadScore = !next.settings.forceBadScore;
+        next.settings.forcePerfectScore = false;
+        break;
+      case "no_bugs_mode":
+        next.settings.noBugsMode = !next.settings.noBugsMode;
+        if (next.settings.noBugsMode && next.currentProject) {
+          next.currentProject = { ...next.currentProject, bugs: 0 };
+        }
+        break;
+      case "fast_research_mode":
+        next.settings.fastResearchMode = !next.settings.fastResearchMode;
+        break;
+      case "show_all_hints":
+        next.settings.showAllHints = !next.settings.showAllHints;
+        if (next.settings.showAllHints) next.settings.infoMode = "analyst";
+        break;
+      case "no_vacation":
+        next.settings.noVacationMode = !next.settings.noVacationMode;
+        next.staff = next.staff.map((m) => ({ ...m, energy: 100 }));
+        break;
+      case "dream_team":
+        if (next.office < 2) next.office = 2;
+        fillTeam("dream");
+        next.unlocks = { ...next.unlocks, hiring: "owned", training: "owned" };
+        break;
+      case "b_team":
+        if (next.office < 2) next.office = 2;
+        fillTeam("b");
+        next.unlocks = { ...next.unlocks, hiring: "owned", training: "owned" };
+        break;
+      case "pro_developer":
+        next.staff = next.staff.map((m, i) =>
+          i === 0 || m.id === "founder" || m.name === "You"
+            ? { ...m, design: 100, tech: 100, speed: 100, energy: 100, level: Math.max(m.level, 8) }
+            : m,
+        );
         break;
       case "office_ready":
         next.fans = Math.max(next.fans, 25_000);
@@ -2061,9 +2282,60 @@ export const useGame = create<GameState & Actions>((set, get) => ({
           next.month = d.month;
         }
         break;
+      case "move_to_final_level":
+        next.office = 4 as typeof next.office;
+        next.cash = Math.max(next.cash, 5_000_000);
+        next.fans = Math.max(next.fans, 250_000);
+        next.gamesPublished = Math.max(next.gamesPublished, 12);
+        next.researchPoints = Math.max(next.researchPoints, 200);
+        next.unlockedTopics = TOPICS.map((t) => t.id);
+        next.unlockedGenres = [
+          "action",
+          "adventure",
+          "rpg",
+          "simulation",
+          "strategy",
+          "casual",
+        ] as GenreId[];
+        next.unlockedPlatforms = PLATFORMS.map((p) => p.id);
+        next.researched = RESEARCH.map((r) => r.id);
+        next.flags = {
+          multiGenre: true,
+          sequels: true,
+          expansions: true,
+          marketing: true,
+          contracts: true,
+          audience: true,
+          rndLab: true,
+          hardwareLab: true,
+        };
+        for (const k of Object.keys(next.unlocks)) next.unlocks[k] = "owned";
+        next.week = Math.max(next.week, 48 * 10);
+        {
+          const d = weekToDate(next.week, START_YEAR);
+          next.year = d.year;
+          next.month = d.month;
+        }
+        break;
+      case "set_office": {
+        const o = Math.min(4, Math.max(1, Number(arg) || 2));
+        next.office = o as typeof next.office;
+        break;
+      }
       case "sequels":
         next.flags = { ...next.flags, sequels: true };
         next.unlocks = { ...next.unlocks, sequels: "owned" };
+        break;
+      case "add_aaa":
+        next.researched = Array.from(
+          new Set([...next.researched, ...RESEARCH.filter((r) => /large|aaa|medium/i.test(r.id) || /large|aaa|medium/i.test(r.name)).map((r) => r.id)]),
+        );
+        if (next.office < 3) next.office = 3 as typeof next.office;
+        next.flags = { ...next.flags, rndLab: true };
+        break;
+      case "add_all_topics":
+      case "unlock_topics":
+        next.unlockedTopics = TOPICS.map((t) => t.id);
         break;
       case "unlock_era":
       case "unlock_all":
@@ -2092,17 +2364,57 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         };
         for (const k of Object.keys(next.unlocks)) next.unlocks[k] = "owned";
         break;
-      case "no_bankruptcy":
-        next.settings = { ...next.settings, disableBankruptcy: true };
+      case "unlock_platforms":
+        next.unlockedPlatforms = PLATFORMS.map((p) => p.id);
         break;
-      case "advance_time": {
-        const weeks = Number(arg) || 48;
-        for (let i = 0; i < weeks; i++) {
-          set(next);
-          get().tick();
-          next = get();
+      case "unlock_research":
+        next.researched = RESEARCH.map((r) => r.id);
+        break;
+      case "no_bankruptcy":
+        next.settings.disableBankruptcy = !next.settings.disableBankruptcy;
+        break;
+      case "set_year": {
+        const y = Math.floor(Number(arg) || next.year);
+        if (y >= START_YEAR && y <= 2030) {
+          next.week = Math.max(0, (y - START_YEAR) * 48 + Math.min(47, (next.month - 1) * 4));
+          const d = weekToDate(next.week, START_YEAR);
+          next.year = d.year;
+          next.month = d.month;
         }
+        break;
+      }
+      case "advance_time": {
+        const weeks = Math.min(96, Number(arg) || 48);
+        next.cheatLog = logEntry(cheat, `+${weeks}w`);
+        set(next);
+        for (let i = 0; i < weeks; i++) {
+          get().tick();
+        }
+        set({
+          ...get(),
+          cheatsEnabled: true,
+          dirty: true,
+          cheatLog: logEntry(cheat, `+${weeks}w done`),
+        });
         return;
+      }
+      case "random_trend": {
+        const g = (["action", "adventure", "rpg", "simulation", "strategy", "casual"] as const)[
+          Math.floor(Math.random() * 6)
+        ]!;
+        const topic = TOPICS[Math.floor(Math.random() * TOPICS.length)];
+        next.hype = Math.min(200, next.hype + 25);
+        next.notifications = [
+          {
+            id: uid("note"),
+            text: `CheatMod trend: ${topic?.name ?? "?"} ${g} is surging.`,
+            tone: "warn" as const,
+            week: next.week,
+            read: false,
+          },
+          ...next.notifications,
+        ].slice(0, 40);
+        break;
       }
       case "unlock_topic":
         if (typeof arg === "string" && !next.unlockedTopics.includes(arg)) {
@@ -2114,9 +2426,32 @@ export const useGame = create<GameState & Actions>((set, get) => ({
           next.researched = [...next.researched, arg];
         }
         break;
+      case "info_classic":
+        next.settings.infoMode = "classic";
+        break;
+      case "info_assisted":
+        next.settings.infoMode = "assisted";
+        break;
+      case "info_analyst":
+        next.settings.infoMode = "analyst";
+        break;
+      case "reveal_seed":
+        next.notifications = [
+          {
+            id: uid("note"),
+            text: `Campaign seed: ${next.campaignSeed}`,
+            tone: "info" as const,
+            week: next.week,
+            read: false,
+          },
+          ...next.notifications,
+        ].slice(0, 40);
+        break;
       default:
         break;
     }
+
+    next.cheatLog = logEntry(cheat, arg !== undefined ? String(arg) : undefined);
     set(next);
   },
 

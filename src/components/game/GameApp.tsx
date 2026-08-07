@@ -7,6 +7,7 @@ import {
   AUDIENCES,
   FIELD_LABELS,
   GENRES,
+  OFFICE_INFO,
   PLATFORMS,
   RESEARCH,
   REVIEWER_NAMES,
@@ -1052,7 +1053,7 @@ function SettingsScreen() {
           Pause menu
         </Button>
         <Button className="w-full" variant="secondary" onClick={() => setModal("cheats")}>
-          Cheats (QA)
+          CheatMod
         </Button>
         <Button className="w-full" variant="secondary" onClick={() => setScreen("market")}>
           Market
@@ -1425,28 +1426,282 @@ function CheatsModal() {
   const setModal = useGame((s) => s.setModal);
   const applyCheat = useGame((s) => s.applyCheat);
   const settings = useGame((s) => s.settings);
+  const cash = useGame((s) => s.cash);
+  const fans = useGame((s) => s.fans);
+  const office = useGame((s) => s.office);
+  const project = useGame((s) => s.currentProject);
+  const seed = useGame((s) => s.campaignSeed);
+  const year = useGame((s) => s.year);
+  const cheatLog = useGame((s) => s.cheatLog);
+  const cheatsEnabled = useGame((s) => s.cheatsEnabled);
+  const [tab, setTab] = useState<"main" | "dev" | "modes" | "modding">("main");
+  const [cashField, setCashField] = useState("");
+  const [fansField, setFansField] = useState("");
+  const [yearField, setYearField] = useState(String(year));
+
+  const rowBtn = (label: string, cheat: string, arg?: string | number) => (
+    <Button
+      key={cheat + label}
+      size="sm"
+      variant="secondary"
+      className="min-w-[5.5rem] flex-1"
+      onClick={() => applyCheat(cheat, arg)}
+    >
+      {label}
+    </Button>
+  );
+
+  const wideBtn = (label: string, cheat: string, arg?: string | number, active?: boolean) => (
+    <Button
+      key={cheat + label}
+      size="sm"
+      variant={active ? "primary" : "secondary"}
+      className="w-full justify-start text-left"
+      onClick={() => applyCheat(cheat, arg)}
+    >
+      {label}
+      {active ? " · ON" : ""}
+    </Button>
+  );
+
+  const tabs: { id: typeof tab; label: string }[] = [
+    { id: "main", label: "Resources" },
+    { id: "dev", label: "Dev" },
+    { id: "modes", label: "Modes" },
+    { id: "modding", label: "Modding" },
+  ];
+
   return (
-    <Modal open={modal === "cheats"} onClose={() => setModal(null)} title="QA Cheats">
-      <div className="grid grid-cols-2 gap-2">
-        <Button size="sm" variant="secondary" onClick={() => applyCheat("cash_10k")}>
-          +$10k
-        </Button>
-        <Button size="sm" variant="secondary" onClick={() => applyCheat("cash_100k")}>
-          +$100k
-        </Button>
-        <Button size="sm" variant="secondary" onClick={() => applyCheat("cash_1m")}>
-          +$1M
-        </Button>
-        <Button size="sm" variant="secondary" onClick={() => applyCheat("rp")}>
-          +RP
-        </Button>
-        <Button size="sm" variant={settings.forcePerfectScore ? "primary" : "secondary"} onClick={() => applyCheat("toggle_perfect_score")}>
-          Perfect scores
-        </Button>
-        <Button size="sm" variant={settings.forceBadScore ? "primary" : "secondary"} onClick={() => applyCheat("toggle_bad_score")}>
-          Bad scores
-        </Button>
+    <Modal open={modal === "cheats"} onClose={() => setModal(null)} title="CheatMod" wide>
+      <p className="text-xs text-muted">
+        Inspired by kristof1104's GDT CheatMod — safer than editing saves.
+        {cheatsEnabled ? " Campaign marked modified." : ""}
+      </p>
+      <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted">
+        <span className="tabular rounded-md bg-elevated px-2 py-1 font-semibold text-fg">
+          {formatCash(cash)}
+        </span>
+        <span className="tabular rounded-md bg-elevated px-2 py-1">{formatFans(fans)} fans</span>
+        <span className="rounded-md bg-elevated px-2 py-1">
+          {OFFICE_INFO[office]?.name ?? `Office ${office}`}
+        </span>
       </div>
+
+      <div className="mt-3 flex flex-wrap gap-1">
+        {tabs.map((tb) => (
+          <button
+            key={tb.id}
+            type="button"
+            onClick={() => setTab(tb.id)}
+            className={cnJoin(
+              "min-h-9 rounded-lg px-3 text-xs font-semibold",
+              tab === tb.id ? "bg-accent text-accent-fg" : "bg-elevated text-muted hover:text-fg",
+            )}
+          >
+            {tb.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-4 max-h-[52dvh] space-y-4 overflow-y-auto pr-1">
+        {tab === "main" && (
+          <>
+            <section>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Add Money</h3>
+              <div className="flex flex-wrap gap-1.5">
+                {rowBtn("1M", "cash_1m")}
+                {rowBtn("10M", "cash_10m")}
+                {rowBtn("100M", "cash_100m")}
+                {rowBtn("1B", "cash_1b")}
+              </div>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {rowBtn("+10k", "cash_10k")}
+                {rowBtn("+100k", "cash_100k")}
+              </div>
+            </section>
+            <section>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Add Fans</h3>
+              <div className="flex flex-wrap gap-1.5">
+                {rowBtn("1M", "fans_1m")}
+                {rowBtn("10M", "fans_10m")}
+                {rowBtn("100M", "fans_100m")}
+                {rowBtn("+10k", "fans", 10000)}
+              </div>
+            </section>
+            <section>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Add Hype</h3>
+              <div className="flex flex-wrap gap-1.5">
+                {rowBtn("+10", "hype_10")}
+                {rowBtn("+50", "hype_50")}
+                {rowBtn("+100", "hype_100")}
+              </div>
+            </section>
+            <section className="space-y-1.5">
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Research & team</h3>
+              {wideBtn("Add Research Points (100)", "rp_100")}
+              {wideBtn("Fill open slots · 1337 Dream Team", "dream_team")}
+              {wideBtn("Fill open slots · B-Team", "b_team")}
+              {wideBtn("Turn founder into 1337 developer", "pro_developer")}
+              {wideBtn("Generate random market trend", "random_trend")}
+            </section>
+            <section className="space-y-1.5">
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Progression</h3>
+              {wideBtn("Move to final level (HQ + unlocks)", "move_to_final_level")}
+              {wideBtn("Office-ready pack (garage gate)", "office_ready")}
+              {wideBtn("Add all topics", "add_all_topics")}
+              {wideBtn("Unlock large / AAA path", "add_aaa")}
+              {wideBtn("Unlock everything", "unlock_all")}
+              {wideBtn("Unlock sequels", "sequels")}
+            </section>
+          </>
+        )}
+
+        {tab === "dev" && (
+          <>
+            <p className="text-xs text-muted">
+              {project
+                ? `${project.title} · D${Math.round(project.designPoints)} / T${Math.round(project.techPoints)} · bugs ${project.bugs}`
+                : "No active project."}
+            </p>
+            <section>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Design points</h3>
+              <div className="flex flex-wrap gap-1.5">
+                {rowBtn("+10", "design_10")}
+                {rowBtn("+100", "design_100")}
+              </div>
+            </section>
+            <section>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Tech points</h3>
+              <div className="flex flex-wrap gap-1.5">
+                {rowBtn("+10", "tech_10")}
+                {rowBtn("+100", "tech_100")}
+              </div>
+            </section>
+            <section className="space-y-1.5">
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Stage & polish</h3>
+              {wideBtn("Finish / boost stage", "finish_stage")}
+              {wideBtn("Force release-ready stats", "force_release_ready")}
+              {wideBtn("Clear bugs", "bugs")}
+              {wideBtn("Add 5 bugs", "add_bugs", 5)}
+              {wideBtn("Max points + clean", "max_points")}
+              {wideBtn("Finish research job", "finish_research")}
+              {wideBtn("Restore staff energy", "energy")}
+            </section>
+          </>
+        )}
+
+        {tab === "modes" && (
+          <>
+            <p className="text-xs text-muted">Toggle modes stay on until turned off (CheatMod parity).</p>
+            <div className="space-y-1.5">
+              {wideBtn("Always perfect scores", "perfect_scores", undefined, !!settings.forcePerfectScore)}
+              {wideBtn("Force bad scores", "toggle_bad_score", undefined, !!settings.forceBadScore)}
+              {wideBtn("No Bugs Mode", "no_bugs_mode", undefined, !!settings.noBugsMode)}
+              {wideBtn("Fast Research Mode", "fast_research_mode", undefined, !!settings.fastResearchMode)}
+              {wideBtn("Remove staff vacation need", "no_vacation", undefined, !!settings.noVacationMode)}
+              {wideBtn("Show all hints (Analyst)", "show_all_hints", undefined, !!settings.showAllHints)}
+              {wideBtn("Disable bankruptcy", "no_bankruptcy", undefined, !!settings.disableBankruptcy)}
+            </div>
+            <section>
+              <h3 className="mb-2 mt-3 text-xs font-semibold uppercase tracking-wide text-muted">Information mode</h3>
+              <div className="flex flex-wrap gap-1.5">
+                {rowBtn(settings.infoMode === "classic" ? "Classic ●" : "Classic", "info_classic")}
+                {rowBtn(settings.infoMode === "assisted" ? "Assisted ●" : "Assisted", "info_assisted")}
+                {rowBtn(settings.infoMode === "analyst" ? "Analyst ●" : "Analyst", "info_analyst")}
+              </div>
+            </section>
+          </>
+        )}
+
+        {tab === "modding" && (
+          <>
+            <section>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Set absolute values</h3>
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="min-w-[10rem] flex-1">
+                  <label className="text-[11px] font-semibold uppercase text-muted">Cash</label>
+                  <Input
+                    className="mt-1"
+                    inputMode="numeric"
+                    placeholder={String(Math.floor(cash))}
+                    value={cashField}
+                    onChange={(e) => setCashField(e.target.value.replace(/[^\d]/g, ""))}
+                  />
+                </div>
+                <Button size="sm" onClick={() => cashField && applyCheat("set_cash", Number(cashField))}>
+                  SET
+                </Button>
+              </div>
+              <div className="mt-2 flex flex-wrap items-end gap-2">
+                <div className="min-w-[10rem] flex-1">
+                  <label className="text-[11px] font-semibold uppercase text-muted">Fans</label>
+                  <Input
+                    className="mt-1"
+                    inputMode="numeric"
+                    placeholder={String(Math.floor(fans))}
+                    value={fansField}
+                    onChange={(e) => setFansField(e.target.value.replace(/[^\d]/g, ""))}
+                  />
+                </div>
+                <Button size="sm" onClick={() => fansField && applyCheat("set_fans", Number(fansField))}>
+                  SET
+                </Button>
+              </div>
+            </section>
+            <section>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Move through time</h3>
+              <p className="mb-2 text-xs text-subtle">
+                Experimental — prefer forward jumps for testing.
+              </p>
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="min-w-[8rem]">
+                  <label className="text-[11px] font-semibold uppercase text-muted">Year</label>
+                  <Input
+                    className="mt-1"
+                    inputMode="numeric"
+                    value={yearField}
+                    onChange={(e) => setYearField(e.target.value.replace(/[^\d]/g, ""))}
+                  />
+                </div>
+                <Button size="sm" onClick={() => yearField && applyCheat("set_year", Number(yearField))}>
+                  Move to year
+                </Button>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {rowBtn("+1 week", "advance_time", 1)}
+                {rowBtn("+1 month", "advance_time", 4)}
+                {rowBtn("+12 weeks", "advance_time", 12)}
+                {rowBtn("+1 year", "advance_time", 48)}
+              </div>
+            </section>
+            <section className="rounded-xl bg-elevated p-3 text-xs text-muted">
+              <p className="font-semibold text-fg">Diagnostics</p>
+              <p className="mt-1 tabular">Campaign seed: {seed}</p>
+              <p className="tabular">
+                perfect={String(!!settings.forcePerfectScore)} · noBugs=
+                {String(!!settings.noBugsMode)} · fastRP={String(!!settings.fastResearchMode)}
+              </p>
+              <Button size="sm" variant="secondary" className="mt-2" onClick={() => applyCheat("reveal_seed")}>
+                Reveal seed toast
+              </Button>
+              <p className="mt-3 font-semibold text-fg">Cheat log</p>
+              <ul className="mt-1 max-h-24 space-y-0.5 overflow-y-auto">
+                {(cheatLog ?? []).slice(0, 14).map((c, i) => (
+                  <li key={`${c.week}-${c.action}-${i}`} className="tabular">
+                    W{c.week}: {c.action}
+                    {c.detail ? ` (${c.detail})` : ""}
+                  </li>
+                ))}
+                {!(cheatLog ?? []).length && <li>None yet</li>}
+              </ul>
+            </section>
+          </>
+        )}
+      </div>
+
+      <Button className="mt-5 w-full" variant="secondary" onClick={() => setModal(null)}>
+        Close
+      </Button>
     </Modal>
   );
 }

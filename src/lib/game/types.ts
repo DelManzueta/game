@@ -439,6 +439,14 @@ export interface GameSettings {
   forcePerfectScore?: boolean;
   /** QA: force ~2.0 reviews on next releases (toggle). */
   forceBadScore?: boolean;
+  /** CheatMod: no bugs during development */
+  noBugsMode?: boolean;
+  /** CheatMod: research completes almost instantly */
+  fastResearchMode?: boolean;
+  /** CheatMod: show all hints / analyst density */
+  showAllHints?: boolean;
+  /** CheatMod: staff never need vacation */
+  noVacationMode?: boolean;
 }
 
 export interface GameState {
@@ -513,6 +521,8 @@ export interface GameState {
   consecutiveSameCombo: number;
   tutorialStep: number;
   cheatsEnabled: boolean;
+  /** Append-only cheat audit (CheatMod). */
+  cheatLog?: { week: number; action: string; detail?: string }[];
   dirty: boolean;
   lastSavedWeek: number;
   /** Deterministic campaign seed for scoring/sales. */
