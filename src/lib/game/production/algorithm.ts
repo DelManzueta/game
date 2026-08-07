@@ -104,6 +104,7 @@ export type ProductionBalance = {
   polishRequiredWork: number;
   polishWorkPerDay: number;
   polishDailyCost: number;
+  sizeSwuFactor: Record<string, number>;
 };
 
 export const DEFAULT_PRODUCTION_BALANCE: ProductionBalance = {
@@ -125,6 +126,7 @@ export const DEFAULT_PRODUCTION_BALANCE: ProductionBalance = {
   polishRequiredWork: 280,
   polishWorkPerDay: 140,
   polishDailyCost: 55,
+  sizeSwuFactor: { small: 1, medium: 1.55, large: 2.2, aaa: 3.0 },
 };
 
 export function normalizedDistribution(
@@ -250,6 +252,7 @@ export function planStage(
     rawIntent: Record<string, number>;
     demand: Record<string, number>;
     balance?: ProductionBalance;
+    size?: string;
   },
 ): ProductionState {
   const balance = opts.balance ?? DEFAULT_PRODUCTION_BALANCE;
@@ -278,8 +281,10 @@ export function planStage(
   const rawTotal = disciplines.reduce((s, d) => s + Number(opts.rawIntent[d]), 0);
   const scopePressure = Math.max(0, rawTotal / 100 - 1);
   const demandFit = distributionFit(allocation, demand);
+  const sizeFactor = balance.sizeSwuFactor[opts.size ?? "small"] ?? 1;
   const totalRequired =
     balance.stageBaseSwu[opts.stage] *
+    sizeFactor *
     (1 + balance.scopeSwuMultiplier * scopePressure) *
     (1 + balance.mismatchSwuMultiplier * (1 - demandFit));
   const requiredSwu: Record<string, number> = {};
