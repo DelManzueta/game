@@ -49,7 +49,7 @@ export function competitionModifierFor(
   week: number,
 ): number {
   let pressure = 0;
-  let selfAppeal =
+  const selfAppeal =
     (0.3 + self.awareness) *
     (0.4 + self.avgReview / 15) *
     (1 + self.marketingSpend / 200000);

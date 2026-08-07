@@ -40,6 +40,33 @@
   --shadow-card: 0 8px 28px rgba(60, 40, 20, 0.12), 0 0 0 1px rgba(80, 50, 20, 0.06);
   --shadow-soft: 0 16px 40px rgba(60, 40, 20, 0.16);
   --shadow-lamp: 0 0 40px rgba(232, 148, 26, 0.15);
+
+  /* Warm Industrial Editorial — semantic chrome */
+  --color-canvas: var(--color-bg);
+  --color-canvas-deep: var(--color-bg-deep);
+  --color-surface-base: var(--color-surface);
+  --color-surface-raised: var(--color-elevated);
+  --color-surface-sunken: var(--color-panel);
+  --color-text-primary: var(--color-fg);
+  --color-text-secondary: var(--color-muted);
+  --color-text-tertiary: var(--color-subtle);
+  --color-action: var(--color-accent);
+  --color-action-hover: #f0a030;
+  --color-action-pressed: var(--color-accent-dim);
+  --color-action-fg: var(--color-accent-fg);
+  --color-focus: #3a7ec8;
+  --color-overlay: rgba(42, 36, 28, 0.42);
+  --color-danger-hover: #e05545;
+  --color-danger-pressed: #b0382c;
+
+  --spacing-page: 1rem;
+  --spacing-panel: 1rem;
+  --spacing-control-x: 1rem;
+  --control-sm: 2.5rem;
+  --control-md: 2.75rem;
+  --control-lg: 3rem;
+  --motion-fast: 140ms;
+  --motion-standard: 220ms;
 }
 
 @layer base {
@@ -52,6 +79,10 @@
     color: var(--color-fg);
     -webkit-font-smoothing: antialiased;
     line-height: 1.45;
+  }
+  :focus-visible {
+    outline: 3px solid color-mix(in oklab, var(--color-focus) 72%, white);
+    outline-offset: 2px;
   }
   button:not(:disabled), [role="button"]:not(:disabled) { cursor: pointer; }
   input, select, textarea, button { font: inherit; }
@@ -87,6 +118,33 @@
   }
 }
 
+@layer components {
+  .ui-page-title {
+    font-size: clamp(1.75rem, 4vw, 2.5rem);
+    line-height: 1.05;
+    font-weight: 750;
+    letter-spacing: -0.035em;
+  }
+  .ui-section-title {
+    font-size: 1rem;
+    line-height: 1.25;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+  }
+  .ui-label {
+    font-size: 0.75rem;
+    line-height: 1.25;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+  .ui-caption {
+    font-size: 0.75rem;
+    line-height: 1.4;
+    color: var(--color-text-secondary);
+  }
+}
+
 .glass {
   background: color-mix(in oklab, var(--color-surface) 94%, transparent);
   border: 1px solid var(--color-border);
@@ -100,11 +158,11 @@
 }
 .paper-card {
   background: var(--color-paper);
-  color: #2a241c;
+  color: var(--color-text-primary);
   border: 1px solid var(--color-border);
   box-shadow: var(--shadow-soft);
 }
-.paper-card .text-muted { color: #6b6154; }
+.paper-card .text-muted { color: var(--color-text-secondary); }
 .lamp-glow {
   box-shadow: var(--shadow-lamp), var(--shadow-card);
 }
