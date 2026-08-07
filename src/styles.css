@@ -30,8 +30,8 @@
   --color-bad: #d94a3a;
   --color-cash: #2e9a5a;
   --color-fans: #3a7ec8;
-  --font-sans: "Segoe UI", "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Segoe UI", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Segoe UI", "Nunito", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Georgia", "Palatino Linotype", "Book Antiqua", serif;
   --font-mono: "SF Mono", "Cascadia Code", ui-monospace, Consolas, monospace;
   --radius-sm: 6px;
   --radius-md: 10px;
@@ -289,4 +289,69 @@
 @media (max-width: 390px) {
   body { font-size: 15px; }
   .hud-chip { font-size: 12px; }
+}
+
+
+/* ─── 2D game presentation ─── */
+.font-display {
+  font-family: var(--font-display);
+}
+
+.game-panel {
+  background:
+    linear-gradient(180deg, color-mix(in oklab, var(--color-paper) 96%, white) 0%, var(--color-surface) 100%);
+  color: var(--color-fg);
+  border: 2px solid var(--color-border-strong);
+  border-radius: var(--radius-xl);
+  box-shadow:
+    0 1px 0 color-mix(in oklab, white 55%, transparent) inset,
+    var(--shadow-card);
+}
+
+.hud-chip {
+  background:
+    linear-gradient(180deg, #fffdf8 0%, color-mix(in oklab, var(--color-paper) 90%, #e8dcc8) 100%);
+  border: 1.5px solid var(--color-border-strong);
+  color: var(--color-fg);
+  border-radius: 999px;
+  box-shadow: 0 2px 0 color-mix(in oklab, var(--color-border-strong) 55%, transparent),
+    0 4px 12px rgba(60, 40, 20, 0.1);
+}
+
+.room-void {
+  color: var(--color-fg);
+  background:
+    radial-gradient(
+      ellipse 90% 70% at 50% 30%,
+      color-mix(in oklab, var(--color-surface) 70%, #fff8ee) 0%,
+      var(--color-bg) 50%,
+      var(--color-bg-deep) 100%
+    );
+}
+
+/* Paper modal feel is already in Modal component surfaces */
+
+/* Stage progress bars - thicker game-like */
+.game-bar {
+  height: 0.65rem;
+  border-radius: 999px;
+  background: var(--color-panel);
+  border: 1px solid var(--color-border);
+  overflow: hidden;
+}
+.game-bar > i,
+.game-bar > div {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+}
+
+/* Era room tint on chrome */
+[data-era="garage"] .hud-chip {
+  box-shadow: 0 2px 0 #c4a878, 0 4px 14px rgba(120, 70, 20, 0.12);
+}
+[data-era="office"] .hud-chip,
+[data-era="studio"] .hud-chip,
+[data-era="empire"] .hud-chip {
+  border-radius: 0.65rem;
 }

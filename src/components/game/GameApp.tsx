@@ -99,50 +99,88 @@ function MainMenu() {
   }, []);
 
   return (
-    <div className="room-void relative flex min-h-[100dvh] flex-col items-center justify-center px-4 py-12">
-      <div className="w-full max-w-md text-center">
-        <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-accent">Phase One · Garage</p>
-        <h1 className="mt-2 text-4xl font-bold tracking-tight text-fg sm:text-5xl">Studio Empire</h1>
-        <p className="mx-auto mt-3 max-w-sm text-sm text-muted">
-          One founder. One garage. Plan stages, ship games, grow fans — until you earn the office.
-        </p>
+    <div className="relative flex min-h-[100dvh] flex-col text-fg">
+      {/* Full-bleed 2D garage scene */}
+      <div className="absolute inset-0 overflow-hidden">
+        <img
+          src="/art/garage-bg.png"
+          alt=""
+          className="h-full w-full object-cover object-center"
+          draggable={false}
+        />
+        <div className="absolute inset-0 bg-gradient-to-t from-[#1a1208]/85 via-[#1a1208]/35 to-[#1a1208]/25" />
       </div>
-      <div className="mt-8 w-full max-w-md space-y-4 rounded-2xl border border-border bg-paper p-6 shadow-[var(--shadow-soft)]">
-        <div>
-          <label className="mb-1.5 block text-center text-xs font-bold uppercase tracking-wide text-subtle">
-            Company name
-          </label>
-          <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={32} className="!bg-elevated !text-fg" />
+
+      <div className="relative z-10 flex flex-1 flex-col items-center justify-end px-4 pb-10 pt-16 sm:justify-center sm:pb-16">
+        <div className="mb-5 flex flex-col items-center text-center">
+          <img
+            src="/art/founder-cut.png"
+            alt=""
+            className="mb-3 h-28 w-auto drop-shadow-lg sm:h-36"
+            draggable={false}
+          />
+          <p className="text-[11px] font-bold uppercase tracking-[0.28em] text-accent">Phase One · Garage</p>
+          <h1 className="mt-1 font-display text-4xl font-bold tracking-tight text-white drop-shadow sm:text-5xl">
+            Studio Empire
+          </h1>
+          <p className="mx-auto mt-2 max-w-sm text-sm text-white/85">
+            One founder. One garage. Ship games, grow fans, earn the office.
+          </p>
         </div>
-        <label className="flex items-center justify-center gap-2 text-sm text-muted">
-          <input type="checkbox" className="h-4 w-4 accent-[var(--color-accent)]" checked={pirate} onChange={(e) => setPirate(e.target.checked)} />
-          Pirate mode (harder sales)
-        </label>
-        {err && <p className="text-center text-sm text-bad">{err}</p>}
-        <Button
-          className="w-full"
-          size="lg"
-          onClick={() => {
-            if (!name.trim()) {
-              setErr("Name your studio.");
-              return;
-            }
-            newGame(name, pirate);
-          }}
-        >
-          <Sparkles className="h-4 w-4" />
-          New Campaign
-        </Button>
-        {has && (
-          <div className="grid grid-cols-2 gap-2">
-            <Button variant="secondary" onClick={() => { if (!loadGame()) setErr("Could not load save."); }}>
-              Continue
-            </Button>
-            <Button variant="ghost" onClick={() => { deleteSave(); setHas(false); }}>
-              Delete save
-            </Button>
+
+        <div className="game-panel w-full max-w-md space-y-4 p-5 sm:p-6">
+          <div>
+            <label className="mb-1.5 block text-center text-xs font-bold uppercase tracking-wide text-muted">
+              Company name
+            </label>
+            <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={32} />
           </div>
-        )}
+          <label className="flex items-center justify-center gap-2 text-sm text-fg">
+            <input
+              type="checkbox"
+              className="h-4 w-4 accent-[var(--color-accent)]"
+              checked={pirate}
+              onChange={(e) => setPirate(e.target.checked)}
+            />
+            Pirate mode (harder sales)
+          </label>
+          {err && <p className="text-center text-sm text-bad">{err}</p>}
+          <Button
+            className="w-full"
+            size="lg"
+            onClick={() => {
+              if (!name.trim()) {
+                setErr("Name your studio.");
+                return;
+              }
+              newGame(name, pirate);
+            }}
+          >
+            <Sparkles className="h-4 w-4" aria-hidden="true" />
+            New Campaign
+          </Button>
+          {has && (
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  if (!loadGame()) setErr("Could not load save.");
+                }}
+              >
+                Continue
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  deleteSave();
+                  setHas(false);
+                }}
+              >
+                Delete save
+              </Button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -239,14 +277,19 @@ function GdtTopChrome({ forcePause }: { forcePause: boolean }) {
         {/* Menu */}
         <button
           type="button"
-          className="hud-chip flex h-10 items-center gap-1.5 px-3 text-xs font-bold uppercase tracking-wide text-fg"
+          className="hud-chip flex h-11 items-center gap-2 px-2.5 pr-3 text-xs font-bold uppercase tracking-wide text-fg"
           onClick={() => {
             saveGame();
             setModal("pauseMenu");
           }}
           aria-label="Menu"
         >
-          <Menu className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <img
+            src="/art/founder-cut.png"
+            alt=""
+            className="h-8 w-8 rounded-full object-cover object-top ring-2 ring-accent/40"
+            draggable={false}
+          />
           <span className="max-w-[7rem] truncate">{company || "Menu"}</span>
         </button>
 
@@ -390,8 +433,8 @@ function BottomDock() {
     { id: "settings", label: "More", icon: Settings },
   ];
   return (
-    <nav className="fixed bottom-0 inset-x-0 z-30 border-t border-border bg-[color-mix(in_oklab,var(--color-paper)_94%,transparent)] backdrop-blur-md">
-      <div className="mx-auto flex max-w-lg justify-around px-1 py-1">
+    <nav className="fixed bottom-0 inset-x-0 z-30 border-t-2 border-border-strong bg-paper/95 shadow-[0_-8px_24px_rgba(60,40,20,0.12)] backdrop-blur-md">
+      <div className="mx-auto flex max-w-lg justify-around px-1 py-1.5 pb-[max(0.4rem,env(safe-area-inset-bottom))]">
         {items.map(({ id, label, icon: Icon }) => {
           const lit =
             id === "studio"
@@ -421,29 +464,75 @@ function BottomDock() {
 
 /* ═══════════════════════════ Garage room ═══════════════════════════ */
 
+function roomArtForOffice(office: number): string {
+  if (office >= 4) return "/art/office-modern.png";
+  if (office >= 2) return "/art/office-small.png";
+  return "/art/garage-bg.png";
+}
+
 function GarageRoomView() {
   const state = useGame();
   const ov = studioOverview(state);
   const setModal = useGame((s) => s.setModal);
   const setScreen = useGame((s) => s.setScreen);
   const busy = !!state.currentProject?.devPhase.includes("RUNNING");
+  const art = roomArtForOffice(state.office);
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col items-center px-2 pt-2 sm:px-4">
-      {/* Big isometric-style garage */}
+    <div className="mx-auto flex w-full max-w-5xl flex-col items-center px-2 pt-1 sm:px-4">
+      {/* 2D room stage */}
       <button
         type="button"
-        className="relative w-full max-w-3xl outline-none"
+        className="group relative w-full max-w-3xl overflow-hidden rounded-2xl border-2 border-border-strong shadow-[var(--shadow-soft)] outline-none ring-offset-2 focus-visible:ring-2 focus-visible:ring-focus"
         onClick={() => {
           if (state.currentProject) setScreen("develop");
           else setModal("newGame");
         }}
         aria-label={state.currentProject ? "Open desk" : "Develop new game"}
       >
-        <GarageIsometric busy={busy} hasProject={!!state.currentProject} />
+        <img
+          src={art}
+          alt=""
+          className="aspect-[16/10] w-full object-cover object-[center_40%] transition duration-300 group-hover:scale-[1.02]"
+          draggable={false}
+        />
+        {/* Ambient vignette */}
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-black/10" />
+
+        {/* Founder sprite */}
+        <img
+          src="/art/founder-cut.png"
+          alt=""
+          className={cnJoin(
+            "pointer-events-none absolute bottom-[6%] left-[8%] h-[42%] w-auto drop-shadow-md transition duration-300",
+            busy && "animate-pulse",
+          )}
+          draggable={false}
+        />
+
+        {/* Desk hotspot label */}
+        <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 flex-col items-center gap-1">
+          <span className="rounded-full border border-border bg-paper/95 px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-fg shadow-md backdrop-blur-sm">
+            {state.currentProject
+              ? busy
+                ? "Coding at the desk…"
+                : "Tap to open desk"
+              : "Tap garage · start a game"}
+          </span>
+        </div>
+
+        {/* Project plaque */}
+        {state.currentProject && (
+          <div className="absolute left-3 top-3 max-w-[70%] rounded-xl border border-border bg-paper/95 px-3 py-2 shadow-md backdrop-blur-sm">
+            <div className="truncate text-sm font-bold text-fg">{state.currentProject.title}</div>
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-accent">
+              {ov.phase.title}
+            </div>
+          </div>
+        )}
       </button>
 
-      {/* Quick actions under room */}
+      {/* Quick actions */}
       <div className="mt-3 flex w-full max-w-md flex-wrap justify-center gap-2">
         {!state.currentProject ? (
           <Button size="lg" className="min-w-[12rem]" onClick={() => setModal("newGame")}>
@@ -459,13 +548,13 @@ function GarageRoomView() {
         </Button>
       </div>
 
-      {/* Compact goal strip */}
-      {ov.officeGoal && (
-        <div className="hud-chip mt-4 w-full max-w-md px-3 py-2 text-[11px]">
-          <div className="mb-1 font-bold uppercase tracking-wide text-subtle">Office goal</div>
-          <div className="flex flex-wrap gap-x-3 gap-y-1 tabular">
+      {/* Office goal card */}
+      {state.office === 1 && ov.officeGoal && (
+        <div className="game-panel mt-4 w-full max-w-md px-4 py-3 text-center text-xs">
+          <div className="mb-1 font-bold uppercase tracking-wide text-muted">Office goal</div>
+          <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 font-semibold text-fg">
             <span>
-              Fans {ov.fans.toLocaleString()}/{ov.officeGoal.fansNeed.toLocaleString()}
+              Fans {formatFans(ov.fans)}/{formatFans(ov.officeGoal.fansNeed)}
             </span>
             <span>
               Games {ov.gamesPublished}/{ov.officeGoal.gamesNeed}
@@ -476,68 +565,6 @@ function GarageRoomView() {
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function GarageIsometric({ busy, hasProject }: { busy: boolean; hasProject: boolean }) {
-  return (
-    <div className="relative overflow-hidden rounded-xl">
-      <svg viewBox="0 0 720 420" className="w-full drop-shadow-lg" role="img" aria-label="Garage workspace">
-        {/* floor shadow */}
-        <ellipse cx="360" cy="380" rx="280" ry="28" fill="#c4b49a" opacity="0.45" />
-        {/* room walls isometric-ish */}
-        <path d="M120 160 L360 80 L600 160 L600 320 L360 400 L120 320 Z" fill="#d8c8a8" stroke="#b8a888" strokeWidth="2" />
-        {/* left wall tint */}
-        <path d="M120 160 L360 80 L360 400 L120 320 Z" fill="#c8b898" opacity="0.55" />
-        {/* right wall */}
-        <path d="M360 80 L600 160 L600 320 L360 400 Z" fill="#e8dcc4" opacity="0.9" />
-        {/* floor */}
-        <path d="M120 320 L360 400 L600 320 L360 240 Z" fill="#b8b0a0" />
-        {/* rug */}
-        <path d="M240 300 L360 340 L420 300 L300 260 Z" fill="#5a9a8a" opacity="0.85" />
-        {/* door */}
-        <path d="M150 200 L150 300 L210 320 L210 220 Z" fill="#d0c8b8" stroke="#9a9080" />
-        {/* desk */}
-        <path d="M220 250 L320 285 L320 305 L220 270 Z" fill="#8b6914" />
-        <path d="M320 285 L380 255 L380 275 L320 305 Z" fill="#6b4f10" />
-        <path d="M220 250 L280 220 L380 255 L320 285 Z" fill="#a67c1a" />
-        {/* CRT */}
-        <rect x="250" y="200" width="48" height="40" rx="3" fill="#2a2a2a" transform="skewY(-8)" />
-        <rect x="256" y="206" width="36" height="26" fill={busy ? "#1a3a2a" : "#0a1010"} transform="skewY(-8)" />
-        {busy && (
-          <>
-            <rect x="260" y="212" width="18" height="2" fill="#4ecb8a" transform="skewY(-8)" />
-            <rect x="260" y="218" width="26" height="2" fill="#5ec8d8" transform="skewY(-8)" />
-            <rect x="260" y="224" width="14" height="2" fill="#e8a838" transform="skewY(-8)" />
-          </>
-        )}
-        {/* founder chair + body simple */}
-        <ellipse cx="300" cy="278" rx="14" ry="8" fill="#3d3d3d" />
-        <circle cx="295" cy="248" r="12" fill="#c9a882" />
-        <path d="M285 258 L285 290 L305 298 L308 262 Z" fill="#3d5a80" />
-        {/* car under tarp */}
-        <ellipse cx="480" cy="310" rx="70" ry="28" fill="#2a4a8a" opacity="0.9" />
-        <path d="M420 300 Q480 250 540 300 Q480 320 420 300" fill="#3a5a9a" />
-        <path d="M430 295 Q480 265 530 295" fill="#4a6aaa" opacity="0.5" />
-        {/* shelves */}
-        <rect x="480" y="170" width="50" height="70" fill="#8b6914" transform="skewY(12)" />
-        <rect x="485" y="180" width="40" height="8" fill="#c45" opacity="0.7" transform="skewY(12)" />
-        <rect x="485" y="195" width="40" height="8" fill="#4a8" opacity="0.7" transform="skewY(12)" />
-        {/* whiteboard */}
-        <rect x="400" y="140" width="90" height="50" fill="#f5f5f0" stroke="#aaa" transform="skewY(8)" />
-        {/* company plaque */}
-        <text x="130" y="190" fontSize="11" fill="#6b6154" fontWeight="bold" transform="skewY(-12)">
-          GARAGE
-        </text>
-        <text x="250" y="395" fontSize="12" fill="#6b6154" textAnchor="middle">
-          {hasProject
-            ? busy
-              ? "Coding under the lamp…"
-              : "Project on the desk — tap to manage"
-            : "Tap the garage to start a game"}
-        </text>
-      </svg>
     </div>
   );
 }
@@ -564,6 +591,27 @@ function DevelopOverlay() {
 
   return (
     <div className="mx-auto mt-2 w-full max-w-lg px-3 pb-6">
+      <div className="relative mb-3 overflow-hidden rounded-2xl border-2 border-border-strong shadow-[var(--shadow-card)]">
+        <img
+          src="/art/desk.png"
+          alt=""
+          className="aspect-[21/9] w-full object-cover object-center"
+          draggable={false}
+        />
+        <div className="absolute inset-0 bg-gradient-to-r from-black/55 via-black/20 to-transparent" />
+        <div className="absolute bottom-2 left-3 right-3 flex items-end justify-between gap-2">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-white/80">Work desk</p>
+            <p className="text-sm font-bold text-white drop-shadow">{project.title}</p>
+          </div>
+          <img
+            src="/art/founder-cut.png"
+            alt=""
+            className="h-16 w-auto drop-shadow-lg sm:h-20"
+            draggable={false}
+          />
+        </div>
+      </div>
       <DevelopPanel />
     </div>
   );

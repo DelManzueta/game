@@ -24,9 +24,9 @@ export function Button({
 }) {
   const variants = {
     primary:
-      "border border-action-pressed bg-action text-action-fg shadow-[0_3px_0_var(--color-action-pressed)] hover:bg-action-hover",
+      "border-2 border-action-pressed bg-action text-action-fg shadow-[0_3px_0_var(--color-action-pressed)] hover:bg-action-hover",
     secondary:
-      "border border-border bg-surface-raised text-text-primary shadow-sm hover:border-border-strong hover:bg-surface-base",
+      "border-2 border-border-strong bg-paper text-text-primary shadow-[0_2px_0_var(--color-border-strong)] hover:bg-surface-base",
     ghost:
       "border border-transparent bg-transparent text-text-secondary hover:bg-surface-sunken/80 hover:text-text-primary",
     danger:
