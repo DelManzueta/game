@@ -74,6 +74,7 @@ export function applyPlanStage(
       stage,
       rawIntent: rawIntentFromSliders(stage, project.sliders as Record<string, number>),
       demand: demand ?? defaultStageDemand(stage),
+      size: project.size,
     });
     return {
       project: {

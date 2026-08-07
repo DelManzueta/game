@@ -20,3 +20,9 @@
 - Every chrome control has its own visible text label (speed, inbox, orbs, menu).
 - Stronger muted/subtle contrast; warm shared tokens; `data-era` restyle path.
 - Removed unused `desk-ui.png` / `founder-ui.png` frames.
+
+
+## Production pace (follow-up)
+- Small garage stages ~1.5–2 weeks each (SWU base ~1600–1750, 210 SWU/day).
+- Polish ~2 days.
+- Medium/large/AAA scale via sizeSwuFactor (1.55 / 2.2 / 3.0).
