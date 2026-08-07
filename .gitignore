@@ -3,3 +3,14 @@ node_modules/
 .github_repo
 .env
 .env.*
+# Build / deploy artifacts
+dist/
+.output/
+.vercel/
+.nitro/
+.wrangler/
+# Local env & locks
+.node_modules.lock
+# OS / editor
+.DS_Store
+*.log
