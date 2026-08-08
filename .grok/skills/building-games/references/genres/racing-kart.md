@@ -47,62 +47,6 @@ Model the car as a point/box with a **heading (yaw)**, a **forward speed**, and 
 
 ---
 
-## 3b. Track geometry (get this right or the road crosses itself)
-
-A track is a **corridor** (centerline ± half-width), not a line. Nearly every
-"the track is all messed up / roads crossing each other" bug comes from
-violating one of these constraints when placing centerline waypoints:
-
-- **Corridor clearance:** any two points on the centerline that are far apart
-  *along the lap* must be at least **3× the road width apart in plan (XZ)** —
-  or vertically separated by real bridge clearance (car height + deck, ≥ 4–5
-  units at toy scale) if you intend an overpass. Parallel straights closer
-  than that will visually merge or cross once the road width is applied.
-- **Minimum turn radius ≥ 2× half-width.** A hairpin tighter than the road's
-  half-width folds the inner edge over itself (bowtie). If you want a tight
-  hairpin, either widen the radius or narrow the road locally.
-- **Waypoint spacing ≥ road width.** Consecutive control points closer than
-  the road width make the spline kink and self-overlap. Never place duplicate
-  or near-duplicate waypoints (a closed Catmull-Rom re-connects to the start
-  automatically — do NOT repeat the first point at the end).
-- **Closed loops must be planned as loops.** Sketch the lap in plan view
-  first (a rounded rectangle / kidney / figure-8 with a *deliberate* bridge)
-  and keep the return leg well away from the outbound leg.
-
-**Real circuits (Spa, Monza, Suzuka...):** do NOT free-hand 30 waypoints from
-memory — that reliably produces crossing corridors. Trace a *simplified,
-non-crossing* approximation with ~12–20 well-spaced points that keeps the
-famous corner *sequence* (players recognize the rhythm, not survey-accurate
-coordinates), then validate.
-
-**Validate before shipping (cheap, do it in code):** after building the
-centerline samples, run a self-check — for every pair of samples more than
-~6× half-width apart along the lap, assert their XZ distance is > 2× half-width
-(or their Y separation is bridge-height). Also assert local turn radius >
-half-width everywhere. Log or `throw` on violation so you catch it in the dev
-console *before* eyeballing screenshots:
-
-```ts
-for (let i = 0; i < pts.length; i++)
-  for (let j = i + 1; j < pts.length; j++) {
-    const along = Math.min(arc[j] - arc[i], total - (arc[j] - arc[i]));
-    if (along < 6 * HALF_W) continue;
-    const dxz = Math.hypot(pts[i].x - pts[j].x, pts[i].z - pts[j].z);
-    const dy = Math.abs(pts[i].y - pts[j].y);
-    if (dxz < 2 * HALF_W && dy < 4) throw new Error(`track self-overlap near ${i},${j}`);
-  }
-// and: local turn radius must exceed the half-width everywhere
-for (let i = 0; i < pts.length; i++) {
-  const r = circumradiusXZ(pts[(i - 3 + pts.length) % pts.length], pts[i], pts[(i + 3) % pts.length]);
-  if (r < 2 * HALF_W) throw new Error(`turn too tight at sample ${i} (r=${r.toFixed(1)})`);
-}
-```
-
-A top-down screenshot of the full track (orthographic camera above the scene)
-is the fastest visual check — take one before polishing anything else.
-
----
-
 ## 4. Checkpoints & laps (get this right or laps break)
 
 - **Place ordered checkpoints around the track** (invisible trigger volumes/gates), including a start/finish line. Store the count `N`.
@@ -126,8 +70,6 @@ is the fastest visual check — take one before polishing anything else.
 
 ## 6. Common bugs to avoid (checklist)
 
-- **Track corridor crosses/merges with itself** (roads visibly crossing) → keep far-apart centerline sections > 3× road width apart in XZ or give a real bridge height; validate with the self-overlap check in §3b and a top-down screenshot.
-- **Hairpin folds into a bowtie** → local turn radius must exceed the road half-width; widen the corner or narrow the road.
 - **Lap counter increments on any finish-line crossing** → require all checkpoints in order before counting a lap.
 - **Player skips/cuts the track to cheat laps** → sequential-checkpoint gating + wrong-way detection.
 - **Car tunnels through walls/checkpoints at speed** → swept/segment collision, not just per-frame overlap; consider fixed timestep.
@@ -145,7 +87,6 @@ is the fastest visual check — take one before polishing anything else.
 
 ## Defaults to apply
 
-0. **Build the track as a validated corridor first:** well-spaced waypoints (see §3b), corridor-clearance + turn-radius self-check in code, and a top-down screenshot before anything else. For real circuits use a simplified non-crossing layout that preserves the corner sequence.
 1. **Use arcade pseudo-physics, not a rigid-body sim:** heading + forward speed + decaying lateral velocity; drag for coasting; steering that scales with speed. Grippy-but-slidey.
 2. **Ship drift with a boost payoff** (reduce lateral grip while held + charge → mini-turbo on release, with sparks/skid feedback). This is the genre's hook.
 3. **Lap logic MUST use ordered checkpoints:** a lap counts only after all checkpoints are passed in sequence, then the finish line. Prevents skip/reverse cheating. Respawn at last checkpoint.

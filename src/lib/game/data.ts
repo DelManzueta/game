@@ -271,20 +271,54 @@ export const REVIEWER_NAMES = [
 
 export const OFFICE_INFO = {
   1: {
-    name: "Garage",
+    name: "Founder Garage",
     rent: 0,
+    /** Total HQ seats including founder (bible §2). */
     capacity: 1,
-    upgradeCost: 1_000_000,
-    fanRequirement: 25_000,
+    upgradeCost: 150_000,
+    fanRequirement: 1_000,
     gamesRequirement: 5,
     cashRequirement: 1_000_000,
-    /** Earliest calendar: Year 2 Month 10 (pacing floor only). */
-    minYear: 1983,
-    minMonth: 10,
+    /** Earliest: campaign year 3. */
+    minYear: 1984,
+    minMonth: 1,
   },
-  2: { name: "Small Office", rent: 2000, capacity: 4, upgradeCost: 1_200_000, fanRequirement: 0, gamesRequirement: 0, cashRequirement: 0 },
-  3: { name: "Downtown Studio", rent: 8000, capacity: 8, upgradeCost: 5_000_000, fanRequirement: 0, gamesRequirement: 0, cashRequirement: 0 },
-  4: { name: "HQ Campus", rent: 25000, capacity: 14, upgradeCost: 0, fanRequirement: 0, gamesRequirement: 0, cashRequirement: 0 },
+  2: {
+    name: "First Office",
+    rent: 2_000,
+    capacity: 4, // founder + 3
+    upgradeCost: 500_000,
+    fanRequirement: 0,
+    gamesRequirement: 0,
+    cashRequirement: 0,
+  },
+  3: {
+    name: "Upgraded Office",
+    rent: 5_000,
+    capacity: 5, // founder + 4
+    upgradeCost: 8_000_000,
+    fanRequirement: 0,
+    gamesRequirement: 0,
+    cashRequirement: 0,
+  },
+  4: {
+    name: "Technology Park",
+    rent: 15_000,
+    capacity: 6, // founder + 5
+    upgradeCost: 50_000_000,
+    fanRequirement: 0,
+    gamesRequirement: 0,
+    cashRequirement: 0,
+  },
+  5: {
+    name: "Expanded Technology Campus",
+    rent: 40_000,
+    capacity: 8, // founder + 5 + 2 directors
+    upgradeCost: 0,
+    fanRequirement: 0,
+    gamesRequirement: 0,
+    cashRequirement: 0,
+  },
 } as const;
 
 /** Map compatibility rank / MatchTier → 0.6–1.0 product space. */

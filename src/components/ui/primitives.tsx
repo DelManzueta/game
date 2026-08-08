@@ -24,20 +24,20 @@ export function Button({
 }) {
   const variants = {
     primary:
-      "border-2 border-action-pressed bg-action text-action-fg shadow-[0_3px_0_var(--color-action-pressed)] hover:bg-action-hover",
+      "border border-[rgba(180,255,255,0.55)] bg-gradient-to-b from-[#3de8ff] to-[#14a8c8] text-[#042028] shadow-[0_0_14px_rgba(60,220,240,0.35)] hover:brightness-110",
     secondary:
-      "border-2 border-border-strong bg-paper text-text-primary shadow-[0_2px_0_var(--color-border-strong)] hover:bg-surface-base",
+      "border border-[rgba(100,220,230,0.4)] bg-[rgba(12,40,52,0.62)] text-[#e8fbff] shadow-[0_0_12px_rgba(40,200,220,0.2)] backdrop-blur-md hover:border-[rgba(120,245,255,0.7)]",
     ghost:
-      "border border-transparent bg-transparent text-text-secondary hover:bg-surface-sunken/80 hover:text-text-primary",
+      "border border-transparent bg-transparent text-[rgba(200,235,240,0.88)] hover:bg-[rgba(20,55,68,0.45)] hover:text-white",
     danger:
-      "border border-danger-pressed bg-bad text-white shadow-[0_3px_0_var(--color-danger-pressed)] hover:bg-danger-hover",
+      "border border-[rgba(255,160,120,0.5)] bg-gradient-to-r from-[#ff3d4a] to-[#ff8a3a] text-white shadow-[0_0_12px_rgba(255,80,60,0.35)] hover:brightness-110",
     accent:
-      "border border-action-pressed bg-action text-action-fg shadow-[0_3px_0_var(--color-action-pressed)] hover:bg-action-hover",
+      "border border-[rgba(180,255,255,0.55)] bg-gradient-to-b from-[#3de8ff] to-[#14a8c8] text-[#042028] shadow-[0_0_14px_rgba(60,220,240,0.35)] hover:brightness-110",
   };
   const sizes = {
-    sm: "h-[var(--control-sm)] rounded-lg px-3 text-sm",
-    md: "h-[var(--control-md)] rounded-lg px-4 text-sm",
-    lg: "h-[var(--control-lg)] rounded-xl px-6 text-base",
+    sm: "h-[var(--control-sm)] rounded-full px-3 text-sm",
+    md: "h-[var(--control-md)] rounded-full px-4 text-sm",
+    lg: "h-[var(--control-lg)] rounded-full px-6 text-base",
   };
   return (
     <button
@@ -85,14 +85,17 @@ export function SearchField({
   ...props
 }: InputHTMLAttributes<HTMLInputElement> & { inputClassName?: string }) {
   return (
-    <label className={cnJoin("relative block", className)}>
+    <label className={cnJoin("glass-search", className)}>
       <Search
         aria-hidden="true"
-        className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-text-tertiary"
+        className="h-4 w-4 shrink-0 text-[rgba(200,235,240,0.75)]"
       />
-      <Input
+      <input
         type="search"
-        className={cnJoin("pl-10", inputClassName)}
+        className={cnJoin(
+          "min-w-0 flex-1 bg-transparent text-[0.9rem] text-[#e8fbff] outline-none placeholder:text-[rgba(200,235,240,0.55)]",
+          inputClassName,
+        )}
         {...props}
       />
     </label>
@@ -139,26 +142,27 @@ export function Modal({
         <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-overlay backdrop-blur-[2px] data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out data-[state=open]:fade-in" />
         <DialogPrimitive.Content
           className={cnJoin(
-            "fixed inset-x-0 bottom-0 z-50 flex max-h-[92dvh] flex-col overflow-hidden rounded-t-2xl border border-border bg-surface-raised text-text-primary shadow-[var(--shadow-soft)] outline-none data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:slide-out-to-bottom-4 data-[state=open]:slide-in-from-bottom-4 sm:bottom-auto sm:left-1/2 sm:top-1/2 sm:w-[calc(100%-2rem)] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:data-[state=closed]:zoom-out-95 sm:data-[state=open]:zoom-in-95",
+            "glass-modal-shell fixed inset-x-0 bottom-0 z-50 flex max-h-[92dvh] flex-col overflow-hidden rounded-t-2xl outline-none data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:slide-out-to-bottom-4 data-[state=open]:slide-in-from-bottom-4 sm:bottom-auto sm:left-1/2 sm:top-1/2 sm:w-[calc(100%-2rem)] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:data-[state=closed]:zoom-out-95 sm:data-[state=open]:zoom-in-95",
             wide ? "sm:max-w-3xl" : "sm:max-w-lg",
           )}
         >
-          <header className="relative border-b border-border px-12 py-4 text-center">
-            <DialogPrimitive.Title className="text-xl font-bold tracking-tight sm:text-2xl">
+          <header className="relative px-12 pb-2 pt-4 text-center">
+            <DialogPrimitive.Title className="glass-modal-shell__title text-base tracking-[0.18em] sm:text-lg">
               {title}
             </DialogPrimitive.Title>
+            <div className="glass-modal-shell__rule" />
             {description ? (
-              <DialogPrimitive.Description className="mt-1 text-sm text-text-secondary">
+              <DialogPrimitive.Description className="mt-1 text-sm text-[var(--glass-muted)]">
                 {description}
               </DialogPrimitive.Description>
             ) : null}
             <DialogPrimitive.Close asChild>
-              <IconButton label="Close" className="absolute right-3 top-3">
+              <IconButton label="Close" className="glass-btn glass-btn--icon absolute right-3 top-3 text-[var(--glass-text)]">
                 <X aria-hidden="true" className="h-5 w-5" />
               </IconButton>
             </DialogPrimitive.Close>
           </header>
-          <div className="overflow-y-auto px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-4">
+          <div className="overflow-y-auto px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-2 text-[var(--glass-text)]">
             {children}
           </div>
         </DialogPrimitive.Content>
@@ -201,25 +205,31 @@ export function Progress({
   value,
   label,
   className,
+  tone = "action",
 }: {
   value: number;
   label: string;
   className?: string;
+  tone?: "action" | "design" | "tech" | "bugs" | "research" | "sales";
 }) {
   const bounded = Math.max(0, Math.min(100, value));
   return (
-    <div
-      className={cnJoin("h-2 overflow-hidden rounded-full bg-surface-sunken", className)}
-      role="progressbar"
-      aria-label={label}
-      aria-valuemin={0}
-      aria-valuemax={100}
-      aria-valuenow={Math.round(bounded)}
-    >
+    <div className={cnJoin("glass-progress", className)}>
+      <span className="glass-progress__label">{label}</span>
       <div
-        className="h-full rounded-full bg-action transition-[width] duration-[var(--motion-standard)]"
-        style={{ width: `${bounded}%` }}
-      />
+        className="glass-progress__track"
+        role="progressbar"
+        aria-label={label}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={bounded}
+      >
+        <div
+          className={cnJoin("glass-progress__fill", `glass-progress__fill--${tone}`)}
+          style={{ width: `${bounded}%` }}
+        />
+      </div>
+      <span className="glass-progress__pct">{bounded}%</span>
     </div>
   );
 }

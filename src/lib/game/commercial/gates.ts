@@ -32,15 +32,17 @@ function req(
   return { id, label, met, detail };
 }
 
-/** First office: calendar floor + fans + releases + cash + move cost. */
+/** First office: bible proofs + liquid cash + move cost (not calendar alone). */
 export function evaluateFirstOfficeGate(state: GameState): SystemGateResult {
   const minWeek = firstOfficeMinWeek(START_YEAR);
+  const released = state.releasedGames ?? [];
+  const profitable = released.some((g) => (g.revenue ?? 0) > (g.developmentCost ?? 5_000));
   const requirements: GateRequirement[] = [
     req(
-      "calendar",
-      "Calendar floor",
+      "campaign_year",
+      "Campaign year 3+",
       state.week >= minWeek,
-      `Year ${FIRST_OFFICE_GATE.minYear} Month ${FIRST_OFFICE_GATE.minMonth}+ (week ${minWeek}+)`,
+      `Week ${state.week} / ${minWeek}`,
     ),
     req(
       "releases",
@@ -53,6 +55,12 @@ export function evaluateFirstOfficeGate(state: GameState): SystemGateResult {
       "Fans",
       state.fans >= FIRST_OFFICE_GATE.minFans,
       `${state.fans.toLocaleString()} / ${FIRST_OFFICE_GATE.minFans.toLocaleString()}`,
+    ),
+    req(
+      "profitable",
+      "One profitable title",
+      profitable,
+      profitable ? "Met" : "Need a title that pays for itself",
     ),
     req(
       "cash",
@@ -75,7 +83,7 @@ export function evaluateFirstOfficeGate(state: GameState): SystemGateResult {
     requirements,
     summary: available
       ? "Ready to leave the garage."
-      : "Office needs time, fans, releases, and cash together.",
+      : "Office needs releases, fans, a profitable title, year 3+, and cash together.",
   };
 }
 

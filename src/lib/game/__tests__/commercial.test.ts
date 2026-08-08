@@ -368,13 +368,14 @@ describe("commercial layers", () => {
     assert.ok(founderActivityRp("idle") === 0);
   });
 
-  it("employee RP table matches stage design", () => {
+  it("employee RP table matches stage design (bible HQ seats)", () => {
+    // Per-employee weekly base RP; max hires exclude founder
     assert.equal(EMPLOYEE_RP_PER_WEEK[1], 0);
     assert.equal(EMPLOYEE_RP_PER_WEEK[2], 1);
     assert.equal(EMPLOYEE_RP_PER_WEEK[3], 2);
-    assert.equal(EMPLOYEE_RP_PER_WEEK[4], 4);
-    assert.equal(PRODUCTION_SEATS[2], 4);
-    assert.equal(PRODUCTION_SEATS[4], 6);
+    assert.equal(EMPLOYEE_RP_PER_WEEK[4], 3);
+    assert.equal(PRODUCTION_SEATS[2], 3); // founder + 3 = 4 HQ
+    assert.equal(PRODUCTION_SEATS[4], 5); // founder + 5 = 6 HQ
   });
 
   it("sales plan is deterministic for same seed", () => {
@@ -576,10 +577,11 @@ describe("system gates", () => {
 });
 
 describe("first office gate constants", () => {
-  it("requires 5 games, 25k fans, $1M, year2 month10 floor", () => {
+  it("requires 5 games, 1k fans, $1M liquid, $150k move, year 3 floor (bible §4.3)", () => {
     assert.equal(FIRST_OFFICE_GATE.minReleasedGames, 5);
-    assert.equal(FIRST_OFFICE_GATE.minFans, 25000);
-    assert.equal(FIRST_OFFICE_GATE.moveCost, 1_000_000);
+    assert.equal(FIRST_OFFICE_GATE.minFans, 1_000);
+    assert.equal(FIRST_OFFICE_GATE.minCashOnHand, 1_000_000);
+    assert.equal(FIRST_OFFICE_GATE.moveCost, 150_000);
     assert.ok(firstOfficeMinWeek(START_YEAR) >= 80);
   });
 });

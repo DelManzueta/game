@@ -13,6 +13,6 @@
     "baseUrl": ".",
     "paths": { "@/*": ["./src/*"] }
   },
-  "include": ["src"],
-  "exclude": ["src/**/__tests__/**", "src/**/*.test.ts"]
+  "include": ["src", "server"],
+  "exclude": ["src/**/__tests__/**", "node_modules", "dist", ".vercel"]
 }

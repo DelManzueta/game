@@ -1,7 +1,6 @@
 /**
  * Garage Phase One — progressive content exposure.
  * Full catalogs live in topics/platforms; this gates what a new campaign starts with.
- * Campaign opens in 1979: early home computers + pre-crash consoles only.
  */
 import { GENRES, PLATFORMS, TOPICS } from "../data";
 import type { GenreId } from "../types";
@@ -22,18 +21,23 @@ export const GARAGE_TOPIC_IDS = [
   "history",
 ] as const;
 
-/** Early platforms only (1977–1984 + nearby). */
+/**
+ * Decade-1 platforms the garage can eventually reach (not day-one unlocked).
+ * Availability still requires year + license (except PC).
+ */
 export const GARAGE_PLATFORM_IDS = [
-  "itara",
   "pc",
-  "intelli",
-  "odyssey",
   "commodore",
+  "arcade",
   "itara_5200",
-  "grapintosh",
+  "tes",
+  "master_v",
+  "vena_oasis",
+  "vena_genesis_x",
+  "gameling",
+  "super_tes",
 ] as const;
 
-/** Exactly six top-level genres. */
 export const GARAGE_GENRE_IDS: GenreId[] = [
   "action",
   "adventure",
@@ -43,7 +47,6 @@ export const GARAGE_GENRE_IDS: GenreId[] = [
   "casual",
 ];
 
-/** Four starting topics — do not dump the full catalog. */
 export const GARAGE_START_TOPICS = ["space", "fantasy", "racing", "dungeon"] as const;
 export const GARAGE_START_GENRES: GenreId[] = [
   "action",
@@ -53,8 +56,9 @@ export const GARAGE_START_GENRES: GenreId[] = [
   "strategy",
   "casual",
 ];
-/** 1979 garage: home computer + mature Itara console. TES arrives 1985. */
-export const GARAGE_START_PLATFORMS = ["pc", "itara"] as const;
+
+/** Day one: PC only. No Commodore, Atari, or Arcade until their years. */
+export const GARAGE_START_PLATFORMS = ["pc"] as const;
 
 export function garageTopics() {
   return TOPICS.filter((t) => (GARAGE_TOPIC_IDS as readonly string[]).includes(t.id));

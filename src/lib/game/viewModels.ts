@@ -6,6 +6,12 @@ import type { GameProject, GameState, ReleasedGame } from "./types";
 import { formatCash, formatFans } from "./simulation";
 import { getGenre, getPlatform, getTopic, OFFICE_INFO, STAGE_FIELDS } from "./data";
 import { FIELD_LABELS } from "./data";
+import {
+  firstOfficeOfferView,
+  isFeatureEnabled,
+  migrateStudioProgression,
+  type ProofResult,
+} from "./progression";
 
 export type PhaseLabel = {
   code: string;
@@ -157,25 +163,61 @@ export function studioOverview(s: GameState) {
         }
       : null,
     recentKnowledge: s.knowledge.entries.slice(0, 5),
-    officeGoal:
-      s.office === 1
-        ? {
-            fansNeed: office.fanRequirement ?? 25000,
-            gamesNeed: office.gamesRequirement ?? 5,
-            cashNeed: office.cashRequirement ?? 1_000_000,
-            moveCost: office.upgradeCost,
-            fansPct: Math.min(100, (s.fans / Math.max(1, office.fanRequirement ?? 1)) * 100),
-            gamesPct: Math.min(
-              100,
-              (s.gamesPublished / Math.max(1, office.gamesRequirement ?? 1)) * 100,
-            ),
-            cashPct: Math.min(100, (s.cash / Math.max(1, office.cashRequirement ?? 1)) * 100),
-            canMove:
-              s.fans >= (office.fanRequirement ?? 0) &&
-              s.gamesPublished >= (office.gamesRequirement ?? 0) &&
-              s.cash >= Math.max(office.cashRequirement ?? 0, office.upgradeCost),
-          }
-        : null,
+    officeGoal: buildOfficeGoal(s),
+  };
+}
+
+function buildOfficeGoal(s: GameState) {
+  if (s.office !== 1) return null;
+  const office = OFFICE_INFO[1];
+
+  if (isFeatureEnabled("officeFoundation")) {
+    const prog = migrateStudioProgression(s.progression, s.office);
+    const v = firstOfficeOfferView(s, prog);
+    const fansNeed = 1_000;
+    const gamesNeed = 5;
+    const cashNeed = v.offer.liquidCashGate;
+    return {
+      fansNeed,
+      gamesNeed,
+      cashNeed,
+      moveCost: v.offer.moveCost,
+      fansPct: Math.min(100, (s.fans / fansNeed) * 100),
+      gamesPct: Math.min(100, (s.gamesPublished / gamesNeed) * 100),
+      cashPct: Math.min(100, (s.cash / Math.max(1, cashNeed)) * 100),
+      canMove: v.proofsMet && v.afford.ok,
+      proofs: v.proofs as ProofResult[],
+      offerState: v.offer.state,
+      runway: v.afford.runway,
+      seatsAfter: v.dest.hqSeatsTotal,
+      constructionWeeks: v.offer.constructionWeeks,
+      weeklyOverheadAfter: v.offer.weeklyOverheadAfter,
+      activeMove: prog.activeMove,
+    };
+  }
+
+  return {
+    fansNeed: office.fanRequirement ?? 1_000,
+    gamesNeed: office.gamesRequirement ?? 5,
+    cashNeed: office.cashRequirement ?? 1_000_000,
+    moveCost: office.upgradeCost,
+    fansPct: Math.min(100, (s.fans / Math.max(1, office.fanRequirement ?? 1)) * 100),
+    gamesPct: Math.min(
+      100,
+      (s.gamesPublished / Math.max(1, office.gamesRequirement ?? 1)) * 100,
+    ),
+    cashPct: Math.min(100, (s.cash / Math.max(1, office.cashRequirement ?? 1)) * 100),
+    canMove:
+      s.fans >= (office.fanRequirement ?? 0) &&
+      s.gamesPublished >= (office.gamesRequirement ?? 0) &&
+      s.cash >= Math.max(office.cashRequirement ?? 0, office.upgradeCost),
+    proofs: [] as ProofResult[],
+    offerState: "hidden" as const,
+    runway: 0,
+    seatsAfter: 4,
+    constructionWeeks: 2,
+    weeklyOverheadAfter: 2_000,
+    activeMove: null,
   };
 }
 

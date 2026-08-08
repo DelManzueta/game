@@ -2,7 +2,7 @@
  * Studio Empire — GDT-inspired Garage presentation
  * Room-first layout. Domain mutations via useGame only.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   AUDIENCES,
   FIELD_LABELS,
@@ -18,6 +18,14 @@ import {
   getTopic,
 } from "@/lib/game/data";
 import { isGarageTopic } from "@/lib/game/content/garageSlice";
+import { ENGINE_COMPONENTS } from "@/lib/game/content/engines";
+import {
+  MENU_ROOM_ART,
+  roomArtForOffice as roomArtDefForOffice,
+  screenRoomArt,
+} from "@/lib/game/content/roomArt";
+import { platformThumb } from "@/lib/game/content/platformArt";
+import { genreIconSrc } from "@/lib/game/content/genreArt";
 import { evaluateCombo, formatCash, formatFans, generateGameTitle } from "@/lib/game/simulation";
 import { availableSizes, hasSave, useGame } from "@/lib/game/store";
 import {
@@ -79,6 +87,7 @@ export function GameApp() {
       <EventModal />
       <LoopGuideModal />
       <NotificationsInbox />
+      <OfficeOfferModal />
     </>
   );
 }
@@ -103,9 +112,9 @@ function MainMenu() {
       {/* Full-bleed 2D garage scene */}
       <div className="absolute inset-0 overflow-hidden">
         <img
-          src="/art/garage-bg.png"
+          src={MENU_ROOM_ART}
           alt=""
-          className="h-full w-full object-cover object-center"
+          className="h-full w-full object-cover object-[center_42%]"
           draggable={false}
         />
         <div className="absolute inset-0 bg-gradient-to-t from-[#1a1208]/85 via-[#1a1208]/35 to-[#1a1208]/25" />
@@ -113,13 +122,7 @@ function MainMenu() {
 
       <div className="relative z-10 flex flex-1 flex-col items-center justify-end px-4 pb-10 pt-16 sm:justify-center sm:pb-16">
         <div className="mb-5 flex flex-col items-center text-center">
-          <img
-            src="/art/founder-cut.png"
-            alt=""
-            className="mb-3 h-28 w-auto drop-shadow-lg sm:h-36"
-            draggable={false}
-          />
-          <p className="text-[11px] font-bold uppercase tracking-[0.28em] text-accent">Phase One · Garage</p>
+          <p className="text-[11px] font-bold uppercase tracking-[0.28em] text-accent drop-shadow">Phase One · Garage</p>
           <h1 className="mt-1 font-display text-4xl font-bold tracking-tight text-white drop-shadow sm:text-5xl">
             Studio Empire
           </h1>
@@ -260,12 +263,21 @@ function GdtTopChrome({ forcePause }: { forcePause: boolean }) {
   const phase = projectPhaseLabel(project);
   const pct = Math.round((project?.stageProgress || 0) * 100);
   const bugs = project?.bugs ?? 0;
-  const designOrb = project
-    ? Math.round(30 + (project.stageProgress || 0) * 40 + (project.weeksDev || 0) * 2)
+  // GDT-style dual orbs: design pair (left) + tech pair (right), grow while developing
+  const dBase = project?.designPoints ?? 0;
+  const tBase = project?.techPoints ?? 0;
+  const grow = project
+    ? Math.round((project.stageProgress || 0) * 18 + (project.weeksDev || 0) * 1.5)
     : 0;
-  const techOrb = project
-    ? Math.round(28 + (project.stageProgress || 0) * 38 + (project.weeksDev || 0) * 2)
-    : 0;
+  const designOrbA = project ? Math.max(0, Math.round(dBase * 0.45 + grow * 0.4)) : 0;
+  const designOrbB = project ? Math.max(0, Math.round(dBase * 0.55 + grow * 0.6)) : 0;
+  const techOrbA = project ? Math.max(0, Math.round(tBase * 0.5 + grow * 0.45)) : 0;
+  const techOrbB = project ? Math.max(0, Math.round(tBase * 0.5 + grow * 0.55)) : 0;
+  const phaseBarLabel = project
+    ? project.devPhase.includes("RUNNING")
+      ? phase.title
+      : phase.title
+    : "";
 
   useEffect(() => {
     if (forcePause && speed !== 0) setSpeed(0);
@@ -284,26 +296,31 @@ function GdtTopChrome({ forcePause }: { forcePause: boolean }) {
           }}
           aria-label="Menu"
         >
-          <img
-            src="/art/founder-cut.png"
-            alt=""
-            className="h-8 w-8 rounded-full object-cover object-top ring-2 ring-accent/40"
-            draggable={false}
-          />
+          <span
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-accent/25 text-xs font-bold text-accent ring-2 ring-accent/40"
+            aria-hidden
+          >
+            {(company || "S").slice(0, 1).toUpperCase()}
+          </span>
           <span className="max-w-[7rem] truncate">{company || "Menu"}</span>
         </button>
 
         {/* Project HUD — GDT top-center orbs */}
         <div className="order-last flex w-full flex-col items-center sm:order-none sm:w-auto">
           <div className="flex items-end gap-1 sm:gap-2">
-            <Orb value={bugs} label="Bugs" color="var(--color-bugs)" Icon={Bug} active={!!project} />
-            <Orb value={project ? Math.min(999, designOrb) : 0} label="Design" color="var(--color-design)" Icon={Palette} active={!!project} />
+            {/* Design orbs (warm) — classic GDT left pair */}
+            <Orb value={designOrbA} label="Design" color="var(--color-design)" Icon={Palette} active={!!project} />
+            <Orb value={designOrbB} label="Design" color="#e8941a" Icon={Palette} active={!!project} />
             <div className="hud-chip mx-0.5 min-w-[9.5rem] max-w-[14rem] px-3 py-2 text-center sm:min-w-[12rem]">
               {project ? (
                 <>
                   <div className="truncate text-sm font-bold leading-tight">{project.title}</div>
                   <div className="truncate text-[10px] text-muted">
-                    {getTopic(project.topicId)?.name}/{getGenre(project.genreId).name}
+                    {getTopic(project.topicId)?.name} / {getGenre(project.genreId).name}
+                  </div>
+                  <div className="mt-1 rounded bg-panel px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-accent">
+                    {phaseBarLabel}
+                    {project.devPhase.includes("RUNNING") ? ` · ${pct}%` : ""}
                   </div>
                   {project.devPhase.includes("RUNNING") && (
                     <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-panel">
@@ -313,16 +330,14 @@ function GdtTopChrome({ forcePause }: { forcePause: boolean }) {
                       />
                     </div>
                   )}
-                  {!project.devPhase.includes("RUNNING") && (
-                    <div className="mt-1 text-[10px] font-semibold text-accent">{phase.title}</div>
-                  )}
                 </>
               ) : (
                 <div className="py-0.5 text-sm font-semibold text-muted">No Project</div>
               )}
             </div>
-            <Orb value={project ? Math.min(999, techOrb) : 0} label="Tech" color="var(--color-tech)" Icon={Cpu} active={!!project} />
-            <Orb value={Math.floor(rp)} label="Research" color="var(--color-research)" Icon={Beaker} active always />
+            {/* Tech orbs (cool) — classic GDT right pair */}
+            <Orb value={techOrbA} label="Tech" color="var(--color-tech)" Icon={Cpu} active={!!project} />
+            <Orb value={techOrbB} label="Tech" color="#4ecb8a" Icon={Cpu} active={!!project} />
           </div>
         </div>
 
@@ -464,23 +479,17 @@ function BottomDock() {
 
 /* ═══════════════════════════ Garage room ═══════════════════════════ */
 
-function roomArtForOffice(office: number): string {
-  if (office >= 4) return "/art/office-modern.png";
-  if (office >= 2) return "/art/office-small.png";
-  return "/art/garage-bg.png";
-}
-
 function GarageRoomView() {
   const state = useGame();
   const ov = studioOverview(state);
   const setModal = useGame((s) => s.setModal);
   const setScreen = useGame((s) => s.setScreen);
   const busy = !!state.currentProject?.devPhase.includes("RUNNING");
-  const art = roomArtForOffice(state.office);
+  const art = roomArtDefForOffice(state.office);
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col items-center px-2 pt-1 sm:px-4">
-      {/* 2D room stage */}
+      {/* 2D room stage — uses your photo ladder, not the cartoon garage */}
       <button
         type="button"
         className="group relative w-full max-w-3xl overflow-hidden rounded-2xl border-2 border-border-strong shadow-[var(--shadow-soft)] outline-none ring-offset-2 focus-visible:ring-2 focus-visible:ring-focus"
@@ -491,41 +500,31 @@ function GarageRoomView() {
         aria-label={state.currentProject ? "Open desk" : "Develop new game"}
       >
         <img
-          src={art}
+          src={art.room}
           alt=""
-          className="aspect-[16/10] w-full object-cover object-[center_40%] transition duration-300 group-hover:scale-[1.02]"
+          className="aspect-[3/2] w-full object-cover transition duration-300 group-hover:scale-[1.02] sm:aspect-[16/10]"
+          style={{ objectPosition: art.objectPosition }}
           draggable={false}
         />
         {/* Ambient vignette */}
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-black/10" />
-
-        {/* Founder sprite */}
-        <img
-          src="/art/founder-cut.png"
-          alt=""
-          className={cnJoin(
-            "pointer-events-none absolute bottom-[6%] left-[8%] h-[42%] w-auto drop-shadow-md transition duration-300",
-            busy && "animate-pulse",
-          )}
-          draggable={false}
-        />
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/45 via-transparent to-black/10" />
 
         {/* Desk hotspot label */}
         <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 flex-col items-center gap-1">
-          <span className="rounded-full border border-border bg-paper/95 px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-fg shadow-md backdrop-blur-sm">
+          <span className="rounded-full border border-white/25 bg-black/55 px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-white shadow-md backdrop-blur-sm">
             {state.currentProject
               ? busy
-                ? "Coding at the desk…"
-                : "Tap to open desk"
-              : "Tap garage · start a game"}
+                ? art.hotspotBusy
+                : art.hotspotOpen
+              : art.hotspotIdle}
           </span>
         </div>
 
         {/* Project plaque */}
         {state.currentProject && (
-          <div className="absolute left-3 top-3 max-w-[70%] rounded-xl border border-border bg-paper/95 px-3 py-2 shadow-md backdrop-blur-sm">
-            <div className="truncate text-sm font-bold text-fg">{state.currentProject.title}</div>
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-accent">
+          <div className="absolute left-3 top-3 max-w-[70%] rounded-xl border border-white/20 bg-black/60 px-3 py-2 shadow-md backdrop-blur-sm">
+            <div className="truncate text-sm font-bold text-white">{state.currentProject.title}</div>
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-cyan-200">
               {ov.phase.title}
             </div>
           </div>
@@ -538,6 +537,22 @@ function GarageRoomView() {
           <Button size="lg" className="min-w-[12rem]" onClick={() => setModal("newGame")}>
             Develop New Game
           </Button>
+        ) : state.currentProject.devPhase === "READY_TO_RELEASE" ? (
+          <Button
+            size="lg"
+            className="min-w-[12rem] !bg-emerald-500 !text-white hover:!bg-emerald-400"
+            onClick={() => setScreen("develop")}
+          >
+            Finish · Release
+          </Button>
+        ) : state.currentProject.devPhase.includes("CONFIG") ? (
+          <Button size="lg" className="min-w-[12rem]" onClick={() => setScreen("develop")}>
+            Configure Stage
+          </Button>
+        ) : state.currentProject.devPhase === "POLISHING" ? (
+          <Button size="lg" className="min-w-[12rem]" onClick={() => setScreen("develop")}>
+            Finish · Polish
+          </Button>
         ) : (
           <Button size="lg" className="min-w-[12rem]" variant="secondary" onClick={() => setScreen("develop")}>
             Open Desk · {ov.phase.title}
@@ -548,21 +563,58 @@ function GarageRoomView() {
         </Button>
       </div>
 
-      {/* Office goal card */}
+      {/* Office goal card — bible proofs, no formulas computed here */}
       {state.office === 1 && ov.officeGoal && (
         <div className="game-panel mt-4 w-full max-w-md px-4 py-3 text-center text-xs">
-          <div className="mb-1 font-bold uppercase tracking-wide text-muted">Office goal</div>
-          <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 font-semibold text-fg">
-            <span>
-              Fans {formatFans(ov.fans)}/{formatFans(ov.officeGoal.fansNeed)}
-            </span>
-            <span>
-              Games {ov.gamesPublished}/{ov.officeGoal.gamesNeed}
-            </span>
-            <span>
-              Cash {formatCash(ov.cash)}/{formatCash(ov.officeGoal.cashNeed)}
-            </span>
+          <div className="mb-1 font-bold uppercase tracking-wide text-muted">
+            {ov.officeGoal.activeMove
+              ? "Move in progress"
+              : ov.officeGoal.offerState === "offered" || ov.officeGoal.offerState === "deferred"
+                ? "Office offer ready"
+                : "Office goal"}
           </div>
+          {ov.officeGoal.activeMove ? (
+            <p className="font-semibold text-fg">
+              Keys hand over week {ov.officeGoal.activeMove.completesWeek} (now W
+              {state.week}).
+            </p>
+          ) : (
+            <>
+              <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 font-semibold text-fg">
+                <span>
+                  Fans {formatFans(ov.fans)}/{formatFans(ov.officeGoal.fansNeed)}
+                </span>
+                <span>
+                  Games {ov.gamesPublished}/{ov.officeGoal.gamesNeed}
+                </span>
+                <span>
+                  Cash {formatCash(ov.cash)}/{formatCash(ov.officeGoal.cashNeed)}
+                </span>
+              </div>
+              {ov.officeGoal.proofs.length > 0 && (
+                <ul className="mt-2 space-y-0.5 text-left text-[11px] text-muted">
+                  {ov.officeGoal.proofs.map((p) => (
+                    <li key={p.id} className={p.met ? "text-good" : ""}>
+                      {p.met ? "✓" : "○"} {p.label}
+                      <span className="ml-1 opacity-70">({p.detail})</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {(ov.officeGoal.offerState === "offered" ||
+                ov.officeGoal.offerState === "deferred" ||
+                ov.officeGoal.offerState === "eligible" ||
+                ov.officeGoal.canMove) && (
+                <Button
+                  size="sm"
+                  className="mt-3"
+                  onClick={() => setModal("officeOffer")}
+                >
+                  View office offer
+                </Button>
+              )}
+            </>
+          )}
         </div>
       )}
     </div>
@@ -574,6 +626,8 @@ function GarageRoomView() {
 function DevelopOverlay() {
   const screen = useGame((s) => s.screen);
   const project = useGame((s) => s.currentProject);
+  const office = useGame((s) => s.office);
+  const deskArt = roomArtDefForOffice(office).desk;
   // Show desk panel when on develop screen, or auto when config needed on studio
   const needsDesk =
     project &&
@@ -593,9 +647,9 @@ function DevelopOverlay() {
     <div className="mx-auto mt-2 w-full max-w-lg px-3 pb-6">
       <div className="relative mb-3 overflow-hidden rounded-2xl border-2 border-border-strong shadow-[var(--shadow-card)]">
         <img
-          src="/art/desk.png"
+          src={deskArt}
           alt=""
-          className="aspect-[21/9] w-full object-cover object-center"
+          className="aspect-[21/9] w-full object-cover object-[center_50%]"
           draggable={false}
         />
         <div className="absolute inset-0 bg-gradient-to-r from-black/55 via-black/20 to-transparent" />
@@ -604,12 +658,6 @@ function DevelopOverlay() {
             <p className="text-[10px] font-bold uppercase tracking-wider text-white/80">Work desk</p>
             <p className="text-sm font-bold text-white drop-shadow">{project.title}</p>
           </div>
-          <img
-            src="/art/founder-cut.png"
-            alt=""
-            className="h-16 w-auto drop-shadow-lg sm:h-20"
-            draggable={false}
-          />
         </div>
       </div>
       <DevelopPanel />
@@ -665,6 +713,9 @@ function DevelopPanel() {
 
       {isConfig && (
         <>
+          <p className="mt-2 text-center text-xs text-muted">
+            Set time allocation for Stage {stageNum}. OK locks it in and starts work.
+          </p>
           <div className="mt-5 flex justify-center gap-4 sm:gap-6">
             {fields.map((f, i) => (
               <VerticalAllocBar
@@ -889,10 +940,10 @@ function GamesScreen() {
   const rows = libraryRows(games);
   const selected = games.find((g) => g.id === sel);
   return (
-    <div className="mx-auto w-full max-w-3xl px-3 pb-8 pt-4">
-      <h2 className="text-center text-2xl font-bold">Game History</h2>
-      <div className="mx-auto mt-1 h-px w-40 bg-border-strong" />
-      {!rows.length && <p className="mt-8 text-center text-muted">No releases yet.</p>}
+    <ScreenBackdrop screen="games">
+      <h2 className="text-center text-2xl font-bold text-white drop-shadow">Game History</h2>
+      <div className="mx-auto mt-1 h-px w-40 bg-cyan-400/50" />
+      {!rows.length && <p className="mt-8 text-center text-white/70">No releases yet.</p>}
       <ul className="mt-4 space-y-2">
         {rows.map((r) => (
           <li key={r.id}>
@@ -900,15 +951,15 @@ function GamesScreen() {
               type="button"
               onClick={() => setSel(r.id === sel ? null : r.id)}
               className={cnJoin(
-                "w-full rounded-xl border p-4 text-left",
-                sel === r.id ? "border-accent bg-accent/5" : "border-border bg-paper",
+                "w-full rounded-xl border p-4 text-left backdrop-blur-sm",
+                sel === r.id ? "border-cyan-300/60 bg-cyan-400/15" : "border-white/15 bg-black/55",
               )}
             >
               <div className="flex justify-between gap-2">
-                <span className="font-bold">{r.title}</span>
-                <span className="text-lg font-bold tabular">{r.avgReview.toFixed(1)}</span>
+                <span className="font-bold text-white">{r.title}</span>
+                <span className="text-lg font-bold tabular text-cyan-200">{r.avgReview.toFixed(1)}</span>
               </div>
-              <p className="mt-1 text-xs text-muted">
+              <p className="mt-1 text-xs text-white/65">
                 {r.genre} · {r.sales.toLocaleString()} sold · {r.revenueLabel}
               </p>
             </button>
@@ -923,9 +974,43 @@ function GamesScreen() {
           <Button size="sm" variant="secondary" onClick={() => setCampMsg(startTitleCampaign(selected.id, "flyer_run") ?? "Flyer started.")}>
             Flyer
           </Button>
-          {campMsg && <p className="w-full text-xs text-muted">{campMsg}</p>}
+          {campMsg && <p className="w-full text-xs text-white/70">{campMsg}</p>}
         </div>
       )}
+    </ScreenBackdrop>
+  );
+}
+
+
+/** Full-bleed department still behind secondary screens — your photos only. */
+function ScreenBackdrop({
+  screen,
+  children,
+}: {
+  screen: "research" | "engines" | "platforms" | "finances" | "market" | "staff" | "games" | "settings";
+  children: ReactNode;
+}) {
+  const office = useGame((s) => s.office);
+  const year = useGame((s) => s.year);
+  const art = screenRoomArt(screen, office, year);
+  return (
+    <div className="relative min-h-[calc(100dvh-8rem)]">
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <img
+          src={art.src}
+          alt=""
+          className="h-full w-full object-cover"
+          style={{ objectPosition: art.objectPosition }}
+          draggable={false}
+        />
+        <div className="absolute inset-0 bg-gradient-to-b from-black/55 via-black/50 to-black/70" />
+      </div>
+      <div className="relative z-10 mx-auto max-w-3xl px-3 pb-10 pt-4">
+        <p className="mb-1 text-center text-[10px] font-bold uppercase tracking-[0.2em] text-cyan-200/80">
+          {art.label}
+        </p>
+        {children}
+      </div>
     </div>
   );
 }
@@ -938,19 +1023,19 @@ function ResearchScreen() {
   const [msg, setMsg] = useState("");
   const available = RESEARCH.filter((r) => !researched.includes(r.id)).slice(0, 24);
   return (
-    <div className="mx-auto max-w-3xl px-3 pb-8 pt-4">
-      <h2 className="text-center text-2xl font-bold">Research</h2>
-      <div className="mx-auto mt-1 h-px w-32 bg-border-strong" />
-      <p className="mt-2 text-center text-sm text-muted">
+    <ScreenBackdrop screen="research">
+      <h2 className="text-center text-2xl font-bold text-white drop-shadow">Research</h2>
+      <div className="mx-auto mt-1 h-px w-32 bg-cyan-400/50" />
+      <p className="mt-2 text-center text-sm text-white/80">
         {Math.floor(researchPoints)} RP{active ? ` · ${active.name}` : ""}
       </p>
-      {msg && <p className="mt-2 text-center text-sm text-warn">{msg}</p>}
+      {msg && <p className="mt-2 text-center text-sm text-amber-200">{msg}</p>}
       <ul className="mt-4 space-y-2">
         {available.map((r) => (
-          <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-paper px-3 py-3">
+          <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/15 bg-black/55 px-3 py-3 backdrop-blur-sm">
             <div>
-              <div className="font-semibold">{r.name}</div>
-              <div className="text-xs text-muted">
+              <div className="font-semibold text-white">{r.name}</div>
+              <div className="text-xs text-white/65">
                 {r.category} · {r.cost} RP
               </div>
             </div>
@@ -960,44 +1045,44 @@ function ResearchScreen() {
           </li>
         ))}
       </ul>
-    </div>
+    </ScreenBackdrop>
   );
 }
 
 function StaffScreen() {
   const staff = useGame((s) => s.staff);
   return (
-    <div className="mx-auto max-w-3xl px-3 pb-8 pt-4">
-      <h2 className="text-center text-2xl font-bold">People</h2>
-      <p className="mt-2 text-center text-sm text-muted">Garage phase is founder-led.</p>
+    <ScreenBackdrop screen="staff">
+      <h2 className="text-center text-2xl font-bold text-white drop-shadow">People</h2>
+      <p className="mt-2 text-center text-sm text-white/75">Garage phase is founder-led.</p>
       <ul className="mt-4 space-y-2">
         {staff.map((m) => (
-          <li key={m.id} className="rounded-xl border border-border bg-paper px-4 py-3">
-            <div className="font-bold">{m.name}</div>
-            <div className="text-xs text-muted">
+          <li key={m.id} className="rounded-xl border border-white/15 bg-black/55 px-4 py-3 backdrop-blur-sm">
+            <div className="font-bold text-white">{m.name}</div>
+            <div className="text-xs text-white/65">
               Lv {m.level} · Design {m.design} · Tech {m.tech}
             </div>
           </li>
         ))}
       </ul>
-    </div>
+    </ScreenBackdrop>
   );
 }
 
 function EnginesScreen() {
   const engines = useGame((s) => s.engines);
   return (
-    <div className="mx-auto max-w-3xl px-3 pb-8 pt-4">
-      <h2 className="text-center text-2xl font-bold">Engines</h2>
+    <ScreenBackdrop screen="engines">
+      <h2 className="text-center text-2xl font-bold text-white drop-shadow">Engines</h2>
       <ul className="mt-4 space-y-2">
         {engines.map((e) => (
-          <li key={e.id} className="rounded-xl border border-border bg-paper px-4 py-3">
-            <div className="font-bold">{e.name}</div>
-            <div className="text-xs text-muted">{e.features.join(", ") || "Core only"}</div>
+          <li key={e.id} className="rounded-xl border border-white/15 bg-black/55 px-4 py-3 backdrop-blur-sm">
+            <div className="font-bold text-white">{e.name}</div>
+            <div className="text-xs text-white/65">{e.features.join(", ") || "Core only"}</div>
           </li>
         ))}
       </ul>
-    </div>
+    </ScreenBackdrop>
   );
 }
 
@@ -1008,17 +1093,27 @@ function PlatformsScreen() {
   const [msg, setMsg] = useState("");
   const list = PLATFORMS.filter((p) => p.year <= year + 1).slice(0, 20);
   return (
-    <div className="mx-auto max-w-3xl px-3 pb-8 pt-4">
-      <h2 className="text-center text-2xl font-bold">Systems</h2>
-      {msg && <p className="mt-2 text-center text-sm text-warn">{msg}</p>}
+    <ScreenBackdrop screen="platforms">
+      <h2 className="text-center text-2xl font-bold text-white drop-shadow">Systems</h2>
+      {msg && <p className="mt-2 text-center text-sm text-amber-200">{msg}</p>}
       <ul className="mt-4 space-y-2">
         {list.map((p) => {
           const owned = unlocked.includes(p.id);
+          const thumb = platformThumb(p.id);
           return (
-            <li key={p.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-paper px-3 py-3">
-              <div>
-                <div className="font-semibold">{p.name}</div>
-                <div className="text-xs text-muted">{p.year}</div>
+            <li key={p.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/15 bg-black/55 px-3 py-3 backdrop-blur-sm">
+              <div className="flex min-w-0 items-center gap-3">
+                {thumb ? (
+                  <img src={thumb} alt="" className="h-12 w-12 shrink-0 rounded-lg object-cover ring-1 ring-white/20" draggable={false} />
+                ) : (
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-white/10 text-[10px] font-bold text-white/70">
+                    {p.short}
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <div className="truncate font-semibold text-white">{p.name}</div>
+                  <div className="text-xs text-white/65">{p.year}</div>
+                </div>
               </div>
               {owned ? (
                 <Badge tone="good">Owned</Badge>
@@ -1031,7 +1126,7 @@ function PlatformsScreen() {
           );
         })}
       </ul>
-    </div>
+    </ScreenBackdrop>
   );
 }
 
@@ -1040,23 +1135,23 @@ function FinancesScreen() {
   const ledger = useGame((s) => s.ledger);
   const entries = ledger?.entries?.slice(-30).reverse() ?? [];
   return (
-    <div className="mx-auto max-w-3xl px-3 pb-8 pt-4">
-      <h2 className="text-center text-2xl font-bold">Finances</h2>
-      <p className="mt-2 text-center text-3xl font-bold tabular text-cash">{formatCash(cash)}</p>
+    <ScreenBackdrop screen="finances">
+      <h2 className="text-center text-2xl font-bold text-white drop-shadow">Finances</h2>
+      <p className="mt-2 text-center text-3xl font-bold tabular text-emerald-300">{formatCash(cash)}</p>
       <ul className="mt-4 space-y-1.5">
         {entries.map((e) => (
-          <li key={e.id} className="flex justify-between gap-3 rounded-lg border border-border bg-paper px-3 py-2 text-sm">
-            <span className="truncate text-muted">
+          <li key={e.id} className="flex justify-between gap-3 rounded-lg border border-white/15 bg-black/55 px-3 py-2 text-sm backdrop-blur-sm">
+            <span className="truncate text-white/70">
               W{e.week} · {e.label}
             </span>
-            <span className={cnJoin("tabular font-bold", e.amount >= 0 ? "text-good" : "text-bad")}>
+            <span className={cnJoin("tabular font-bold", e.amount >= 0 ? "text-emerald-300" : "text-red-300")}>
               {formatCash(e.amount)}
             </span>
           </li>
         ))}
-        {!entries.length && <li className="text-center text-sm text-muted">No ledger entries yet.</li>}
+        {!entries.length && <li className="text-center text-sm text-white/60">No ledger entries yet.</li>}
       </ul>
-    </div>
+    </ScreenBackdrop>
   );
 }
 
@@ -1064,29 +1159,29 @@ function MarketScreen() {
   const sales = useGame((s) => s.activeSales);
   const fans = useGame((s) => s.fans);
   return (
-    <div className="mx-auto max-w-3xl px-3 pb-8 pt-4">
-      <h2 className="text-center text-2xl font-bold">Market</h2>
-      <p className="mt-2 text-center text-sm text-muted">{formatFans(fans)} fans</p>
+    <ScreenBackdrop screen="market">
+      <h2 className="text-center text-2xl font-bold text-white drop-shadow">Market</h2>
+      <p className="mt-2 text-center text-sm text-white/75">{formatFans(fans)} fans</p>
       <ul className="mt-4 space-y-2">
         {sales
           .filter((g) => g.onSale)
           .map((g) => (
-            <li key={g.id} className="rounded-xl border border-border bg-paper p-4">
+            <li key={g.id} className="rounded-xl border border-white/15 bg-black/55 p-4 backdrop-blur-sm">
               <div className="flex justify-between">
-                <span className="font-bold">{g.title}</span>
-                <span className="tabular font-bold">{g.avgReview.toFixed(1)}</span>
+                <span className="font-bold text-white">{g.title}</span>
+                <span className="tabular font-bold text-cyan-200">{g.avgReview.toFixed(1)}</span>
               </div>
-              <p className="mt-1 text-sm text-muted">
+              <p className="mt-1 text-sm text-white/70">
                 {g.sales.toLocaleString()} units · {formatCash(g.revenue)}
               </p>
-              <p className="mt-2 text-xs text-subtle">{explainSales(g)}</p>
+              <p className="mt-2 text-xs text-white/55">{explainSales(g)}</p>
             </li>
           ))}
         {!sales.filter((g) => g.onSale).length && (
-          <li className="text-center text-sm text-muted">No titles selling.</li>
+          <li className="text-center text-sm text-white/60">No titles selling.</li>
         )}
       </ul>
-    </div>
+    </ScreenBackdrop>
   );
 }
 
@@ -1149,9 +1244,10 @@ function NewGameModal() {
   const cash = useGame((s) => s.cash);
   const office = useGame((s) => s.office);
   const staffCount = useGame((s) => s.staff.length);
+  const year = useGame((s) => s.year);
   const topics = TOPICS.filter((t) => unlockedTopics.includes(t.id) && (!garageSlice || isGarageTopic(t.id)));
   const genres = GENRES.filter((g) => unlockedGenres.includes(g.id));
-  const platforms = PLATFORMS.filter((p) => unlockedPlatforms.includes(p.id));
+  const platforms = PLATFORMS.filter((p) => unlockedPlatforms.includes(p.id) && p.year <= year);
   const sizes = availableSizes(researched, unlocks, { office, staffCount });
   const [topicId, setTopicId] = useState(topics[0]?.id ?? "space");
   const [genreId, setGenreId] = useState<GenreId>((genres[0]?.id as GenreId) ?? "action");
@@ -1159,13 +1255,26 @@ function NewGameModal() {
   const [audience, setAudience] = useState<AudienceId>("everyone");
   const [size, setSize] = useState<GameSize>("small");
   const [engineId, setEngineId] = useState(engines[0]?.id ?? "basic");
+  const [featureIds, setFeatureIds] = useState<string[]>(["basic_2d_v1"]);
   const [title, setTitle] = useState("");
   const [marketing, setMarketing] = useState(0);
   const [err, setErr] = useState("");
-  const [step, setStep] = useState<"topic" | "genre" | "details">("topic");
+  // Classic GDT path: concept → topic → genre → platform → tech → start
+  const [step, setStep] = useState<"concept" | "topic" | "genre" | "platform" | "tech">("concept");
   const [topicQuery, setTopicQuery] = useState("");
   const visibleTopics = topics.filter((topic) =>
     topic.name.toLocaleLowerCase().includes(topicQuery.trim().toLocaleLowerCase()),
+  );
+
+  const graphicOptions = ENGINE_COMPONENTS.filter(
+    (c) =>
+      c.category === "Graphics" &&
+      (c.starting || researched.includes(c.id) || researched.includes(c.engineFeature ?? "")),
+  );
+  const soundOptions = ENGINE_COMPONENTS.filter(
+    (c) =>
+      c.category === "Sound" &&
+      (c.starting || researched.includes(c.id) || researched.includes(c.engineFeature ?? "")),
   );
 
   useEffect(() => {
@@ -1174,126 +1283,120 @@ function NewGameModal() {
       setGenreId((genres[0]?.id as GenreId) ?? "action");
       setPlatformId(platforms[0]?.id ?? "pc");
       setEngineId(engines[0]?.id ?? "basic");
+      setFeatureIds(["basic_2d_v1"]);
       setSize("small");
       setTitle("");
       setMarketing(0);
       setErr("");
-      setStep("topic");
+      setStep("concept");
       setTopicQuery("");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modal]);
 
-  const cost = SIZE_STATS[size].cost + marketing;
+  const featureCost = featureIds.reduce((sum, id) => {
+    const c = ENGINE_COMPONENTS.find((x) => x.id === id);
+    if (!c || c.starting) return sum;
+    return sum + 5000;
+  }, 0);
+  const cost = SIZE_STATS[size].cost + marketing + featureCost;
   const combo = evaluateCombo({ topicId, genreId, platformId, audience });
+  const marketTotal = platforms.reduce((s, p) => s + p.marketSize, 0) || 1;
+
+  const titleByStep: Record<typeof step, string> = {
+    concept: "Game Concept",
+    topic: "Pick Topic",
+    genre: "Pick Genre",
+    platform: "Pick Platform",
+    tech: "Game Concept",
+  };
+
+  const chipBtn = (active: boolean) =>
+    cnJoin(
+      "min-h-12 rounded-xl border-2 px-3 py-3 text-left text-sm font-bold transition active:scale-[0.98]",
+      active
+        ? "border-[var(--glass-cyan)] bg-[rgba(77,240,255,0.18)] text-white shadow-[0_0_12px_rgba(77,240,255,0.25)]"
+        : "border-white/20 bg-[rgba(8,28,38,0.85)] text-white hover:border-[var(--glass-cyan)]/60",
+    );
+
+  const canStart =
+    !!topicId &&
+    !!genreId &&
+    !!platformId &&
+    featureIds.length > 0 &&
+    cash >= cost;
 
   return (
-    <Modal open={modal === "newGame"} onClose={() => setModal(null)} title={step === "topic" ? "Pick Topic" : step === "genre" ? "Pick Genre" : "New Game"} wide>
-      {step === "topic" && (
-        <div>
-          <SearchField
-            value={topicQuery}
-            onChange={(event) => setTopicQuery(event.target.value)}
-            placeholder="Search topics…"
-            aria-label="Search topics"
-            className="mb-3"
-          />
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {visibleTopics.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => {
-                  setTopicId(t.id);
-                  setStep("genre");
-                }}
-                className={cnJoin(
-                  "rounded-xl border-2 px-3 py-4 text-left transition",
-                  topicId === t.id ? "border-accent bg-accent/10" : "border-border bg-elevated hover:border-accent/50",
-                )}
-              >
-                <div className="text-sm font-bold">{t.name}</div>
-              </button>
-            ))}
-          </div>
-          {visibleTopics.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center">
-              <p className="font-semibold text-text-primary">No topics found</p>
-              <p className="mt-1 text-sm text-text-secondary">
-                Try another name or clear your search.
-              </p>
-            </div>
-          ) : null}
-        </div>
-      )}
-      {step === "genre" && (
-        <div>
-          <button type="button" className="mb-3 text-xs font-bold text-muted underline" onClick={() => setStep("topic")}>
-            ← Topics
-          </button>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {genres.map((g) => (
-              <button
-                key={g.id}
-                type="button"
-                onClick={() => {
-                  setGenreId(g.id as GenreId);
-                  setStep("details");
-                }}
-                className={cnJoin(
-                  "rounded-xl border-2 px-3 py-4 text-left transition",
-                  genreId === g.id ? "border-accent bg-accent/10" : "border-border bg-elevated hover:border-accent/50",
-                )}
-              >
-                <div className="text-sm font-bold">{g.name}</div>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-      {step === "details" && (
+    <Modal
+      open={modal === "newGame"}
+      onClose={() => setModal(null)}
+      title={titleByStep[step]}
+      wide
+    >
+      {/* ── Concept hub (GDT Game Concept) ── */}
+      {step === "concept" && (
         <div className="space-y-3">
-          <button type="button" className="text-xs font-bold text-muted underline" onClick={() => setStep("genre")}>
-            ← Genres
-          </button>
-          <p className="text-center text-sm font-semibold">
-            {getTopic(topicId)?.name} · {getGenre(genreId).name}
-          </p>
           <div>
-            <label className="mb-1 block text-xs font-bold uppercase text-subtle">Working title</label>
-            <Input value={title} placeholder={generateGameTitle(topicId, genreId)} onChange={(e) => setTitle(e.target.value)} maxLength={40} className="!bg-elevated" />
+            <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-[var(--glass-muted)]">
+              Working title
+            </label>
+            <Input
+              value={title}
+              placeholder={generateGameTitle(topicId, genreId)}
+              onChange={(e) => setTitle(e.target.value)}
+              maxLength={40}
+              className="!border-white/20 !bg-[rgba(8,28,38,0.9)] !text-white"
+            />
           </div>
-          <div>
-            <label className="mb-1 block text-xs font-bold uppercase text-subtle">Platform</label>
-            <div className="flex flex-wrap gap-2">
-              {platforms.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => setPlatformId(p.id)}
-                  className={cnJoin(
-                    "rounded-lg border px-3 py-2 text-sm font-semibold",
-                    platformId === p.id ? "border-accent bg-accent/15" : "border-border bg-elevated",
-                  )}
-                >
-                  {p.name}
-                </button>
-              ))}
-            </div>
+          <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+            <span className="font-semibold text-[var(--glass-muted)]">Dev cost</span>
+            <span className={cnJoin("font-bold tabular", cash >= cost ? "text-cyan-200" : "text-red-300")}>
+              {formatCash(cost)}
+            </span>
           </div>
+
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <button type="button" className={chipBtn(!!topicId)} onClick={() => setStep("topic")}>
+              <div className="text-[10px] font-bold uppercase tracking-wide text-cyan-200/80">Topic</div>
+              <div>{getTopic(topicId)?.name ?? "Pick Topic"}</div>
+            </button>
+            <button type="button" className={chipBtn(!!genreId)} onClick={() => setStep("genre")}>
+              <div className="text-[10px] font-bold uppercase tracking-wide text-cyan-200/80">Genre</div>
+              <div className="flex items-center gap-2">
+                <img
+                  src={genreIconSrc(genreId)}
+                  alt=""
+                  className="h-7 w-7 shrink-0 rounded-md object-contain"
+                  draggable={false}
+                />
+                <span>{getGenre(genreId).name}</span>
+              </div>
+            </button>
+            <button type="button" className={chipBtn(!!platformId)} onClick={() => setStep("platform")}>
+              <div className="text-[10px] font-bold uppercase tracking-wide text-cyan-200/80">Platform</div>
+              <div>{getPlatform(platformId)?.name ?? "Pick Platform"}</div>
+            </button>
+            <button type="button" className={chipBtn(featureIds.length > 0)} onClick={() => setStep("tech")}>
+              <div className="text-[10px] font-bold uppercase tracking-wide text-cyan-200/80">Tech pack</div>
+              <div className="truncate">
+                {featureIds
+                  .map((id) => ENGINE_COMPONENTS.find((c) => c.id === id)?.name ?? id)
+                  .join(" · ")
+                  .replace("Basic 2D Graphics V1", "2D Graphics V1") || "Choose graphics"}
+              </div>
+            </button>
+          </div>
+
           {(unlocks.audience === "owned" || flags.audience) && (
             <div>
-              <label className="mb-1 block text-xs font-bold uppercase text-subtle">Audience</label>
+              <label className="mb-1 block text-xs font-bold uppercase text-[var(--glass-muted)]">Audience</label>
               <div className="flex flex-wrap gap-2">
                 {AUDIENCES.map((a) => (
                   <button
                     key={a.id}
                     type="button"
                     onClick={() => setAudience(a.id as AudienceId)}
-                    className={cnJoin(
-                      "rounded-lg border px-3 py-2 text-sm font-semibold",
-                      audience === a.id ? "border-accent bg-accent/15" : "border-border bg-elevated",
-                    )}
+                    className={chipBtn(audience === a.id)}
                   >
                     {a.name}
                   </button>
@@ -1301,57 +1404,28 @@ function NewGameModal() {
               </div>
             </div>
           )}
-          <div>
-            <label className="mb-1 block text-xs font-bold uppercase text-subtle">Size</label>
-            <div className="flex flex-wrap gap-2">
-              {sizes.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => setSize(s)}
-                  className={cnJoin(
-                    "rounded-lg border px-3 py-2 text-sm font-semibold capitalize",
-                    size === s ? "border-accent bg-accent/15" : "border-border bg-elevated",
-                  )}
-                >
-                  {s} ({formatCash(SIZE_STATS[s].cost)})
-                </button>
-              ))}
-            </div>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-bold uppercase text-subtle">Engine</label>
-            <div className="flex flex-wrap gap-2">
-              {engines.map((e) => (
-                <button
-                  key={e.id}
-                  type="button"
-                  onClick={() => setEngineId(e.id)}
-                  className={cnJoin(
-                    "rounded-lg border px-3 py-2 text-sm font-semibold",
-                    engineId === e.id ? "border-accent bg-accent/15" : "border-border bg-elevated",
-                  )}
-                >
-                  {e.name}
-                </button>
-              ))}
-            </div>
-          </div>
-          {(unlocks.marketing === "owned" || flags.marketing) && (
+
+          {sizes.length > 1 && (
             <div>
-              <label className="mb-1 block text-xs font-bold uppercase text-subtle">
-                Marketing (${marketing}) — awareness only
-              </label>
-              <input type="range" min={0} max={50000} step={1000} value={marketing} onChange={(e) => setMarketing(Number(e.target.value))} />
+              <label className="mb-1 block text-xs font-bold uppercase text-[var(--glass-muted)]">Size</label>
+              <div className="flex flex-wrap gap-2">
+                {sizes.map((s) => (
+                  <button key={s} type="button" onClick={() => setSize(s)} className={chipBtn(size === s)}>
+                    {s} ({formatCash(SIZE_STATS[s].cost)})
+                  </button>
+                ))}
+              </div>
             </div>
           )}
-          <div className="rounded-xl border border-border bg-elevated px-3 py-2 text-center text-xs text-muted">
-            Fit {combo.topicGenre}/{combo.platformGenre} · Cost {formatCash(cost)} · Cash {formatCash(cash)}
-          </div>
-          {err && <p className="text-center text-sm text-bad">{err}</p>}
+
+          <p className="text-center text-xs text-[var(--glass-muted)]">
+            Fit {combo.topicGenre}/{combo.platformGenre} · Cash {formatCash(cash)}
+          </p>
+          {err && <p className="text-center text-sm text-red-300">{err}</p>}
           <Button
-            className="w-full"
             size="lg"
+            className="w-full"
+            disabled={!canStart}
             onClick={() => {
               const msg = startProject({
                 title: title || generateGameTitle(topicId, genreId),
@@ -1362,12 +1436,209 @@ function NewGameModal() {
                 size,
                 engineId,
                 marketingSpend: marketing,
+                features: featureIds
+                  .map((id) => ENGINE_COMPONENTS.find((c) => c.id === id)?.engineFeature ?? id)
+                  .filter(Boolean),
               });
               if (msg) setErr(msg);
-              else setScreen("develop");
             }}
           >
-            Begin Stage 1
+            Start Development
+          </Button>
+        </div>
+      )}
+
+      {/* ── Pick Topic ── */}
+      {step === "topic" && (
+        <div>
+          <button type="button" className="mb-3 text-xs font-bold text-cyan-200 underline" onClick={() => setStep("concept")}>
+            ← Game Concept
+          </button>
+          <SearchField
+            value={topicQuery}
+            onChange={(event) => setTopicQuery(event.target.value)}
+            placeholder="Search topics…"
+            aria-label="Search topics"
+            className="mb-3"
+          />
+          <div className="grid grid-cols-2 gap-2">
+            {visibleTopics.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => {
+                  setTopicId(t.id);
+                  setStep("concept");
+                }}
+                className={chipBtn(topicId === t.id)}
+              >
+                {t.name}
+              </button>
+            ))}
+          </div>
+          {visibleTopics.length === 0 && (
+            <p className="mt-4 text-center text-sm text-[var(--glass-muted)]">No topics found</p>
+          )}
+        </div>
+      )}
+
+      {/* ── Pick Genre ── */}
+      {step === "genre" && (
+        <div>
+          <button type="button" className="mb-3 text-xs font-bold text-cyan-200 underline" onClick={() => setStep("concept")}>
+            ← Game Concept
+          </button>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {genres.map((g) => {
+              const selected = genreId === g.id;
+              return (
+                <button
+                  key={g.id}
+                  type="button"
+                  onClick={() => {
+                    setGenreId(g.id as GenreId);
+                    setStep("concept");
+                  }}
+                  className={cnJoin(
+                    "flex flex-col items-center gap-2 rounded-xl border-2 px-2 py-3 text-center transition",
+                    selected
+                      ? "border-cyan-300/80 bg-[rgba(20,40,55,0.92)] text-white shadow-[0_0_16px_rgba(60,220,240,0.25)]"
+                      : "border-white/15 bg-[rgba(12,22,32,0.88)] text-white/90 hover:border-cyan-200/40 hover:bg-[rgba(18,34,48,0.95)]",
+                  )}
+                >
+                  <img
+                    src={genreIconSrc(g.id as GenreId)}
+                    alt=""
+                    className="h-14 w-14 object-contain drop-shadow-md sm:h-16 sm:w-16"
+                    draggable={false}
+                  />
+                  <span className="text-sm font-bold tracking-tight">{g.name}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Pick Platform (cards: cost + market + fit) ── */}
+      {step === "platform" && (
+        <div>
+          <button type="button" className="mb-3 text-xs font-bold text-cyan-200 underline" onClick={() => setStep("concept")}>
+            ← Game Concept
+          </button>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {platforms.map((p) => {
+              const share = Math.round((p.marketSize / marketTotal) * 1000) / 10;
+              const fit = p.genreAffinity[genreId] ?? "ok";
+              const fitLabel =
+                fit === "great" ? "★★★" : fit === "good" ? "★★" : fit === "ok" ? "★" : "·";
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => {
+                    setPlatformId(p.id);
+                    setStep("concept");
+                  }}
+                  className={cnJoin(
+                    "rounded-xl border-2 p-3 text-left transition",
+                    platformId === p.id
+                      ? "border-[var(--glass-cyan)] bg-[rgba(77,240,255,0.15)]"
+                      : "border-white/15 bg-[rgba(8,28,38,0.9)]",
+                  )}
+                >
+                  <div className="text-base font-bold text-white">{p.name}</div>
+                  <div className="mt-2 space-y-1 text-xs text-[var(--glass-muted)]">
+                    <div className="flex justify-between">
+                      <span>Dev cost</span>
+                      <span className="font-bold text-amber-200">
+                        {p.licenseCost === 0 && p.id === "pc" ? formatCash(SIZE_STATS[size].cost) : formatCash(Math.max(SIZE_STATS[size].cost, Math.round(SIZE_STATS[size].cost * (0.8 + p.marketSize * 0.3))))}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Market share</span>
+                      <span className="font-bold text-cyan-200">{share.toFixed(1)}%</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Genre match</span>
+                      <span className="font-bold text-white">
+                        {fitLabel} {fit}
+                      </span>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          {platforms.length === 0 && (
+            <p className="text-center text-sm text-[var(--glass-muted)]">No platforms unlocked yet — PC should be day one.</p>
+          )}
+        </div>
+      )}
+
+      {/* ── Tech pack (graphics / sound) ── */}
+      {step === "tech" && (
+        <div className="space-y-4">
+          <button type="button" className="text-xs font-bold text-cyan-200 underline" onClick={() => setStep("concept")}>
+            ← Game Concept
+          </button>
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="text-xs font-bold uppercase tracking-wide text-[var(--glass-muted)]">Graphics</h3>
+              <span className="text-xs font-bold text-amber-200">+{formatCash(featureCost)}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {graphicOptions.map((c) => {
+                const on = featureIds.includes(c.id);
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => {
+                      // one graphics pick
+                      setFeatureIds((prev) => {
+                        const withoutGfx = prev.filter(
+                          (id) => ENGINE_COMPONENTS.find((x) => x.id === id)?.category !== "Graphics",
+                        );
+                        return [...withoutGfx, c.id];
+                      });
+                    }}
+                    className={chipBtn(on)}
+                  >
+                    <div>{c.name}</div>
+                    <div className="mt-1 text-[10px] text-cyan-200/80">{c.starting ? "Free" : "+$5.0K"}</div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          {soundOptions.length > 0 && (
+            <div>
+              <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-[var(--glass-muted)]">Sound</h3>
+              <div className="grid grid-cols-2 gap-2">
+                {soundOptions.map((c) => {
+                  const on = featureIds.includes(c.id);
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => {
+                        setFeatureIds((prev) =>
+                          on ? prev.filter((id) => id !== c.id) : [...prev, c.id],
+                        );
+                      }}
+                      className={chipBtn(on)}
+                    >
+                      <div>{c.name}</div>
+                      <div className="mt-1 text-[10px] text-cyan-200/80">{c.starting ? "Free" : "+$5.0K"}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          <Button size="lg" className="w-full" onClick={() => setStep("concept")}>
+            Done
           </Button>
         </div>
       )}
@@ -1375,7 +1646,6 @@ function NewGameModal() {
   );
 }
 
-// helper used in NewGameModal after start
 function setScreen(id: ScreenId) {
   useGame.getState().setScreen(id);
 }
@@ -1860,6 +2130,126 @@ function NotificationsInbox() {
             Clear all
           </Button>
         )}
+      </div>
+    </Modal>
+  );
+}
+
+/* ═══════════════════════════ First office offer (bible §5.4 / §31.1) ═══════════════════════════ */
+
+function OfficeOfferModal() {
+  const modal = useGame((s) => s.modal);
+  const setModal = useGame((s) => s.setModal);
+  const state = useGame();
+  const acceptOfficeOffer = useGame((s) => s.acceptOfficeOffer);
+  const deferOfficeOffer = useGame((s) => s.deferOfficeOffer);
+  const [err, setErr] = useState<string | null>(null);
+
+  const open = modal === "officeOffer";
+  const ov = studioOverview(state);
+  const goal = ov.officeGoal;
+
+  if (!open) return null;
+
+  const moveCost = goal?.moveCost ?? 150_000;
+  const seatsAfter = goal?.seatsAfter ?? 4;
+  const construction = goal?.constructionWeeks ?? 2;
+  const overhead = goal?.weeklyOverheadAfter ?? 2_000;
+  const cashAfter = state.cash - moveCost;
+  const runway = goal?.runway ?? 0;
+  const canAccept = goal?.canMove ?? false;
+
+  return (
+    <Modal
+      open={open}
+      onClose={() => setModal(null)}
+      title="A real office is possible"
+      description="Optional move — stay in the garage as long as you want."
+      wide
+    >
+      <div className="space-y-3 text-sm">
+        <p className="text-muted">
+          You have proven the garage. Moving unlocks hiring capacity (Checkpoint 2) and a higher burn rate.
+          No free staff. Campaign progress is preserved.
+        </p>
+
+        <div className="grid grid-cols-2 gap-2 rounded-xl border border-border bg-elevated p-3 text-xs">
+          <div>
+            <div className="font-bold uppercase tracking-wide text-muted">Now</div>
+            <div className="mt-1 font-semibold text-fg">1 HQ seat · Founder Garage</div>
+            <div className="text-muted">$0 weekly overhead</div>
+          </div>
+          <div>
+            <div className="font-bold uppercase tracking-wide text-muted">After move</div>
+            <div className="mt-1 font-semibold text-fg">
+              {seatsAfter} HQ seats · First Office
+            </div>
+            <div className="text-muted">{formatCash(overhead)}/week overhead</div>
+          </div>
+        </div>
+
+        <ul className="space-y-1 text-xs">
+          <li>
+            Move cost: <strong>{formatCash(moveCost)}</strong>
+          </li>
+          <li>
+            Construction: <strong>{construction} week(s)</strong>
+          </li>
+          <li>
+            Cash after move:{" "}
+            <strong className={cashAfter < 0 ? "text-bad" : ""}>{formatCash(cashAfter)}</strong>
+          </li>
+          <li>
+            Est. runway:{" "}
+            <strong>
+              {runway >= 500
+                ? "stable (ops cash covers burn)"
+                : `~${Math.max(0, Math.floor(runway))} weeks`}
+            </strong>{" "}
+            (need 26)
+          </li>
+        </ul>
+
+        {goal?.proofs && goal.proofs.length > 0 && (
+          <div>
+            <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-muted">
+              Proofs
+            </div>
+            <ul className="space-y-0.5 text-xs">
+              {goal.proofs.map((p) => (
+                <li key={p.id} className={p.met ? "text-good" : "text-muted"}>
+                  {p.met ? "✓" : "○"} {p.label} — {p.detail}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {err && <p className="text-xs font-semibold text-bad">{err}</p>}
+
+        <div className="flex flex-col gap-2 pt-1 sm:flex-row">
+          <Button
+            className="flex-1"
+            disabled={!canAccept}
+            onClick={() => {
+              const msg = acceptOfficeOffer();
+              if (msg) setErr(msg);
+              else setErr(null);
+            }}
+          >
+            Accept move
+          </Button>
+          <Button
+            className="flex-1"
+            variant="secondary"
+            onClick={() => {
+              deferOfficeOffer();
+              setErr(null);
+            }}
+          >
+            Decide later
+          </Button>
+        </div>
       </div>
     </Modal>
   );

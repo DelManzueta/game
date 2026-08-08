@@ -25,6 +25,17 @@ import {
   migrateUnlocks,
 } from "./progression/service";
 import {
+  createStudioProgression,
+  migrateStudioProgression,
+  tickOfficeOffers,
+  tickActiveMove,
+  tickTenure,
+  acceptFirstOfficeMove,
+  deferFirstOfficeOffer,
+  firstOfficeOfferView,
+  isFeatureEnabled,
+} from "./progression";
+import {
   computeReviews,
   computeSalesCurve,
   developWeek,
@@ -110,6 +121,7 @@ import type {
   GenreId,
   ModalId,
   Notification,
+  ReleasedGame,
   ResearchJob,
   ScreenId,
   Speed,
@@ -292,6 +304,7 @@ function initialState(): GameState {
     researchPointsFrac: 0,
     seriesRecords: {},
     ledger: emptyLedger(70000),
+    progression: createStudioProgression("classic_35"),
   };
 }
 
@@ -1058,6 +1071,10 @@ interface Actions {
   getCandidates: () => StaffMember[];
   licensePlatform: (id: string) => string | null;
   upgradeOffice: () => string | null;
+  /** Accept first-office move (bible offer path). */
+  acceptOfficeOffer: () => string | null;
+  /** Defer first-office offer — remains available, economics frozen. */
+  deferOfficeOffer: () => string | null;
   buildEngine: (name: string, featureIds: string[]) => string | null;
   takeContract: (id: string) => string | null;
   dismissNotifications: () => void;
@@ -1132,6 +1149,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     ];
     s.dirty = true;
     s.campaignSeed = seedFromString(`${s.companyName}|garage|${pirateMode ? 1 : 0}`);
+    s.progression = createStudioProgression("classic_35");
     if (USE_MARKET_V2) s.market = initMarket(s.campaignSeed, 0);
     set(s);
   },
@@ -1144,6 +1162,10 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       if (!parsed) return false;
       const data = parsed as Partial<GameState>;
       const base = initialState();
+      const migratedProgression = migrateStudioProgression(
+        data.progression,
+        Number(data.office) || 1,
+      );
       const staff = (data.staff ?? base.staff).map((m) => ({
         ...m,
         energy: m.id === "founder" ? 100 : (m.energy ?? 100),
@@ -1157,7 +1179,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         modal:
           data.pendingEvent != null
             ? "event"
-            : data.modal === "reviews" || data.modal === "report"
+            : data.modal === "reviews" || data.modal === "report" || data.modal === "officeOffer"
               ? (data.modal as GameState["modal"])
               : null,
         pendingEvent: data.pendingEvent ?? null,
@@ -1178,6 +1200,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
           : data.market ?? null,
         knowledge: migrateKnowledge((data as GameState).knowledge),
         garageSlice: (data as GameState).garageSlice ?? true,
+        progression: migratedProgression,
         dirty: false,
         settings: {
           ...base.settings,
@@ -1326,6 +1349,28 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     next.year = date.year;
     next.month = date.month;
     next.dirty = true;
+
+    // Progression tenure + office offers + move completion (CP1)
+    if (isFeatureEnabled("officeFoundation")) {
+      let prog = migrateStudioProgression(next.progression, next.office);
+      prog = tickTenure(prog);
+      const moved = tickActiveMove(next, prog);
+      next = moved.state;
+      prog = moved.progression;
+      prog = tickOfficeOffers(next, prog);
+      next.progression = prog;
+      // Surface first-office offer modal once when newly offered
+      const fo = prog.offers.first_office;
+      if (
+        fo?.state === "offered" &&
+        fo.offeredWeek === next.week &&
+        next.modal !== "officeOffer" &&
+        !next.pendingEvent
+      ) {
+        next.modal = "officeOffer";
+        next.speed = 0;
+      }
+    }
 
     const payroll = next.staff.reduce((s, m) => s + m.salary, 0);
     next.cash -= payroll / 4;
@@ -1947,20 +1992,23 @@ export const useGame = create<GameState & Actions>((set, get) => ({
   },
 
   upgradeOffice: () => {
+    // Prefer progression offer path when foundation flag is on
+    if (isFeatureEnabled("officeFoundation")) {
+      return get().acceptOfficeOffer();
+    }
     const state = get();
-    const info = OFFICE_INFO[state.office];
-    if (state.office >= 4) return "Already max office.";
-    // Garage → Small Office requires fans, releases, cash, and move cost.
+    const info = OFFICE_INFO[state.office as 1 | 2 | 3 | 4 | 5];
+    if (state.office >= 5) return "Already max office.";
     if (state.office === 1) {
-      const fansNeed = info.fanRequirement ?? 25000;
-      const gamesNeed = info.gamesRequirement ?? 3;
-      const cashNeed = info.cashRequirement ?? 300000;
+      const fansNeed = info.fanRequirement ?? 1000;
+      const gamesNeed = info.gamesRequirement ?? 5;
+      const cashNeed = info.cashRequirement ?? 1_000_000;
       if (state.fans < fansNeed) return `Need ${fansNeed.toLocaleString()} fans (have ${state.fans.toLocaleString()}).`;
       if (state.gamesPublished < gamesNeed) return `Need ${gamesNeed} released games.`;
       if (state.cash < cashNeed) return `Need ${formatCash(cashNeed)} on hand.`;
     }
     if (state.cash < info.upgradeCost) return `Need ${formatCash(info.upgradeCost)} for the move.`;
-    const nextOffice = (state.office + 1) as 1 | 2 | 3 | 4;
+    const nextOffice = (state.office + 1) as 1 | 2 | 3 | 4 | 5;
     let next: GameState = {
       ...state,
       cash: state.cash - info.upgradeCost,
@@ -1969,13 +2017,36 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       notifications: pushNote(
         state,
         nextOffice === 2
-          ? `Moved into ${OFFICE_INFO[nextOffice].name}. Garage phase complete — staff systems unlock later.`
+          ? `Moved into ${OFFICE_INFO[nextOffice].name}.`
           : `Moved to ${OFFICE_INFO[nextOffice].name}.`,
         "good",
       ),
     };
     next = applyUnlockNotes(next);
     set(next);
+    return null;
+  },
+
+  acceptOfficeOffer: () => {
+    const state = get();
+    const prog = migrateStudioProgression(state.progression, state.office);
+    const result = acceptFirstOfficeMove(state, prog);
+    if (!result.ok) return result.error;
+    const next: GameState = applyUnlockNotes({
+      ...result.state,
+      progression: result.progression,
+      modal: null,
+    });
+    set(next);
+    return null;
+  },
+
+  deferOfficeOffer: () => {
+    const state = get();
+    const prog = migrateStudioProgression(state.progression, state.office);
+    const result = deferFirstOfficeOffer(state, prog);
+    if (!result.ok) return result.error;
+    set({ ...result.state, progression: result.progression, modal: null });
     return null;
   },
 
@@ -2431,14 +2502,70 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         );
         break;
       case "office_ready":
-        next.fans = Math.max(next.fans, 25_000);
-        next.cash = Math.max(next.cash, 1_000_000);
+        // Bible garage gate: 5 releases, 1k fans, profitable title, Y3+, $1M liquid
+        next.fans = Math.max(next.fans, 1_000);
+        next.cash = Math.max(next.cash, 1_200_000);
         next.gamesPublished = Math.max(next.gamesPublished, 5);
-        next.week = Math.max(next.week, 84);
+        next.totalRevenue = Math.max(next.totalRevenue ?? 0, 250_000);
+        next.week = Math.max(next.week, 96); // campaign year 3
         {
           const d = weekToDate(next.week, START_YEAR);
           next.year = d.year;
           next.month = d.month;
+        }
+        // Seed a profitable released title if none exist (for proof evaluation)
+        if (!(next.releasedGames ?? []).some((g) => (g.revenue ?? 0) > 5_000)) {
+          const stubId = uid("rel");
+          const stub: ReleasedGame = {
+            id: stubId,
+            title: "Garage Hit",
+            topicId: "military",
+            genreId: "action",
+            platformId: "pc",
+            audience: "everyone",
+            size: "small",
+            engineId: "basic",
+            designPoints: 80,
+            techPoints: 80,
+            bugs: 0,
+            reviewScores: [7.5, 7.5, 7.5, 7.5],
+            avgReview: 7.5,
+            sales: 12_000,
+            revenue: 180_000,
+            fansGained: 400,
+            weekReleased: Math.max(0, next.week - 20),
+            yearReleased: next.year,
+            marketingSpend: 0,
+            developmentCost: 20_000,
+            hype: 20,
+            residualWeeks: 8,
+            weeklySalesLeft: [],
+            weeklyHistory: [],
+            weeksOnMarket: 20,
+            onSale: true,
+            dormant: false,
+            productQuality: 75,
+          };
+          next.releasedGames = [stub, ...next.releasedGames];
+        }
+        // Positive trailing OCF via ledger sales
+        next.ledger = applyLedger(next.ledger, {
+          week: next.week - 2,
+          amount: 40_000,
+          category: "sales",
+          label: "Office-ready pack sales seed",
+          ref: `office-ready-sales-${next.week}`,
+        });
+        // Re-evaluate progression offer after seeding
+        if (isFeatureEnabled("officeFoundation")) {
+          let prog = migrateStudioProgression(next.progression, next.office);
+          prog = tickOfficeOffers(next, prog);
+          next.progression = prog;
+          const fo = prog.offers.first_office;
+          if (fo && (fo.state === "offered" || fo.state === "eligible" || fo.state === "deferred")) {
+            next.modal = "officeOffer";
+            next.speed = 0;
+          }
         }
         break;
       case "move_to_final_level":

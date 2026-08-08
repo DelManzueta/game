@@ -25,7 +25,7 @@ export type DevField =
   | "sound";
 
 export type MatchTier = "great" | "good" | "ok" | "poor" | "bad";
-export type OfficeTier = 1 | 2 | 3 | 4;
+export type OfficeTier = 1 | 2 | 3 | 4 | 5;
 export type Speed = 0 | 1 | 2 | 4;
 
 /** Development state machine */
@@ -67,7 +67,8 @@ export type ModalId =
   | "event"
   | "report"
   | "loopGuide"
-  | "notifications";
+  | "notifications"
+  | "officeOffer";
 
 export type UnlockId =
   | "research"
@@ -516,6 +517,14 @@ export interface GameState {
     rndLab: boolean;
     hardwareLab: boolean;
   };
+  /** External market buffs (trade shows, creators, waves). */
+  external?: {
+    marketingMult: number;
+    marketingUntilWeek: number;
+    bookedCreatorId: string | null;
+    creatorUntilWeek: number;
+    mediaTopicsUnlocked: string[];
+  };
   draft?: Partial<GameProject> | null;
   lastComboKey?: string;
   consecutiveSameCombo: number;
@@ -543,6 +552,11 @@ export interface GameState {
   seriesRecords?: Record<string, import("./commercial/sequels").SeriesRecord>;
   /** Append-only finance ledger (mirrors cash). */
   ledger?: import("./finance/ledger").FinanceLedger;
+  /**
+   * Authoritative studio progression (bible Checkpoint 1+).
+   * Optional on legacy saves — migrated on load.
+   */
+  progression?: import("./progression/types").StudioProgressionState;
 }
 
 

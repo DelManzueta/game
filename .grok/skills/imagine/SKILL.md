@@ -37,32 +37,6 @@ When the output must get specific text, numbers, data, or structure right, don't
    - Otherwise make one targeted edit.
 4. Only finish when the discrete content is exactly correct. If it can't be made accurate, tell the user instead of shipping something wrong.
 
-## Images as app assets (generate → verify → wire → verify again)
-
-When generated images become **assets of the app you're building** (card art,
-hero images, product shots, sprites, textures), treat them like code: never
-wire in an image you haven't looked at.
-
-1. **Read back every generated asset** with image understanding before using
-   it. Check: right subject, no garbled text or extra limbs/artifacts, usable
-   composition for its slot (a hero needs empty space for copy; a card
-   portrait must be centered), and consistent style with its siblings.
-   A generation that "succeeded" as a tool call can still be wrong as an asset.
-2. **Sets need a shared style.** For a set of matching assets (e.g. 8 card
-   illustrations), generate ONE base image first, verify it, then create the
-   rest with `image_edit` from that base (Core Principle 4) or, at minimum,
-   reuse the exact same style sentence in every prompt and read the set back
-   side-by-side to catch drift. Eight independent `image_gen` calls with
-   ad-hoc prompts produce eight different art styles.
-3. **Verify the wiring, not just the file.** After integrating, screenshot the
-   running app and confirm each image actually renders where intended (no
-   broken paths, no stretched/cropped subjects, text over images still
-   readable). A 404'd hero image looks like a blank div — check the actual
-   pixels.
-4. **Budget generations.** Each asset gets at most one regeneration pass for
-   quality; if it's still wrong, adjust the design to need a simpler image
-   rather than looping.
-
 ## Core Principles
 
 1. **You own the prompt.** If the user gives a detailed prompt or asks you to use theirs, use it verbatim. Otherwise craft the final prompt: front-load the subject, give strong high-level direction for mood, composition, lighting, and style without over-specifying every detail, write natural prose rather than keyword tags, and describe positively instead of using negative prompts. For edits, describe only what changes. Target 2-5 sentences.

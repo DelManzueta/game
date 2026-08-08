@@ -47,19 +47,6 @@ Everything is **preinstalled and pre-wired in `src/lib/auth/`** — do not
 `npm install` anything or reach for another auth library. `better-auth` is the
 only auth package; do NOT use `@neondatabase/*`, `@stackframe/*`, or `@clerk/*`.
 
-## When NOT to add auth
-
-Auth is for apps that genuinely need **per-user data or protected content**
-(saved notes, personal dashboards, multiplayer identity, todos, purchases).
-Do NOT wire sign-in into apps that don't: landing/marketing pages,
-single-player games with local scores, calculators, visualizers, demos,
-portfolios. For those, skip this skill entirely — no `SignedIn` gates, no
-`UserButton`, no login route, no auth imports. Sprinkling a `UserButton` on a
-static landing page adds friction and popup jank for zero value. If the user
-asks for accounts later, wiring it then takes minutes. When in doubt: does any
-feature break if two visitors share the same view? If no, don't add auth. A
-leaderboard alone can usually be an optional name field, not full sign-in.
-
 ## What's pre-wired (`src/lib/auth/`)
 
 | File | Use it for |
@@ -268,6 +255,7 @@ signed-in on load. Rules:
 
    export const Route = createRootRoute({
      beforeLoad: async () => ({ sessionUser: await fetchSessionUser() }),
+     // Merge into the existing root — keep head() / og:image from first scaffold.
      // component: prefer `sessionUser` for the FIRST paint when deployed, then
      // `useCurrentUserState()` for live in-page updates.
    });

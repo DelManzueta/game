@@ -5,15 +5,16 @@
 import type { GameSize } from "../types";
 import { WEEKS_PER_MONTH, WEEKS_PER_YEAR } from "../data";
 
-/** First office gate (Garage → Small Office). All must be met + player confirms. */
+/** First office gate (Garage → First Office). Bible §4.3. */
 export const FIRST_OFFICE_GATE = {
-  /** Year 2 Month 10 = START_YEAR + 1 year + 9 months → week floor */
-  minYear: 1983,
-  minMonth: 10,
+  /** Campaign year 3 ≈ START_YEAR+2 */
+  minYear: 1984,
+  minMonth: 1,
   minReleasedGames: 5,
-  minFans: 25_000,
+  minFans: 1_000,
   minCashOnHand: 1_000_000,
-  moveCost: 1_000_000,
+  moveCost: 150_000,
+  minRunwayWeeks: 26,
 } as const;
 
 /** Approximate week floor: Y2 M10 from START 1982 → 1y + 9m = 48 + 36 = 84 weeks. */
@@ -82,18 +83,21 @@ export function releaseRpSpike(avgReview: number): number {
 }
 
 /** Employee production RP by office stage (production seats only). */
-export const EMPLOYEE_RP_PER_WEEK: Record<1 | 2 | 3 | 4, number> = {
+export const EMPLOYEE_RP_PER_WEEK: Record<1 | 2 | 3 | 4 | 5, number> = {
   1: 0, // garage
   2: 1,
   3: 2,
-  4: 4,
+  4: 3,
+  5: 4,
 };
 
-export const PRODUCTION_SEATS: Record<1 | 2 | 3 | 4, number> = {
+/** Max hired production employees (excludes founder). */
+export const PRODUCTION_SEATS: Record<1 | 2 | 3 | 4 | 5, number> = {
   1: 0,
-  2: 4,
+  2: 3,
   3: 4,
-  4: 6,
+  4: 5,
+  5: 5,
 };
 
 /** Sales phase by weeks on market vs shelf life. */

@@ -1,0 +1,5275 @@
+
+Review repository and provide report
+Aug 7
+·
+game
+·
+main
+
+Archive
+
+Share
+
+1
+review the entire repo. come back with a full report of what you see
+Copy
+Repository QA Report
+Executive summary
+This repository contains a substantial, browser-based game-development tycoon titled Studio Empire. It is built with React 19, TanStack Start/Router, Zustand, TypeScript, Tailwind CSS, and Vite. The implemented game is much more than a UI prototype: it includes a deterministic production simulation, progression, research, staff, engines, platform lifecycles, market competition, reviews, sales, marketing, finances, save migration, and a sizeable automated domain-test suite.
+
+The strongest part of the codebase is its domain modeling. Game logic is split into focused modules, many calculations are seeded and deterministic, and the commercial/scoring systems have dedicated tests. The weakest areas are deployment/restart correctness, save-file safety, repository hygiene, and the amount of legacy/prototype surface still shipped alongside the application.
+
+I found five actionable issues, including one critical operational defect.
+
+What is in the repository
+Product
+The main route renders Studio Empire — Game Dev Tycoon, a single-player simulation that begins in an early garage phase. The player can:
+
+Start and save a named campaign.
+
+Select topics, genres, platforms, audience, engine, size, and marketing spend.
+
+Develop a game through three configured production stages.
+
+Accumulate design, technology, research, hype, and bugs.
+
+Polish and release projects.
+
+Receive reviews and weekly sales.
+
+Gain fans and research knowledge from releases.
+
+Research topics and technology.
+
+Hire and develop staff.
+
+Build engines.
+
+License platforms and progress through platform lifecycles.
+
+Run marketing campaigns.
+
+Track finances and market competition.
+
+Use QA cheats.
+
+Export and import saves.
+
+Progress from the initial garage slice toward larger studio systems.
+
+The app intentionally uses browser-local persistence rather than accounts or server-side campaign storage.
+
+Application structure
+The major source areas are:
+
+src/components/game/GameApp.tsx
+Main product UI and top-level game presentation.
+
+src/lib/game/store.ts
+Zustand store and the primary orchestration layer for campaign state and actions.
+
+src/lib/game/simulation.ts
+Simulation helpers, generation, development, reviews, and conversions.
+
+src/lib/game/production/
+Production-stage algorithms and bridge functions.
+
+src/lib/game/scoring/
+Review, quality, sales, experience, and deterministic scoring.
+
+src/lib/game/commercial/
+Commercial runtime, awareness, campaigns, publishing, fans, sequels, and weekly sales.
+
+src/lib/game/market/
+Market initialization, competitors, rivals, RNG, and weekly market changes.
+
+src/lib/game/content/
+Topics, engines, platforms, genre compatibility, and garage-slice content.
+
+src/lib/game/platforms/
+Platform availability and lifecycle rules.
+
+src/lib/game/progression/
+Unlock progression and migration.
+
+src/lib/game/finance/
+Ledger calculations.
+
+src/lib/game/__tests__/
+Domain tests for scoring, commercial behavior, content integrity, progression, market behavior, and determinism.
+
+src/components/mockups/ and src/routes/mockups.tsx
+An additional prototype/mockup gallery, separate from the playable application.
+
+src/lib/auth/, src/lib/db.ts, migrations/0001_auth.sql
+Prewired template authentication and database infrastructure. The game itself does not currently opt into auth.
+
+src/lib/multiplayer/
+A generic P2P/WebRTC helper that is not integrated into the game.
+
+Tooling and deployment
+The project includes:
+
+Vite development and production configuration.
+
+TanStack Start with a Vercel Nitro preset for builds.
+
+Strict TypeScript configuration.
+
+ESLint and Prettier configuration.
+
+A migration script.
+
+Browser smoke-test helpers.
+
+A restart script.
+
+Prebuilt .vercel/output deployment artifacts.
+
+A very large collection of historical screenshots, generated art, prompt attachments, and design references.
+
+Strengths
+1. Domain boundaries are generally well chosen
+The simulation is not concentrated entirely in the React layer. Production, scoring, commercial calculations, market behavior, finance, progression, and content catalogs have separate modules. This makes the business logic easier to understand and test.
+
+2. Deterministic calculations are treated as a first-class concern
+The repository includes seeded RNG utilities, project and campaign seeds, immutable outcome traces, and explicit tests for deterministic behavior. That is particularly valuable for:
+
+Stable reviews across reloads.
+
+Reproducible weekly sales.
+
+Debugging balance regressions.
+
+Save compatibility.
+
+Preventing results from changing merely because a component rerendered.
+
+There are still a few intentionally nondeterministic presentation/support operations, such as generating staff candidates, but the central release/scoring path is designed around stable seeds.
+
+3. The game model is broad and strongly typed
+The type model covers development phases, fields, topics, genres, audiences, sizes, platforms, engines, staff, released games, notifications, research, sales, knowledge, market state, and unlocks. Literal unions constrain many important state transitions.
+
+4. Scoring and commercial logic have meaningful test coverage
+The tests cover more than happy-path utilities. Their subjects include:
+
+Production simulation.
+
+Stage allocations.
+
+Review quality.
+
+Poorly balanced games.
+
+Sequel timing.
+
+Bugs and premature release.
+
+AAA capability.
+
+Platform generation gaps.
+
+Trends.
+
+Marketing campaigns.
+
+Commercial layers.
+
+Publisher gates.
+
+Market simulation.
+
+Content-catalog integrity.
+
+Experience progression.
+
+Garage-slice restrictions.
+
+Project seed hashing.
+
+Determinism.
+
+The central domain logic is considerably better covered than the browser UI.
+
+5. The UI accounts for SSR constraints
+The root route uses a ClientOnly boundary around the Zustand/local-storage-driven game. This avoids trying to render browser-only campaign state during server rendering and provides a dedicated loading screen.
+
+6. Timers are cleaned up correctly
+The main gameplay interval is created inside a React effect and cleared during cleanup. Its timing is derived from the selected game speed, and the interval reads the latest store state rather than closing over an obsolete tick implementation.
+
+7. Save migration exists
+The load path fills in newer fields, normalizes staff and released games, migrates unlocks and market state, and assigns defaults to old projects. This is much better than assuming every browser contains only the latest schema.
+
+8. Auth is not unnecessarily imposed on the game
+Although template auth and database infrastructure remain present, the playable route does not require login. That is appropriate for an anonymous, locally saved game.
+
+Findings
+1. Critical: the restart script starts from the wrong project directory
+startup.sh changes directory to /workspace, but the repository and its package.json are under /workspace/game. On a fresh revive without an already-running healthy server, npm run dev will therefore be invoked from the parent directory. Unless that parent independently happens to contain a compatible package, the preview will not restart.
+
+This violates the repository’s own restart contract and can leave the product unavailable after hibernation. The health check can conceal the defect during an active session because the script exits before reaching the incorrect directory.
+
+Suggested task
+Fix application restart from the repository directory
+
+Start task
+2. High: deleting a save does not delete all legacy saves that the loader recognizes
+hasSave() and readSaveRaw() recognize v1, v2, and v3 legacy keys in addition to the current v5 key. deleteSave(), however, removes only the current key, v1, and v2. It leaves studio-empire-save-v3 behind.
+
+Consequences:
+
+A user can click Delete save, but the old v3 campaign still exists.
+
+Returning to the menu can make Continue reappear.
+
+Loading can resurrect a campaign the user explicitly deleted.
+
+The behavior depends on which historical version the browser happens to contain.
+
+The code also defines a v4 key contract but neither the fallback reader nor deletion path includes a v4 save. If a released build ever wrote v4 data, that campaign is currently ignored rather than migrated.
+
+Suggested task
+Delete and migrate every supported legacy save key
+
+Start task
+3. High: importing malformed but valid JSON can replace a good save before validation
+importSave(raw) only verifies that the input parses to a non-null object. It then writes the raw content directly to the current save key before calling loadGame().
+
+A syntactically valid value such as an array, an object with invalid nested structures, or a partially malicious save can therefore overwrite a valid campaign. If loadGame() subsequently throws while mapping staff or migrating state, it returns false, but the bad raw value remains in local storage. The next attempt to continue will fail again.
+
+The loader’s broad object spread also allows arbitrary imported fields to enter game state without schema validation or bounds checking. TypeScript’s as Partial<GameState> assertion provides no runtime protection.
+
+Suggested task
+Validate imported campaigns before replacing the active save
+
+Start task
+4. Medium: generated deployment output and extensive QA artifacts are committed
+The repository tracks .vercel/output, including bundled application JavaScript, server-function chunks, static assets, and deployment metadata. It also tracks a very large number of screenshots, searched images, duplicate source images, and opaque attachment files.
+
+Problems include:
+
+Source and generated output can drift independently.
+
+Reviewers may mistake stale compiled bundles for current source behavior.
+
+Build output creates noisy diffs and merge conflicts.
+
+Several large images are duplicated between attachments/, public/art/, and .vercel/output/static/art/.
+
+Historical QA material materially increases clone and checkout size.
+
+Opaque UUID-named attachments are difficult to audit or attribute.
+
+.gitignore does not exclude .vercel, .output, dist, generated screenshots, or temporary artifacts.
+
+The checked-in screenshots are useful as design history, but the current volume is not organized as a curated regression baseline.
+
+Suggested task
+Remove generated deploy output and curate repository artifacts
+
+Start task
+5. Medium: internal prototypes and unused infrastructure are shipped as production surface
+The route tree exposes /mockups, backed by a sizeable parallel UI implementation under src/components/mockups/. This appears to be a design/prototype gallery rather than part of the playable product. Because it is a normal application route, it is included in the production build and publicly reachable.
+
+The repository also carries:
+
+A complete auth subsystem that the game does not use.
+
+Database initialization and auth migration infrastructure.
+
+A generic P2P multiplayer implementation with no game integration.
+
+Multiple generations of mockup components and documentation.
+
+The Vite development bootstrap for PGLite even though the active product has no database-backed feature.
+
+Some of these are template-provided and may be intentionally retained, but together they obscure the actual dependency and deployment boundary. In particular, PGLite bootstrap means an unused database system can still prevent the development server from starting if initialization fails.
+
+Suggested task
+Separate production game code from prototypes and dormant template services
+
+Start task
+Architecture assessment
+State management
+The application uses one large Zustand store containing both persistent campaign state and action methods. This gives the UI a simple mutation API and allows direct state access from the timer.
+
+The tradeoff is that src/lib/game/store.ts has become a very large orchestration module responsible for:
+
+Initialization.
+
+Save migration.
+
+Persistence.
+
+Campaign lifecycle.
+
+Production.
+
+Research.
+
+Hiring.
+
+Platforms.
+
+Engines.
+
+Commercial systems.
+
+Notifications.
+
+Cheats.
+
+Import/export.
+
+The underlying calculations are well extracted, but the command layer is still a high-coupling point. Future feature work will increasingly risk unrelated regressions unless store actions are split into domain slices or command modules.
+
+I am not classifying file length alone as a defect; the current design is coherent and typed. The strongest next architectural improvement would be to make save normalization and persistence a separate subsystem first, because it has both correctness and data-loss implications.
+
+Simulation loop
+The browser interval advances the store at a selected real-time rate:
+
+Normal: approximately one tick per 900 ms.
+
+Fast: approximately one tick per 450 ms.
+
+Faster: approximately one tick per 220 ms.
+
+The store also blocks automatic progress during configuration or release decisions, which is appropriate for a staged management game.
+
+Because each tick performs multiple domain calculations and may autosave, the design should remain acceptable at current scale. If later campaigns contain hundreds of games or competitors, profiling the tick and serialization cost will become important.
+
+Persistence
+Campaigns are stored as JSON in localStorage. Advantages:
+
+No login required.
+
+Simple offline behavior.
+
+Near-zero infrastructure.
+
+Easy manual import/export.
+
+Limitations:
+
+Campaigns do not follow the player across browsers.
+
+Storage clearing loses the campaign.
+
+Writes are synchronous on the UI thread.
+
+Large campaign histories may eventually approach browser quota.
+
+Runtime validation is currently insufficient.
+
+Save fallback/deletion behavior is inconsistent, as described above.
+
+Scoring and balance
+The game has two explicit current-generation feature flags:
+
+Algorithm V2 enabled.
+
+Market V2 enabled.
+
+This suggests a deliberate migration from earlier scoring and market implementations. The current domain tests provide a useful safety net, but retaining both old and new implementations indefinitely will increase cognitive load. Once save compatibility and balance confidence are established, obsolete branches should eventually be removed or archived outside the runtime source.
+
+UI
+The main UI is a large single file with many screens and modals. The product has a coherent visual language:
+
+Paper/elevated surfaces.
+
+Warm garage/studio art.
+
+Responsive mobile-first dimensions.
+
+Semantic color tokens.
+
+Reusable primitive components.
+
+Lucide icons.
+
+Dedicated room and development presentation.
+
+However, GameApp.tsx combines navigation, modals, game screens, staff, research, market, finance, and project setup. This makes component-level testing and isolated maintenance difficult. It would benefit from decomposition by feature, but I did not identify a specific functional defect caused solely by its current size.
+
+Accessibility observations
+Positive signs include:
+
+Native buttons for most interactions.
+
+Explicit button types in many custom selectors.
+
+Form labels.
+
+A shared modal primitive.
+
+Semantic heading structure in many panels.
+
+A reduced-motion setting in game state.
+
+Areas worth verifying in a future interactive accessibility audit:
+
+Modal focus trapping and focus restoration.
+
+Escape-key dismissal.
+
+Screen-reader labels for icon-only controls.
+
+Keyboard operation of custom selection cards.
+
+Whether all text meets contrast requirements over the illustrated backgrounds.
+
+Whether the reduced-motion setting actually disables every animated transition.
+
+Live announcements for reviews, events, and notifications.
+
+Because this was a static review, I did not assert those as confirmed defects.
+
+Security and privacy
+The active game is predominantly client-side and handles no sensitive campaign data. No custom game API or authenticated persistence is exposed.
+
+The bundled auth infrastructure is comparatively security-sensitive but appears to be template code rather than an active feature. Its presence still increases maintenance responsibility. Removing it may conflict with workspace template expectations, so it should only be trimmed after confirming which files are contractually required.
+
+The save-import boundary should be considered untrusted input even though it is local. Runtime validation is important both for stability and to prevent deliberately extreme values from causing expensive loops, oversized rendering, or poisoned persistent state.
+
+Testing assessment
+Existing coverage
+The domain suite is extensive and organized around the highest-value calculations. This is a strong foundation.
+
+Missing or underrepresented coverage
+I did not find equivalent automated coverage for:
+
+Save-key discovery and deletion.
+
+Import rejection and rollback.
+
+Full save migrations across all historical versions.
+
+Zustand action sequences through an entire campaign.
+
+Browser navigation and modal behavior.
+
+Accessibility.
+
+Main-menu continue/delete flow.
+
+Reload persistence.
+
+Responsive layout behavior.
+
+Restart-script correctness.
+
+Production-route exclusion of internal mockups.
+
+Long-running campaign performance.
+
+The next highest-value tests are persistence tests because the two concrete save defects could cause campaign resurrection or data loss.
+
+Documentation assessment
+The repository contains thoughtful product documents:
+
+docs/GARAGE_LOOP_FLOW.md
+
+docs/PHASE_ONE_CONTENT.md
+
+docs/PROGRESSION_ARCHITECTURE.md
+
+attachments/Canonical_Game_Loop_Campaign_Progression_and_State_Machine.md
+
+The docs and extensive screenshots indicate substantial product iteration. The primary concern is discoverability: authoritative documents coexist with attachments, prototype screenshots, generated assets, and historical references. A concise repository README identifying the canonical gameplay architecture, current milestone, active routes, and authoritative documents would make the project much easier to onboard into.
+
+Suggested task
+Add a canonical repository overview
+
+Start task
+Static checks performed
+✅ git status --short --branch — the working tree was clean on branch work.
+
+✅ git ls-files — inspected the complete tracked-file inventory.
+
+✅ find .. -name AGENTS.md -o -name SKILL.md — located repository guidance and available skill documentation.
+
+✅ rg -n "TODO|FIXME|HACK|@ts-ignore|eslint-disable|\bany\b|localStorage|setInterval|setTimeout|Math\.random|Date\.now|window\.|document\." src --glob '*.{ts,tsx}' — reviewed notable suppression, persistence, timer, browser-global, and nondeterminism sites.
+
+✅ rg -n "SAVE_(KEY|VERSION)|deleteSave|loadGame|saveGame|importSave|exportSave|newGame:" src/lib/game/{data.ts,store.ts} — inspected save lifecycle entry points and key handling.
+
+✅ rg -n "multiplayer|P2P|Mockup|mockups|AuthProvider|useCurrentUser" src --glob '*.{ts,tsx}' — identified dormant infrastructure and production prototype routes.
+
+✅ git ls-files -z | xargs -0 -n1 du -k | sort -nr | head -30 — inspected the largest tracked artifacts and duplicate generated assets.
+
+⚠️ npm run test:scoring — not run because this review was explicitly read-only and limited to static inspection.
+
+⚠️ npm run typecheck — not run because executing code or tooling was prohibited by the review scope.
+
+⚠️ npm run lint — not run because executing code or tooling was prohibited by the review scope.
+
+⚠️ npm run build — not run because executing code or tooling was prohibited by the review scope.
+
+No files were changed, so no commit or pull request was created.
+
+ok you're going to help me bring this to life alongside grok heavy, but you're not going to build yet, investigate the `Game Dev Tycoon` mechanics and investigate the deterministic seeding algorithms, below is from groks initial review:
+
+```
+**Full repository review: https://github.com/DelManzueta/game**\n\n### Project Summary\nThis is **Studio Empire**, a sophisticated browser-based **Game Dev Tycoon**-style simulation. You start as a solo founder in a garage, plan and develop games through a strict 3-stage production pipeline (with focus allocation sliders), polish, set price/title, release, receive reviews, manage long-tail sales, research topics/tech, build knowledge from reports/cancellations, grow fans/cash, and progress toward larger offices and empire-scale systems.\n\nThe **Garage vertical slice** is complete and documented as playable. Higher progression (staff hiring, custom engines, multi-genre, AAA, hardware, etc.) is partially implemented via flags + a planned `ProgressionService`.\n\nCreated July 2026, last updated ~July 31 2026. Public, 0 stars/forks at time of review. ~32k size (includes many screenshots and art assets).\n\n### Tech Stack\n- **Frontend**: React 19, TypeScript (strict), TanStack Start + Router + Query + Table, Zustand, Tailwind CSS v4, Radix UI primitives, Lucide icons, Recharts, Sonner, etc.\n- **Backend/Data**: Better Auth (Google/X + optional email/password), Kysely, dual PGLite (local/preview) + Postgres/Neon, migrations.\n- **Build/Deploy**: Vite 8, Nitro (Vercel preset), Playwright for smoke tests.\n- **Other**: Zod, React Hook Form, date-fns, extensive custom game algorithms.\n\nScripts support `dev` (binds 0.0.0.0:8080), `build` (with migrate), typecheck, lint, scoring tests.\n\n### Architecture Highlights\n**Domain-driven core** in `src/lib/game/`:\n- `types.ts` — rich, well-typed `GameState`, `GameProject`, `ReleasedGame`, commercial layers, unlocks, etc.\n- `store.ts` (large orchestrator) — Zustand store handling campaign lifecycle, week ticks, project stages, release/cancel, sales, research, market, knowledge, cheats, save/load (localStorage with versioned migrations).\n- Production state machine (`production/algorithm` + bridge), quality/reviews pipeline (`quality/algorithm` + scoring V2), commercial runtime (marketing, weekly sales engines, publishers, sequels), dynamic market (rivals, trends, platforms lifecycle).\n- Content catalogs: 132 topics with full genre-compatibility matrices, ~40 timeline platforms, engines, research items.\n- Deterministic seeding + `OutcomeTrace` (freezes quality/reviews/sales plan at release so loads never re-roll).\n- Knowledge flywheel from game reports and cancelled projects.\n- Finance ledger, notifications, events.\n\n**UI** (`src/components/game/GameApp.tsx` — also large):\n- Room-first garage view with custom SVG isometric scene.\n- GDT-inspired top HUD (orbs for Bugs/Design/Tech/Research, project progress, vitals, speed controls).\n- Develop desk with vertical allocation bars for stage focus, polish, pre-release.\n- Secondary screens (Games library, Research, Staff, Engines, Platforms, Finances, Market) + modals.\n- Bottom dock navigation. Mobile-aware.\n\n**Docs** (`docs/`): Clear Garage loop flowchart + rules, Phase One content inventory, Progression Architecture plan (UnlockState machine HIDDEN→MASTERED, phased feature flags, UI shell vision).\n\n**Tests**: Multiple solid unit tests for algorithms (quality, commercial, garage policy, market, content catalog, experience).\n\n**Extras**:\n- Extensive `.grok/skills/` (building-games with genre references, generate2dsprite/map, controls, multiplayer-p2p, auth, neon, threejs, design-ui, etc.) + massive `AGENTS.md` (sandbox instructions for Grok Build live-preview apps). This repo doubles as an AI agent workspace for generating games/apps.\n- Many screenshots, mockups, art assets, attachments (including long design notes).\n\n### Strengths\n- **Impressive domain depth** for a GDT-like game: production stages, concept fit, layered quality, commercial sales with awareness/hype/lifecycle, market competition, knowledge persistence, deterministic reproducibility.\n- Clean separation of pure algorithms from the store orchestrator and React UI.\n- Garage slice is coherent, documented, and has policy tests proving the loop (plan → develop stages → polish → pre-release → reviews → sales → report → knowledge).\n- Modern, production-ready stack with SSR/auth/DB readiness for future multi-user or cloud saves.\n- Strong testing of core math and content integrity.\n- Thoughtful UX details (force-pause during config stages, OutcomeTrace, founder energy always full in garage, price ≠ quality, etc.).\n\n### Issues & Recommendations\n1. **God files**: `store.ts` (~68k) and `GameApp.tsx` (~60k) are monoliths. Split the store into domain slices (project, commercial, market, progression, finance) and extract UI screens/components/hooks. This will improve maintainability dramatically as the empire phase grows.\n\n2. **Missing README**: No root README. Add one covering:\n   - What the game is + how to play the Garage loop\n   - `npm install && npm run dev`\n   - Architecture overview + key docs\n   - Save format / version notes\n   - Contribution / test commands\n\n3. **Repo hygiene**: `.vercel/output`, large binary images in `attachments/` and `screenshots/`, and build artifacts are committed. Tighten `.gitignore`, use Git LFS for art, or move generated assets out of the main tree.\n\n4. **Progression incomplete**: Docs describe a full UnlockState machine + service; current code still relies heavily on flat `flags` + partial `evaluateProgression`. Finish wiring the planned system before expanding content.\n\n5. **UI state**: Mix of polished garage SVG + flatter secondary screens. Many mockups exist but are not all integrated. The planned dark premium 2D shell + left nav would help consistency.\n\n6. **Scale concerns**: Large reactive state + frequent ticks. Zustand selectors are used in places (good), but continue auditing re-renders. localStorage saves work for single-player; plan cloud/auth carefully for multiplayer or long campaigns.\n\n7. **Testing gaps**: Excellent algorithm unit tests. Add more integration tests for full release → sales → report loops and e2e browser flows (Playwright is already present).\n\n8. **Minor**: Some deprecated/legacy paths still present (older scoring, flags alongside unlocks). Clean as progression matures. Cheats and QA toggles are helpful but keep them gated.\n\n### Overall Assessment\n**Strong, ambitious, and already highly playable in the Garage phase.** The algorithmic depth (quality, commercial, market, determinism) exceeds many hobby GDT clones. The modern stack and agent-skills infrastructure make it an excellent foundation for both the full game and AI-assisted expansion.\n\n**Priority next steps**:\n1. README + better ignore rules\n2. Refactor the two god files\n3. Complete ProgressionService wiring\n4. Polish UI consistency and integrate remaining mockups\n5. Expand tests around the full loop\n\nThis is high-quality work with clear vision. The Garage vertical slice is a solid, shippable core that already demonstrates the intended loop. With the recommended cleanups it can scale cleanly into a full empire sim.
+```
+Copy
+Mechanics and Deterministic-Seeding Investigation
+Executive conclusion
+Studio Empire already has the right structural interpretation of Game Dev Tycoon: development choices create a product, product quality creates reviews, and reviews combine with market reach and awareness to create sales. It is not merely calculating “topic + genre = score.”
+
+More importantly, the repository has already made a deliberate and sensible design departure from the original game:
+
+Original Game Dev Tycoon heavily compares each release against an evolving historical performance target.
+
+Studio Empire’s V2 system primarily judges the game the player actually made.
+
+Previous success creates only a small expectations modifier rather than silently moving the entire quality bar upward.
+
+That distinction should be preserved. It retains the recognizable Game Dev Tycoon loop while avoiding one of the original’s most opaque and controversial mechanics. The repository’s own design notes explicitly reject requiring every new game to outperform the studio’s previous best. 
+
+The deterministic system is also conceptually strong. It uses:
+
+A campaign seed.
+
+Stable domain identifiers.
+
+Named random-event streams.
+
+Time or sequence coordinates.
+
+A deterministic hash.
+
+Either a stateless hash-derived result or a local seeded PRNG.
+
+Frozen release outcomes for historically important results.
+
+The main risks are not that the RNG is “insufficiently random.” The main risks are:
+
+Ambiguous seed serialization.
+
+Algorithm changes rewriting the future of old campaigns.
+
+Sequential PRNG draws being sensitive to iteration-order refactors.
+
+Multiple overlapping scoring/sales implementations obscuring which algorithm is authoritative.
+
+A few nondeterministic utility paths using Math.random().
+
+Insufficient golden-vector and save/resume determinism tests.
+
+No files were changed.
+
+1. What the original Game Dev Tycoon mechanics are doing
+1.1 The fundamental loop
+The original game’s scoring is best understood as a pipeline:
+
+The player chooses a topic, genre, platform, audience, size, and engine.
+
+The player allocates development time among three disciplines in each of three stages.
+
+Staff generate Design and Technology points.
+
+The game evaluates whether the development focus suits the genre.
+
+It evaluates the final Design/Technology balance.
+
+It applies compatibility and situational modifiers.
+
+Bugs and insufficient technology reduce the result.
+
+The game derives a hidden product score.
+
+The hidden score is compared with the studio’s current expectations.
+
+Four visible critic scores are generated.
+
+Reviews, market size, platform reach, fans, hype, and other commercial factors drive sales.
+
+That pipeline is also recorded in the repository’s prior research. 
+
+A reverse-engineered community reference for the original review system is the Game Dev Tycoon Review Algorithm reference. The developers also discussed the historical-performance component in a Greenheart Games forum explanation.
+
+Research limitation: External web access was unavailable during this investigation, so I could not independently re-open and verify every community page. The repository already contains the source map and extracted mechanics, including those links. I treated community-derived constants as reverse-engineered reference material rather than official contractual behavior.
+
+1.2 The sliders are allocations, not independent bonuses
+A central original-game mechanic is that the three sliders in a stage compete for a shared amount of development time. They are not three unrelated “quality bonus” controls.
+
+The reverse-engineered model documented in the repository assigns each discipline a guaranteed base share and distributes the remaining effort proportionally:
+
+time share = 10% + 70% × slider / sum of stage sliders
+If all sliders are zero, the stage is divided equally. 
+
+That creates meaningful opportunity cost:
+
+Increasing Gameplay reduces the relative time available to Engine and Story.
+
+Trying to maximize every field should not be free.
+
+Genre priorities matter because the player cannot fully fund everything.
+
+A “perfect” allocation is contextual rather than simply moving every slider right.
+
+Studio Empire follows the shared-budget principle. Its current UI normalizes each stage’s chosen values before committing the stage. 
+
+The production algorithm then treats excessive raw intent as scope pressure. Values totaling more than the nominal stage capacity increase the required work, cost, and bug exposure rather than granting free output. 
+
+This is an excellent adaptation. It addresses a common UI ambiguity: if the player can visually set all three sliders high, the game must either normalize them or interpret the excess as over-scoping. Studio Empire does both in complementary layers:
+
+The quality/scoring path uses normalized allocations.
+
+The production path remembers the raw scope intention and charges for overreach.
+
+1.3 Disciplines produce different Design/Technology mixtures
+The original model assigns characteristic Design/Technology proportions to each development discipline. The repository’s research records broadly technology-heavy fields such as Engine and AI, and design-heavy fields such as Gameplay, Story, and Dialogues. 
+
+Studio Empire preserves the same high-level idea. V2 computes relevant employee skill by mixing staff Design and Technology according to each discipline, then applies:
+
+Allocated effort.
+
+Employee skill.
+
+Employee energy.
+
+Field experience.
+
+Tool/engine support.
+
+Workload.
+
+Team synergy.
+
+A small seeded variation.
+
+Diminishing returns. 
+
+This is deeper than the original game’s player-visible abstraction because production duration, team capability, and tools are integrated directly into output.
+
+1.4 Genre fit has two distinct dimensions
+A good GDT-style system must distinguish:
+
+Concept fit
+Does the selected product make sense in the market?
+
+Examples:
+
+Topic × genre.
+
+Genre × audience.
+
+Genre × platform.
+
+Platform × audience.
+
+Multi-genre weighting.
+
+Craft fit
+Did the team execute that concept properly?
+
+Examples:
+
+Did the sliders emphasize appropriate disciplines?
+
+Did the Design/Technology balance suit the genre?
+
+Was the team capable enough?
+
+Did the engine support the scope?
+
+Was the game polished?
+
+Were bugs left in the release?
+
+The original reverse-engineered mechanics include topic/genre, topic/audience, platform/genre, and platform/audience compatibility. 
+
+Studio Empire’s V2 quality system makes the separation explicit:
+
+Concept fit is calculated independently.
+
+Execution, focus alignment, Design/Technology balance, feature coherence, innovation, polish, and team execution compose craft quality.
+
+Craft quality and concept fit then compose product quality. 
+
+That separation is one of the codebase’s strongest design decisions. It allows meaningful outcomes such as:
+
+A strange concept executed exceptionally well.
+
+A commercially promising concept ruined by poor execution.
+
+A polished niche game with limited market size but strong reviews.
+
+A technically ambitious game undermined by an underqualified team.
+
+1.5 Original moving-target expectations
+The original game is notorious for comparing a release with an evolving target based substantially on past success. The reverse-engineered model documented in the repository follows this broad shape:
+
+intermediate score = base score / target high score
+visible quality ≈ 10 × intermediate score
+A major hit can increase the target, making the studio’s future releases face higher expectations. 
+
+This mechanic has some benefits:
+
+It prevents the player from endlessly repeating one early optimal strategy.
+
+Staff and technology progression remain necessary.
+
+Later eras feel more demanding.
+
+Major successes alter the studio’s position in the industry.
+
+But it also has serious UX costs:
+
+A hit can function like a hidden permanent difficulty increase.
+
+Two objectively similar games can receive very different reviews.
+
+Players may not understand why their next competent release performs poorly.
+
+The optimal behavior can become intentionally suppressing early performance.
+
+Success can feel punitive.
+
+1.6 Studio Empire’s deliberate departure
+Studio Empire V2 explicitly states that product quality is not compared with the studio’s previous best. Previous reviews and reputation only produce a bounded critic-expectation adjustment. 
+
+That is the right place to be inspired by Game Dev Tycoon without reproducing its least transparent behavior.
+
+A robust interpretation for Studio Empire is:
+
+Raw product quality: determined only by the current product and development process.
+
+Critic expectations: slightly affected by reputation and recent releases.
+
+Sales expectations: substantially affected by reputation, fans, awareness, and past commercial success.
+
+Progression pressure: created by rising game scope, salaries, platform standards, player expectations, and competitors.
+
+Never: silently divide current craftsmanship by an unbounded historical high score.
+
+2. Comparison: original mechanics versus Studio Empire
+System	Original GDT-style behavior	Studio Empire implementation	Assessment
+Development stages	Three stages with three disciplines each	Strict three-stage state machine with pauses for player input	Strong match
+Sliders	Shared allocation of stage time	Normalized allocation plus scope-pressure penalties	Stronger and more legible
+Design/Technology	Generated from disciplines and staff	Discipline mixtures, staff skill, energy, experience, tools, synergy	More detailed
+Topic/genre	Compatibility table	Full topic compatibility data and concept-fit calculation	Strong match
+Platform/audience	Compatibility and market size	Concept fit plus platform lifecycle and installed base	More systemic
+Bugs	Reduce final score	Generated deterministically during work; must be fixed before finalization in the current flow	Mechanically deep, but potentially too restrictive
+Reviews	Hidden score converted into four scores	Persistent critic profiles with biases and seeded variation	Strong
+Expectations	Historical moving target can dominate	Small bounded modifier only	Deliberate improvement
+Marketing	Influences hype and sales	Awareness/reach system separated from product quality	Strong separation
+Sales	Reviews, fans, market, platform, hype	Weekly live sales with demand, awareness, lifecycle, price, competition, trends	Considerably deeper
+Long tail	Sales decay over time	Explicit launch, growth, mature, and long-tail phases	Strong
+Rivals	Mostly ambient simulation	Seeded rival studios and competition effects	More systemic
+Knowledge	Reports reveal combinations	Persistent knowledge entries and campaign learning	Strong
+Determinism	Internally pseudo-random, opaque	Explicit seed namespaces, tests, and outcome traces	Stronger engineering discipline
+3. Important mechanics observations
+3.1 Bugs currently appear stricter than the intended design
+The quality algorithm includes a meaningful bug penalty. 
+
+However, the active release flow prevents release while the production state is still in bug_fixing or polish, and pre-release explicitly tells the player to fix remaining bugs. 
+
+This creates a design tension:
+
+If all bugs must be fixed before release, release-time bug penalties rarely matter.
+
+“Ship now with known bugs” is a classic management tradeoff.
+
+Deadlines, cash pressure, publishing contracts, and market windows become less meaningful if polish is mandatory.
+
+The original GDT-style decision is not merely “wait until bugs reach zero”; players can choose to release a defective game and accept the consequences.
+
+The repository’s own later design notes say releasing with bugs should preserve those bugs and affect reviews, sentiment, refunds, sales, and support. 
+
+This should eventually become an explicit design decision:
+
+Safe release: finish all blocking defects.
+
+Risky release: ship with known defects and accept predictable penalties.
+
+Critical blockers: truly unreleasable faults.
+
+Post-release support: spend time and money recovering quality and sentiment.
+
+That is not a request to implement it now; it is a mechanics gap to resolve before commercial and publishing systems become more elaborate.
+
+3.2 Marketing is correctly separated from review quality
+The critic module explicitly states that hype and marketing never affect critic scores. 
+
+The weekly sales engine instead combines:
+
+Installed base.
+
+Platform lifecycle.
+
+Audience demand.
+
+Topic demand.
+
+Genre demand.
+
+Platform fit.
+
+Competition.
+
+Trends.
+
+Review-derived demand.
+
+Awareness.
+
+Fans.
+
+Hype.
+
+Price.
+
+Distribution.
+
+Lifecycle decay. 
+
+That is exactly the separation the simulation should preserve:
+
+Marketing does not make the game better.
+Marketing makes more people aware of the game.
+Quality and reviews influence whether awareness converts into purchases.
+3.3 Price is a commercial decision rather than a quality modifier
+The sales system calculates price fit against a reference price. Undercutting produces a bounded unit-sales benefit, while overpricing introduces an exponential penalty. 
+
+It applies price only in the sales calculation, not product quality or critic scoring. That is correct.
+
+A future balancing concern is that lower prices should not automatically dominate. The system should evaluate:
+
+Units.
+
+Gross revenue.
+
+Platform fees.
+
+Publisher share.
+
+Support costs.
+
+Opportunity cost.
+
+Brand positioning.
+
+The existing ledger and developer-revenue calculations already provide the necessary foundation.
+
+3.4 Live weekly sales are preferable to a frozen sales curve
+The repository contains both:
+
+A precomputed V2 sales-plan implementation.
+
+A live weekly V3 sales calculation.
+
+The active commercial runtime uses live weekly sales when salesEngine === "weekly_v3" and a sales snapshot is available. Each week applies the current fan count, marketing state, hype, price, reach, and other saved conditions. 
+
+That is the superior design for an evolving market because it allows:
+
+New campaigns to affect future weeks.
+
+Price changes to affect only future sales.
+
+Competition to matter at the correct time.
+
+Long-tail behavior.
+
+Dormancy.
+
+Publisher and distribution changes.
+
+Stored weekly explanations.
+
+However, its determinism must be treated differently from a fully frozen curve. Historical weeks are fixed in weeklyHistory, while future weeks are derived from saved state plus the deterministic weekly variance.
+
+4. How the deterministic system currently works
+4.1 Campaign seed
+A new campaign derives its seed from:
+
+company name | garage | pirate mode
+The string is hashed with an FNV-1a-style 32-bit hash. The same company name and mode therefore generate the same starting campaign. The hash implementation is also exposed as seedFromString. 
+
+This means campaign seeds are not secret and do not need cryptographic security. Their purpose is reproducibility.
+
+4.2 Stateless SHA-256-derived random values
+The production algorithm uses stableUnit() for event-addressed randomness. The function:
+
+Converts seed parts to strings.
+
+Joins them with |.
+
+Hashes the result with SHA-256.
+
+Reads the first 48 bits.
+
+Maps that number into [0, 1). 
+
+A production bug is keyed by:
+
+campaign seed
+game id
+"production_bug"
+stage
+day
+discipline
+Bug severity uses a separate "bug_severity" stream. 
+
+This is an example of event-addressed randomness. It has excellent properties:
+
+Replaying the same development day returns the same bug roll.
+
+Adding an unrelated random draw elsewhere does not change it.
+
+Save/load does not need to persist a mutable RNG cursor.
+
+Each domain event has a readable identity.
+
+The generated bug ID is naturally idempotent.
+
+For discrete simulation events, this is generally preferable to one global PRNG stream.
+
+4.3 Stateful local Mulberry32 streams
+Other calculations use a small SeededRng based on Mulberry32. It maintains a 32-bit state and offers:
+
+next().
+
+range(min, max).
+
+Inclusive integer sampling.
+
+Symmetric jitter. 
+
+Before constructing a stream, the code hashes semantic inputs such as:
+
+campaign seed | project id | "review-v2" | release week
+Each critic then gets a substream derived from the parent seed and critic ID. 
+
+Weekly sales instead create a new stream for:
+
+campaign seed | game id | "sales" | market week
+and draw a bounded variance from 0.94 to 1.06. 
+
+4.4 Market stream namespaces
+The market defines a reusable constructor:
+
+marketRng(campaignSeed, streamName, counter, ...extra)
+It hashes those values and returns a local seeded PRNG. 
+
+Named streams include concepts such as:
+
+Market initialization.
+
+Platform initialization.
+
+Trend initialization.
+
+Rival planning.
+
+Rival production.
+
+Weekly platform changes.
+
+Weekly trend changes.
+
+This stream partitioning prevents one subsystem from consuming random numbers intended for another subsystem.
+
+4.5 Frozen outcome traces
+Released games can store an OutcomeTrace containing:
+
+Campaign seed.
+
+Project seed.
+
+Release week.
+
+Product quality.
+
+Visible review scores.
+
+Review average.
+
+Hidden final score.
+
+Weekly sales plan.
+
+Knowledge keys.
+
+Algorithm version.
+
+Commercial explanation snapshot. 
+
+The intention is that historically important release outcomes cannot reroll when a save is loaded. That is correct and should be expanded into a more comprehensive versioned outcome contract.
+
+5. Determinism assessment
+What is strong
+Event-specific namespaces
+Using "production_bug", "bug_severity", "review-v2", and "sales" makes random causality inspectable. It also prevents accidental coupling between unrelated systems.
+
+Stable domain coordinates
+Randomness is tied to meaningful coordinates such as:
+
+Campaign.
+
+Game.
+
+Stage.
+
+Day.
+
+Discipline.
+
+Critic.
+
+Release week.
+
+Market week.
+
+This is much safer than one mutable global seed.
+
+Bounded randomness
+Randomness generally modifies outcomes slightly rather than deciding them entirely:
+
+Weekly sales variance is only ±6%.
+
+Work-output jitter is only ±4%.
+
+Critics have small seeded variation.
+
+Bugs are probabilistic, but their probability comes from actual work, scope pressure, and capability.
+
+The player’s decisions dominate the dice.
+
+Idempotent production events
+Bug IDs encode the project, stage, day, and discipline, and insertion checks prevent duplicate creation. 
+
+Tests already prove baseline reproducibility
+The tests verify:
+
+Same stableUnit inputs return the same result.
+
+Different event keys differ.
+
+Identical production seeds produce identical work and bugs.
+
+Market initialization is identical for identical seeds.
+
+Different market seeds produce different campaigns.
+
+Thirty deterministic market ticks remain identical across two simulations. 
+
+6. Determinism risks
+6.1 Seed serialization is ambiguous
+Both stableUnit() and hashSeed() serialize inputs by converting each value with String() and joining with |. 
+
+That creates avoidable collisions:
+
+stableUnit("a|b", "c")
+stableUnit("a", "b|c")
+Both serialize to:
+
+a|b|c
+Type identity is also lost:
+
+hashSeed(1)
+hashSeed("1")
+And these collapse together:
+
+null
+undefined
+""
+SHA-256 cannot protect against ambiguity introduced before hashing. This is not currently likely to cause obvious player-facing collisions because most keys are controlled IDs, but it weakens the guarantee.
+
+A robust seed encoder should use typed, length-prefixed fields, for example:
+
+s:3:abc
+n:2:42
+b:1:1
+z:0:
+Alternatively, use canonical JSON over tagged values.
+
+6.2 The RNG algorithm lacks explicit versioning
+OutcomeTrace says algorithm: "v2", but the broader campaign and market RNG behavior do not appear to have an independent RNG/seeding version.
+
+If any of these change:
+
+The hash algorithm.
+
+Field order.
+
+Stream name.
+
+Market iteration order.
+
+Critic list.
+
+Rival list.
+
+Content IDs.
+
+Number of PRNG draws.
+
+Calculation order.
+
+Then an old campaign’s future may diverge after loading into a new release.
+
+Historical releases may remain frozen, but upcoming trends, rival plans, and unreleased projects can change.
+
+The save contract should eventually include something like:
+
+simulationVersion: 3
+seedSchemaVersion: 2
+marketAlgorithmVersion: 2
+reviewAlgorithmVersion: 2
+salesAlgorithmVersion: 3
+Then old campaigns can either:
+
+Continue using their original rules.
+
+Migrate through an intentional one-time transition.
+
+Clearly declare that only historical outcomes are preserved.
+
+6.3 Sequential streams are refactor-sensitive
+Mulberry32 is deterministic only if draw order remains constant.
+
+For example, the work calculation loops:
+
+Staff in array order.
+
+Fields in object-key order.
+
+One jitter draw for each staff/field combination. 
+
+If staff order changes, a field is added, or iteration order is refactored, every later draw moves to a different employee/field pair.
+
+This is not a mathematical failure in Mulberry32. It is a seed-addressing problem.
+
+For independent semantic events, prefer:
+
+jitter = stableSigned(
+  campaignSeed,
+  projectId,
+  "work_jitter",
+  staffId,
+  fieldId,
+  productionDay,
+)
+Stateful streams remain appropriate for tightly coupled procedural generation where sequence is part of the intended artifact, such as generating a complete rival profile.
+
+6.4 FNV-1a is acceptable for seed derivation but not collision-resistant
+The 32-bit FNV-style seed hash is fast and suitable for non-adversarial PRNG seeding. But a 32-bit space inevitably collides as the number of generated semantic keys grows.
+
+That does not make it unusable. The important distinction is:
+
+Fine: deriving local game-simulation seeds.
+
+Not fine: assuming the result uniquely identifies a campaign or outcome.
+
+Not fine: using it for security or tamper resistance.
+
+Potential issue: heavy use across thousands of market events increases collision opportunity.
+
+The existing SHA-256-based stateless path provides a 48-bit output and stronger distribution for addressable events. It would be reasonable to standardize new semantic event randomness around that mechanism, after fixing serialization.
+
+For background, NIST FIPS 180-4 defines SHA-256, while PCG’s technical paper and documentation discuss the distinction between PRNG state transition, output functions, and statistically robust stream construction.
+
+6.5 The custom SHA-256 implementation needs reference-vector tests
+The repository implements SHA-256 locally rather than using Web Crypto. 
+
+That has one major benefit: it is synchronous and produces identical behavior in browser and Node.
+
+But custom cryptographic primitives should be verified against published test vectors even when used only as deterministic hashes. I did not see tests for:
+
+Empty input.
+
+"abc".
+
+Unicode input.
+
+Multi-block input.
+
+Long messages.
+
+Browser versus Node equivalence.
+
+The current test verifies only that the same seed parts produce the same float; it does not prove the SHA-256 implementation is correct. 
+
+Correct SHA-256 is not essential for gameplay unpredictability, but golden-vector tests are essential if the algorithm’s output becomes a permanent campaign contract.
+
+6.6 The fallback encoder is not actually UTF-8
+When TextEncoder is unavailable, the fallback takes the low byte of each JavaScript UTF-16 code unit. 
+
+Consequently, non-ASCII company names or IDs can hash differently between environments with and without TextEncoder.
+
+Modern Node and supported browsers provide TextEncoder, so this is unlikely to affect the current runtime. Nevertheless, deterministic infrastructure should not contain an environment-dependent fallback. A proper UTF-8 encoder or an explicit requirement for TextEncoder would be safer.
+
+6.7 Math.random() remains in support paths
+The legacy/general simulation helpers still use Math.random() for:
+
+IDs.
+
+Ranges.
+
+Random array selection. 
+
+Staff candidate generation is also invoked with Math.random(). These paths do not appear to drive the central immutable release outcome, but they can still cause save/reload or repeated-action differences in hiring choices.
+
+Every randomness use should be classified into one of three categories:
+
+Deterministic gameplay randomness
+Must use campaign-addressed seeds:
+
+Staff candidates.
+
+Contract offers.
+
+Events.
+
+Rival activity.
+
+Bugs.
+
+Reviews.
+
+Sales.
+
+Research discoveries.
+
+Ephemeral presentation randomness
+May be nondeterministic:
+
+Confetti positions.
+
+Particle animation.
+
+Non-persistent decorative motion.
+
+Unique identity generation
+Should use deterministic domain IDs or crypto.randomUUID(), depending on whether replay identity must be stable.
+
+At present, the codebase has the correct doctrine in determinism.ts—“never use Math.random”—but the entire repository has not fully converged on it. 
+
+6.8 Outcome traces and live sales need a clearer contract
+OutcomeTrace contains a frozen weekly sales plan, but the active weekly_v3 engine recalculates each future week from the stored market snapshot and current commercial state. 
+
+These are two different deterministic promises:
+
+Frozen-plan determinism
+At release, every future sales week is fixed forever.
+
+Stateful live determinism
+Historical weeks are fixed; future weeks are deterministic functions of future player and market actions.
+
+The live approach is better gameplay, but the trace field name weeklySalesPlan can create a false expectation that future weekly sales are immutable.
+
+The eventual contract should likely freeze:
+
+Product quality.
+
+Reviews.
+
+Release-time commercial snapshot.
+
+Historical weekly results.
+
+It should not freeze future sales if later marketing, discounts, competition, platform decline, and support are meant to influence them.
+
+7. A deterministic architecture suited to Studio Empire
+Without implementing anything yet, the clean target model is:
+
+Layer A: campaign identity
+type CampaignIdentity = {
+  campaignSeed: string;
+  seedSchemaVersion: number;
+  simulationVersion: number;
+};
+The player-facing seed could eventually be explicitly displayed or shareable. Company name should not necessarily be the only seed source; otherwise two players choosing the same name and settings always receive identical markets.
+
+A campaign could store:
+
+human-readable seed + company name + difficulty
+Company name would then remain cosmetic rather than determining the entire universe.
+
+Layer B: typed seed encoding
+Every seed input should preserve:
+
+Type.
+
+Length.
+
+Value.
+
+Ordering.
+
+Conceptually:
+
+encodeSeedParts([
+  ["campaign", campaignSeed],
+  ["domain", "production"],
+  ["event", "bug"],
+  ["project", projectId],
+  ["stage", stage],
+  ["day", day],
+  ["discipline", discipline],
+]);
+Layer C: event-addressed randomness
+Use stateless random functions for independent facts:
+
+unit(seedAddress)
+int(seedAddress, min, max)
+pick(seedAddress, candidates)
+signedJitter(seedAddress, magnitude)
+weightedPick(seedAddress, candidates)
+Good use cases:
+
+Whether a bug appears.
+
+Bug severity.
+
+One critic’s score variation.
+
+One game’s weekly sales variance.
+
+One staff candidate attribute.
+
+One event trigger.
+
+One contract requirement.
+
+Layer D: local stream RNG
+Use a stateful PRNG only where sequence is an intentional part of generating one compound artifact:
+
+Rival studio generation.
+
+A coherent event package.
+
+A procedural platform launch package.
+
+A complete staff candidate profile.
+
+The stream should never be global. It should be created from a semantic address and discarded after generating that artifact.
+
+Layer E: immutable historical records
+Freeze facts once they become history:
+
+Confirmed stage plan.
+
+Work completed.
+
+Bugs generated.
+
+Release build.
+
+Product quality.
+
+Critic reviews.
+
+Completed sales weeks.
+
+Ledger entries.
+
+Research reports.
+
+Rival releases.
+
+Industry news already shown.
+
+Never recompute history from the latest algorithm.
+
+Layer F: deterministic future from current state
+Future values should be computed only when their simulation time arrives:
+
+Next week’s sales.
+
+Next rival action.
+
+Next trend movement.
+
+Next platform lifecycle step.
+
+Next contract offer.
+
+This retains the ability for later player actions to matter without rerolling the past.
+
+8. Tests the deterministic contract ultimately needs
+Golden seed vectors
+Store permanent expected outputs for:
+
+stableUnit("campaign", 1, "project", "g1")
+hashSeed("campaign", 1, "review-v2")
+SeededRng(1).next() // first N values
+If these change, the developer must consciously bump seedSchemaVersion.
+
+Serialization collision tests
+Verify that all of these differ:
+
+["a|b", "c"]
+["a", "b|c"]
+
+[1]
+["1"]
+
+[null]
+[undefined]
+[""]
+Save/resume equivalence
+Run a campaign in two ways:
+
+Continuous
+simulate weeks 1–100
+Interrupted
+simulate weeks 1–50
+serialize
+deserialize
+simulate weeks 51–100
+The resulting state should match after removing explicitly ephemeral UI fields.
+
+Tick chunking invariance
+Where the simulation promises weekly semantics:
+
+tick one week ten times
+should match:
+
+advance ten weeks
+If fast-forward intentionally aggregates events differently, that exception must be explicit.
+
+Content-order invariance
+Reordering unrelated catalog entries should not change:
+
+Existing critic results.
+
+An existing game’s sales.
+
+Bug generation.
+
+Existing rival identities.
+
+Candidate selection from a list may legitimately change when the candidate list changes, but unrelated systems should not.
+
+Historical algorithm-upgrade tests
+Load a fixture from each supported simulation version and verify:
+
+Existing reviews do not change.
+
+Existing sales history does not change.
+
+Existing ledger entries do not change.
+
+Future simulation follows the documented migration policy.
+
+Cross-runtime vectors
+The same seed vectors should match in:
+
+Node.
+
+Chromium.
+
+Production SSR/build runtime.
+
+Statistical smoke tests
+Determinism alone does not imply good distribution. For large samples, verify approximate:
+
+Uniformity.
+
+Mean.
+
+Range.
+
+No obvious low-bit bias in integer selection.
+
+Weighted-pick proportions.
+
+Bug-frequency expectations.
+
+These are balance safeguards, not proofs of cryptographic quality.
+
+9. Mechanics direction for collaboration with Grok Heavy
+The most important shared contract to establish before either system expands the game is:
+
+Preserve
+The strict three-stage player-confirmed production loop.
+
+Shared stage effort rather than independent slider bonuses.
+
+Scope pressure for overambitious plans.
+
+Concept fit separated from execution quality.
+
+Marketing separated from product quality.
+
+Bounded critic variation.
+
+Live weekly commercial simulation.
+
+Historical outcomes frozen after they occur.
+
+The rejection of an unbounded historical high-score quality target.
+
+Knowledge generated from reports and failed/cancelled work.
+
+Deterministic market and rival simulation.
+
+Resolve before adding late-game systems
+Whether games may release with known bugs.
+
+Whether campaign seed is derived from company name or independently generated.
+
+Which scoring pipeline is authoritative.
+
+Which sales pipeline is authoritative.
+
+What OutcomeTrace freezes under live weekly sales.
+
+How seed and algorithm versions are stored.
+
+Whether staff, contracts, and events must be fully deterministic.
+
+Whether old campaigns retain old balance rules or migrate to current rules.
+
+How much information the UI exposes in classic versus analytical modes.
+
+Which parts of original GDT behavior are references versus deliberate exclusions.
+
+Avoid
+Copying the original game’s exact constants as the identity of the product.
+
+Reintroducing a punitive hidden moving-target score.
+
+Letting all sliders behave like independent positive upgrades.
+
+Allowing marketing to improve critic scores.
+
+Generating all future sales at release if later decisions are supposed to matter.
+
+Using one global RNG stream.
+
+Using array indexes as permanent random identities.
+
+Recomputing historical results after balance patches.
+
+Adding randomness simply to conceal a weak causal model.
+
+10. Bottom line
+Studio Empire’s current mechanics are not merely an imitation of Game Dev Tycoon. They are evolving into a more explicit simulation:
+
+Concept
+→ Production plan
+→ Actual work
+→ Product quality
+→ Critics
+→ Awareness and demand
+→ Weekly sales
+→ Fans, finances, and knowledge
+→ Better future capability
+The original game remains a useful reference for:
+
+Three-stage pacing.
+
+Shared slider effort.
+
+Discipline priorities.
+
+Design/Technology identity.
+
+Topic/genre discovery.
+
+Reviews.
+
+Market/platform progression.
+
+The garage-to-empire fantasy.
+
+But Studio Empire’s V2 direction is better served by causal product quality rather than the original’s heavily historical moving target.
+
+On determinism, the foundation is already good: semantic stream names, stable coordinates, SHA-derived event rolls, local seeded streams, immutable outcome traces, and reproducibility tests. The next maturity step is not a “better random algorithm.” It is a formal versioned seed-addressing contract that guarantees:
+
+Different semantic events cannot collide through serialization.
+
+Refactors do not unexpectedly reorder randomness.
+
+Saves do not reroll history.
+
+Balance updates do not silently rewrite old campaigns.
+
+Every player-visible random outcome can be explained and reproduced.
+
+Investigation commands
+✅ nl -ba src/lib/game/determinism.ts — inspected the SHA-256-derived stateless random implementation.
+
+✅ nl -ba src/lib/game/scoring/rng.ts — inspected Mulberry32 and the FNV-style seed hash.
+
+✅ nl -ba src/lib/game/market/rng.ts — inspected market stream partitioning.
+
+✅ rg -n "seed|SeededRng|stableUnit|hashSeed|campaignSeed|projectSeed|outcomeTrace|reviewScores|weeklySalesPlan" src/lib/game --glob '*.{ts,tsx}' — mapped seed propagation and frozen outcomes throughout the domain.
+
+✅ nl -ba src/lib/game/production/algorithm.ts | sed -n '270,430p' — reviewed allocation, scope pressure, deterministic bugs, and development state transitions.
+
+✅ nl -ba src/lib/game/quality/algorithm.ts | sed -n '1,280p' — reviewed the alternate concept, quality, and review pipeline.
+
+✅ nl -ba src/lib/game/scoring/algorithmV2/quality.ts | sed -n '130,360p' — reviewed active V2 work output, focus, Design/Technology balance, craft, expectations, and bugs.
+
+✅ nl -ba src/lib/game/scoring/algorithmV2/critics.ts | sed -n '1,190p' — reviewed persistent critic profiles and seeded review variation.
+
+✅ nl -ba src/lib/game/commercial/weeklySales.ts | sed -n '1,300p' — reviewed live deterministic weekly sales.
+
+✅ nl -ba src/lib/game/commercial/runtime.ts | sed -n '1,330p' — reviewed weekly commercial state transitions and history persistence.
+
+✅ nl -ba src/lib/game/store.ts | sed -n '1460,1665p' — reviewed stage confirmation, polish, pre-release, and release gates.
+
+✅ nl -ba attachments/grok.md | sed -n '1,380p' — reviewed the repository’s prior reverse-engineered GDT mechanics research and source map.
+
+✅ nl -ba src/lib/game/__tests__/algorithms123.test.ts | sed -n '60,210p' — reviewed production determinism tests.
+
+✅ nl -ba src/lib/game/__tests__/marketV2.test.ts | sed -n '1,70p' — reviewed campaign and market determinism tests.
+
+⚠️ Internet research through the configured browsing service and direct network fallback was attempted but unavailable due authorization/network restrictions; external mechanics claims above are therefore anchored primarily to the repository’s existing research and linked source map rather than a fresh independent retrieval.
+
+No source changes, commit, or pull request were produced.
+
+what can we use from these repos whether its ux/ui or backend or whatever:
+
+https://github.com/DelManzueta/OpenTTD
+
+https://github.com/DelManzueta/simutrans
+
+https://github.com/DelManzueta/gdt-modAPI
+
+https://github.com/DelManzueta/GDT-Expansion-Pack (my fav)
+Copy
+Repository Mining Strategy
+Short answer
+All four repositories can help, but in different ways:
+
+Repository	Most useful for	Direct code reuse?
+OpenTTD	Simulation architecture, time controls, economy legibility, graphs, event/news UX, deterministic command patterns	Probably not; study architecture and reimplement concepts
+Simutrans	Long-running world simulation, monthly accounting, historical charts, capacity/utilization, data-driven content	Probably not; concepts and schemas are the main value
+gdt-modAPI	Extension API design, lifecycle hooks, registries, mod validation, compatibility boundaries	Potentially useful as an API reference, but not as Studio Empire’s runtime
+GDT-Expansion-Pack	Player-proven content, progression pacing, research/engine trees, post-release systems, information architecture	Best treated as a product-design reference unless its license clearly allows reuse
+The highest-value combination is:
+
+OpenTTD:
+simulation architecture + time UX + economic explanations
+
+Simutrans:
+persistent world accounting + capacity + historical data
+
+gdt-modAPI:
+stable extension boundaries + hook/event vocabulary
+
+GDT Expansion Pack:
+content progression + player-facing feature set + late-game fantasy
+I would not attempt to port their native simulation code into the React/TypeScript app. Instead, we should extract their mature ideas and implement them cleanly against Studio Empire’s deterministic TypeScript domain model.
+
+Important limitation: I attempted to inspect all four GitHub repositories directly, but network access to GitHub was rejected in this environment. The analysis below therefore distinguishes between:
+
+Well-established architectural traits of OpenTTD and Simutrans.
+
+Safe architectural conclusions from the role of a GDT mod API.
+
+Product ideas already documented in Studio Empire’s local expansion research.
+
+Items that still require a direct file-level/license audit before any code or assets are copied.
+
+1. OpenTTD
+What it can teach Studio Empire
+OpenTTD’s greatest value is not “transport gameplay.” It is decades of refinement around making a complicated, continuously running simulation understandable.
+
+Studio Empire is also becoming a continuous management simulation:
+
+Projects advance over time.
+
+Games stay on the market.
+
+Rival studios act.
+
+Platforms rise and decline.
+
+Cash moves through multiple categories.
+
+Trends and events alter future decisions.
+
+The player must understand why an outcome occurred.
+
+That makes OpenTTD highly relevant.
+
+1.1 Simulation clock and pause semantics
+OpenTTD’s player experience is built around:
+
+Pausing.
+
+Multiple speeds.
+
+Stopping automatically for important decisions.
+
+Allowing the world to continue while non-blocking windows are open.
+
+Separating simulation time from real UI time.
+
+Studio Empire already has speed controls and force-pauses when development requires a player decision. The stage confirmation flow does not begin production until the player confirms that stage, and the store automatically starts normal speed afterward. 
+
+What to borrow
+Introduce a formal simulation pause-reason model rather than treating speed 0 as the complete state:
+
+type PauseReason =
+  | "manual"
+  | "stage_decision"
+  | "pre_release"
+  | "critical_event"
+  | "bankruptcy_warning"
+  | "tutorial"
+  | "modal";
+Then separate:
+
+requestedSpeed
+effectiveSpeed
+pauseReasons
+This avoids bugs where closing one modal resumes time even though another system still requires a pause.
+
+It also supports settings familiar from mature simulation games:
+
+Pause on project stage completion.
+
+Pause on research completion.
+
+Pause on platform retirement.
+
+Pause on critical cash warning.
+
+Pause on rival announcement.
+
+Pause on publishing offer.
+
+Never pause for ordinary news.
+
+1.2 Command-based simulation actions
+One of the most valuable patterns from deterministic simulation games is distinguishing:
+
+Commands: what the player requested.
+
+Simulation: what the world calculated.
+
+Presentation: how the UI displays it.
+
+Studio Empire’s store currently mixes these responsibilities. For example, confirmStage():
+
+Reads current UI/game state.
+
+Normalizes the sliders.
+
+Plans the production stage.
+
+Sets speed.
+
+Changes the screen.
+
+Marks the save dirty.
+
+Creates a notification. 
+
+What to borrow
+Move toward explicit commands:
+
+type GameCommand =
+  | { type: "PROJECT_STAGE_CONFIRMED"; projectId: string; stage: 1 | 2 | 3; allocation: StageAllocation }
+  | { type: "GAME_RELEASED"; projectId: string; title: string; price: number }
+  | { type: "RESEARCH_STARTED"; researchId: string }
+  | { type: "STAFF_HIRED"; candidateId: string }
+  | { type: "CAMPAIGN_STARTED"; campaignConfig: CampaignConfig };
+A command handler would return:
+
+type CommandResult = {
+  nextState: GameState;
+  events: GameEvent[];
+  ledgerEntries: LedgerEntry[];
+};
+Benefits:
+
+Deterministic replay tests.
+
+Undo support for pre-commit configuration decisions.
+
+Cleaner multiplayer or spectator possibilities later.
+
+Better debugging.
+
+Easier save migrations.
+
+Easier separation of the large Zustand store.
+
+Exact causality for notifications and financial changes.
+
+We do not need full event sourcing. The valuable part is making player actions explicit and testable.
+
+1.3 News and event history
+OpenTTD-style games are good at presenting simulation changes as a stream of world events rather than a pile of modal dialogs.
+
+Studio Empire already has notifications and a market-news concept. The local design plan calls for data-driven economic, technological, cultural, staffing, platform, and competitor events. 
+
+What to borrow
+A tiered notification system:
+
+Critical interruption
+Requires player action:
+
+Publisher contract decision.
+
+Insolvency warning.
+
+Lawsuit or major crisis.
+
+Platform exclusivity offer.
+
+Staff departure negotiation.
+
+Important toast/news banner
+Does not pause automatically:
+
+Research completed.
+
+Rival announced a competing release.
+
+Platform price cut.
+
+Trend reversal.
+
+Major game crossed a sales milestone.
+
+Passive ticker/history
+Weekly ranking changes.
+
+Small sales milestones.
+
+Staff skill gains.
+
+Market-share drift.
+
+Routine platform news.
+
+Every event should have:
+
+type WorldEvent = {
+  id: string;
+  eventType: string;
+  occurredWeek: number;
+  severity: "routine" | "important" | "critical";
+  entityRefs: EntityRef[];
+  titleKey: string;
+  bodyKey: string;
+  causedBy?: EventCause[];
+  actions?: EventAction[];
+  read: boolean;
+};
+The essential OpenTTD lesson is that the simulation should leave a readable historical trail.
+
+1.4 Financial graphs and explanations
+OpenTTD-like interfaces make financial state understandable through:
+
+Category breakdowns.
+
+Current-period versus previous-period comparisons.
+
+Historical charts.
+
+Tooltips explaining line items.
+
+Color-coded income and expenses.
+
+Drill-down from aggregate to transaction.
+
+Studio Empire already has a ledger and weekly sales history. Its planned shell explicitly includes Finances and Market screens. 
+
+What to borrow
+A finance hierarchy:
+
+Studio finances
+├── Game revenue
+│   ├── Units × price
+│   ├── Platform fee
+│   ├── Publisher cut
+│   ├── Refunds
+│   └── Net developer revenue
+├── Development
+│   ├── Staff salary
+│   ├── Engine licensing
+│   ├── Outsourcing
+│   ├── QA
+│   └── Overtime
+├── Marketing
+├── Research
+├── Platform licenses
+├── Office overhead
+└── Taxes/financing
+Each number should be traceable to actual ledger entries rather than independently recalculated in the UI.
+
+Studio Empire’s weekly sales already computes gross revenue, platform fees, publisher cuts, and developer revenue independently. 
+
+1.5 Graph UX
+OpenTTD’s graphs are especially applicable to:
+
+Cash over time.
+
+Revenue and expenses.
+
+Fans.
+
+Studio reputation.
+
+Research income/spend.
+
+Platform installed base.
+
+Platform momentum.
+
+Genre popularity.
+
+Game unit sales.
+
+Market rank.
+
+Rival valuation.
+
+What to borrow
+A common graph component with:
+
+Entity toggles.
+
+Comparable series.
+
+Hover inspection.
+
+Fixed simulation-period x-axis.
+
+Event markers.
+
+Normalized and absolute modes.
+
+“Why did this change?” links.
+
+Time ranges: 12 weeks, 1 year, 5 years, all time.
+
+We should not recreate OpenTTD’s visual styling literally. We should borrow the interaction grammar.
+
+1.6 Entity inspection windows
+OpenTTD allows players to inspect individual entities without losing the global simulation context.
+
+For Studio Empire, the same model should apply to:
+
+A game.
+
+An employee.
+
+A rival studio.
+
+A platform.
+
+A publisher.
+
+An engine.
+
+A franchise.
+
+A research technology.
+
+Each detail screen should have stable tabs:
+
+Overview
+History
+Finances
+Performance
+Relationships
+Events
+For example, a game page could include:
+
+Overview       quality, reviews, current status
+Sales          weekly sales, revenue, price, lifecycle
+Audience       awareness, active players, sentiment
+Development    stage choices, staff, generated work, bugs
+Post-release   patches, DLC, ports, discounts
+Knowledge      lessons learned and confidence
+2. Simutrans
+Why Simutrans is different from OpenTTD for our purposes
+OpenTTD is the stronger reference for immediate interaction and broad simulation UX.
+
+Simutrans is particularly valuable for:
+
+Persistent world accounting.
+
+Capacity and utilization.
+
+Long-period operational history.
+
+Supply-chain-like dependencies.
+
+Data-driven content sets.
+
+Separating visual objects from simulation objects.
+
+A world that continues to evolve independently of the player.
+
+That maps well to the later Studio Empire economy.
+
+2.1 Capacity and utilization
+A studio has many capacities that should not be represented by simple unlock booleans:
+
+Developer time.
+
+Design capacity.
+
+Technical capacity.
+
+QA capacity.
+
+Marketing bandwidth.
+
+Management overhead.
+
+Office desks.
+
+Engine support bandwidth.
+
+Customer-support capacity.
+
+Server capacity.
+
+Manufacturing capacity for hardware.
+
+Publishing/distribution capacity.
+
+What to borrow
+Treat these as flows:
+
+capacity
+demand
+utilization
+backlog
+throughput
+failure rate
+For example:
+
+type DepartmentCapacity = {
+  capacityPerWeek: number;
+  scheduledWork: number;
+  completedWork: number;
+  backlog: number;
+  utilization: number;
+  overload: number;
+};
+This would make late-game management richer than “hire a staff member, receive +10% quality.”
+
+A QA department, for example, would not simply subtract bugs. It would have:
+
+Incoming defects.
+
+Testing throughput.
+
+Automation/tool bonuses.
+
+Platform-specific testing requirements.
+
+Regression risk.
+
+Unresolved backlog.
+
+Release certification capacity.
+
+2.2 Bottleneck-driven gameplay
+Simutrans-style systems are most interesting when the player discovers that total output is constrained by the slowest stage.
+
+Studio Empire can use the same principle:
+
+Idea throughput
+→ pre-production
+→ design
+→ implementation
+→ content
+→ QA
+→ certification
+→ launch
+→ support
+A technically powerful studio might still suffer because:
+
+QA is understaffed.
+
+Management span is exceeded.
+
+Audio is outsourced too late.
+
+Marketing begins after the launch window.
+
+The engine team cannot support multiple projects.
+
+Customer support is overwhelmed after release.
+
+Porting capacity is overbooked.
+
+This is a better source of difficulty than arbitrary global penalties.
+
+2.3 Monthly and yearly accounting
+Simutrans is a strong reference for saving historical operational metrics over long campaigns.
+
+Studio Empire currently records weekly sales history. It should eventually aggregate immutable time buckets:
+
+type PeriodSnapshot = {
+  period: number;
+  cash: number;
+  revenue: number;
+  expenses: number;
+  profit: number;
+  staffCount: number;
+  payroll: number;
+  gamesInDevelopment: number;
+  activeGames: number;
+  unitsSold: number;
+  fans: number;
+  reputation: number;
+  researchOutput: number;
+  marketRank: number;
+};
+Do not store only the current value and reconstruct old charts later. Historical charts should render stored history.
+
+2.4 Data-driven content packs
+Simutrans’s content-pack mentality is relevant even if Studio Empire never supports arbitrary mods.
+
+Studio Empire already has data catalogs for:
+
+132 topics.
+
+Six genres.
+
+Forty timeline platforms.
+
+Twenty-seven engine components. 
+
+What to borrow
+Put content into validated packs:
+
+type ContentPackManifest = {
+  id: string;
+  version: string;
+  schemaVersion: number;
+  dependencies: string[];
+  conflicts: string[];
+  content: {
+    topics?: string[];
+    platforms?: string[];
+    research?: string[];
+    events?: string[];
+    publishers?: string[];
+    rivals?: string[];
+  };
+};
+This is valuable even for first-party content:
+
+Base campaign.
+
+Alternate-history platform pack.
+
+Indie era pack.
+
+Online-services pack.
+
+Hardware era pack.
+
+Community expansion pack.
+
+Historical mode.
+
+Fictional platform mode.
+
+Content packs should be data, while core simulation rules remain code.
+
+2.5 World state independent of the player
+The market should not exist only to modify the player’s sales.
+
+It should independently contain:
+
+Platforms.
+
+Active studios.
+
+Games on sale.
+
+Franchises.
+
+Publishers.
+
+Trends.
+
+Audience segments.
+
+Hardware generations.
+
+Storefronts.
+
+Technology standards.
+
+Economic conditions.
+
+Studio Empire’s existing market V2 already moves in that direction through deterministic platforms, trends, and rival studios. The local product plan calls this the biggest improvement over ordinary GDT-style clones. 
+
+What to borrow
+Every market entity should have its own state and history. Player results then emerge from interaction with that state rather than from modifiers invented at release time.
+
+3. gdt-modAPI
+The main value: extension boundaries
+A mod API is valuable because it reveals where the underlying game’s authors or modders needed stable integration points.
+
+Even if none of its code is reusable, we should study its vocabulary:
+
+What can mods register?
+
+What lifecycle events are exposed?
+
+Which objects are mutable?
+
+Which parts are data-driven?
+
+How are save fields added?
+
+How are conflicts handled?
+
+How are content IDs namespaced?
+
+What happens when a mod is removed?
+
+How does a mod know the game version?
+
+How are UI panels injected?
+
+How do mods subscribe and unsubscribe?
+
+Those questions directly inform Studio Empire’s architecture.
+
+3.1 Registries
+Studio Empire should eventually expose internal registries rather than letting features import and mutate large arrays.
+
+Candidate registries:
+
+topicRegistry
+genreRegistry
+platformRegistry
+researchRegistry
+engineFeatureRegistry
+eventRegistry
+criticRegistry
+rivalArchetypeRegistry
+publisherRegistry
+achievementRegistry
+tutorialRegistry
+A registry should:
+
+Enforce unique namespaced IDs.
+
+Validate schemas.
+
+Resolve dependencies.
+
+Reject cycles.
+
+Provide filtered queries.
+
+Freeze after campaign initialization when necessary.
+
+Produce a content fingerprint for save compatibility.
+
+The planned progression architecture already describes an unlock registry with validation and cycle detection. 
+
+3.2 Lifecycle hooks
+Useful lifecycle events include:
+
+campaign.created
+week.started
+week.completed
+
+project.created
+project.stagePlanned
+project.stageCompleted
+project.cancelled
+project.buildFinalized
+project.released
+
+review.completed
+sales.weekCompleted
+game.becameDormant
+game.delisted
+
+research.started
+research.completed
+
+staff.hired
+staff.skillIncreased
+staff.left
+
+platform.launched
+platform.priceChanged
+platform.retired
+
+rival.projectAnnounced
+rival.gameReleased
+rival.bankrupt
+
+event.started
+event.choiceMade
+event.completed
+Internally, these should be typed domain events, not arbitrary callbacks directly mutating Zustand.
+
+3.3 Namespaced IDs
+A content extension system needs identifiers such as:
+
+core:topic/space
+core:platform/pc
+community-expansion:event/recession
+alternate-history:platform/aurora
+Namespaced IDs prevent collisions and allow saves to identify exactly which content created an entity.
+
+This also helps deterministic seeding:
+
+campaignSeed
++ contentPackId
++ entityId
++ eventType
++ simulationTime
+3.4 Save-data extensions
+A mod API usually exposes some way to retain extension state. Studio Empire should avoid arbitrary top-level save mutation.
+
+A safer model:
+
+type ExtensionState = Record<
+  ExtensionId,
+  {
+    schemaVersion: number;
+    data: unknown;
+  }
+>;
+Each extension provides:
+
+validate()
+migrate()
+initialize()
+disable()
+When content is missing, the game should:
+
+Preserve unknown extension data.
+
+Warn the player.
+
+Replace missing cosmetic definitions safely.
+
+Refuse to continue only if simulation-critical data cannot be resolved.
+
+Never silently reinterpret IDs.
+
+3.5 Declarative effects rather than unrestricted mutation
+Avoid an API where content can call:
+
+game.cash += 1_000_000;
+game.reviewScore = 10;
+Prefer declarative effects:
+
+{
+  type: "LEDGER_TRANSACTION",
+  category: "event",
+  amount: 100000,
+  reason: "grant_award"
+}
+or:
+
+{
+  type: "TEMPORARY_MARKET_MODIFIER",
+  modifierId: "festival_exposure",
+  durationWeeks: 4,
+  awarenessMultiplier: 1.15
+}
+Declarative effects can be:
+
+Validated.
+
+Logged.
+
+Deterministically ordered.
+
+Saved.
+
+Explained in UI.
+
+Replayed in tests.
+
+Limited for balance and safety.
+
+3.6 What not to bring over
+Studio Empire should not embed a compatibility layer for the original GDT runtime or inherit assumptions tied to its object model.
+
+The correct use of gdt-modAPI is:
+
+study the extension seams
+→ identify stable domain concepts
+→ design a typed Studio Empire API
+Not:
+
+emulate the original GDT JavaScript environment
+→ run old mods unchanged
+Supporting old mods would import technical debt, copyrighted-content risk, inconsistent balance, and dependencies on an unrelated proprietary game.
+
+4. GDT Expansion Pack
+Why this is probably the most useful product reference
+Your preference makes sense. Expansion packs are useful because they expose where experienced players feel the base progression becomes thin.
+
+Studio Empire’s existing research already identifies the strongest expansion direction:
+
+Development intelligence.
+
+Learn-by-doing staff.
+
+Dynamic platforms.
+
+Rival studios.
+
+Post-release management.
+
+Industry events. 
+
+It also explicitly proposes a native “Community Expansion” rather than copying old Workshop code, names, assets, or balance constants. 
+
+4.1 Content progression
+The expansion repository can likely help answer:
+
+How quickly new topics appear.
+
+How research trees are grouped.
+
+How engine technologies branch.
+
+When advanced sizes become available.
+
+How platform eras overlap.
+
+How late-game systems are introduced.
+
+Which unlocks players consider exciting versus filler.
+
+How much content can fit in the UI before becoming clutter.
+
+What to extract
+Create a spreadsheet or structured audit with one row per feature:
+
+Feature name
+Category
+Unlock timing
+Prerequisites
+Player decision introduced
+Economic effect
+Production effect
+Commercial effect
+UI surface
+Save data required
+Does it create a new strategy?
+Does it invalidate earlier content?
+Studio Empire equivalent
+Keep / adapt / reject
+The goal is not to import a huge research tree. It is to find meaningful decision families.
+
+4.2 Development intelligence
+Expansion and utility mods repeatedly show that players want more information about the hidden simulation:
+
+Exact stage percentages.
+
+Approximate Design/Technology balance.
+
+Genre-priority guidance.
+
+Staff workload.
+
+Feature conflicts.
+
+Repetition risk.
+
+Audience fit.
+
+Explanations for warnings.
+
+Studio Empire’s local design already proposes three information modes:
+
+Classic: discovery-heavy.
+
+Assisted: warnings and approximations.
+
+Analyst: detailed calculation breakdowns. 
+
+This is one of the best features to take inspiration from because it improves accessibility without changing the underlying balance.
+
+UX recommendation
+Every mechanic should support progressive knowledge:
+
+Unknown
+→ hinted
+→ observed
+→ understood
+→ mastered
+For example:
+
+Classic
+RPGs seem to benefit from strong storytelling.
+
+Assisted
+Your current Stage 1 plan may underfund Story.
+
+Analyst
+Story receives 18% of Stage 1 effort; your known RPG preference suggests approximately 30–40%.
+
+Do not show an exact predicted review score or a one-click optimal build.
+
+4.3 Learn by doing
+The expansion/mod ecosystem strongly supports employees improving through their actual work rather than only training menus. Studio Empire’s existing plan proposes contribution-based XP with relevance, difficulty, mentorship, fatigue, and diminishing returns. 
+
+What to use
+Field-specific experience.
+
+Skill growth from actual contribution.
+
+Traits emerging from repeated behavior.
+
+Mentorship.
+
+Slower growth at high skill.
+
+Secondary XP for working outside a specialty.
+
+Debugging contributing to QA expertise.
+
+Project leadership contributing to management.
+
+Marketing work contributing to business expertise.
+
+Studio Empire already tracks fieldExperience on staff and applies development experience, so the foundation exists.
+
+4.4 Post-release lifecycle
+This is probably the single largest gameplay opportunity after the core progression becomes stable.
+
+The expansion research proposes:
+
+Patches.
+
+Free updates.
+
+Expansion packs.
+
+Cosmetic DLC.
+
+Paid DLC.
+
+Ports.
+
+Definitive editions.
+
+Remasters.
+
+Remakes.
+
+Sequels.
+
+Bundles.
+
+IP licensing. 
+
+What to use
+Treat a released game as a managed product with:
+
+activePlayers
+ownerBase
+sentiment
+technicalHealth
+contentSatisfaction
+monetizationPressure
+supportBacklog
+platformCoverage
+franchiseStrength
+Post-release actions should have opportunity cost:
+
+Staff assigned to patches cannot develop the next game.
+
+Ports require platform expertise.
+
+DLC can reinvigorate sales but may fragment the team.
+
+Aggressive monetization raises short-term revenue but damages trust.
+
+Abandoning a broken launch saves money but damages the studio and franchise.
+
+A remaster released too soon creates fatigue.
+
+A strong expansion can extend the original’s lifecycle.
+
+A definitive edition may replace or cannibalize the base release.
+
+The local design explicitly says post-release success should depend on original quality, active audience, sentiment, price, timing, content quality, franchise fatigue, and platform audience. 
+
+4.5 Dynamic alternate-history platforms
+Expansion mods often increase replayability by allowing familiar platform archetypes to succeed or fail differently.
+
+Studio Empire already has deterministic campaign seeds and a dynamic market. The local plan calls for:
+
+Install base.
+
+Momentum.
+
+Audience composition.
+
+Development cost.
+
+Royalty rate.
+
+Hardware power.
+
+Publisher support.
+
+Library strength.
+
+Player trust.
+
+Platform age. 
+
+What to use
+A campaign setting:
+
+Historical stability
+├── Predictable
+├── Dynamic
+└── Wild
+Predictable
+Platform outcomes stay near expected historical archetypes.
+
+Dynamic
+Good software, price cuts, and competitor failures can meaningfully alter outcomes.
+
+Wild
+Large alternate histories are possible, but still causally explained.
+
+All three modes use the same market simulation. Only volatility, resilience, and event weights change.
+
+4.6 Rival studios and leaderboards
+Expansion and overhaul mods show that players want to exist in an industry rather than in an isolated spreadsheet.
+
+The local plan already specifies rivals with:
+
+Preferences.
+
+Quality.
+
+Budget strategy.
+
+Risk tolerance.
+
+Technology specialties.
+
+Platform relationships.
+
+Franchises.
+
+Financial health. 
+
+What to use
+Rival studios should generate player-facing stories:
+
+A respected rival pivots into your strongest genre.
+
+A struggling studio accepts a publisher acquisition.
+
+A dominant franchise becomes fatigued.
+
+A former market leader misses a technology transition.
+
+A small studio releases a breakout hit.
+
+A platform owner acquires an exclusive franchise.
+
+A rival’s release saturates the player’s launch window.
+
+A bankrupt rival’s IP becomes available.
+
+The existing market implementation should remain the authority; expansion content should provide data, strategies, and events rather than a parallel fake-rival system.
+
+4.7 Event content
+The local expansion specification proposes external event data with:
+
+Conditions.
+
+Probability.
+
+Duration.
+
+Immediate effects.
+
+Monthly effects.
+
+Player choices.
+
+Follow-up events.
+
+Localization keys. 
+
+This is exactly the right approach.
+
+From GDT Expansion Pack, the valuable extraction would be:
+
+Event categories.
+
+Timing.
+
+Decision framing.
+
+Dependencies.
+
+Consequence length.
+
+How often events appear.
+
+Which events genuinely change strategy.
+
+We should not copy event prose or exact balance values. We can reimplement the high-level situations with Studio Empire’s own fictional world and causal simulation.
+
+5. What can be used directly versus indirectly
+Probably safe to reuse conceptually
+Simulation time-control patterns.
+
+Pause-on-event preferences.
+
+Command/event separation.
+
+Historical charts.
+
+Accounting categories.
+
+Capacity and utilization.
+
+Bottleneck gameplay.
+
+Data registries.
+
+Namespaced IDs.
+
+Content-pack manifests.
+
+Lifecycle hooks.
+
+Post-release product management.
+
+Alternate platform histories.
+
+Industry events.
+
+Learn-by-doing staff.
+
+Information modes.
+
+Rival-studio archetypes.
+
+Detailed tooltips and calculation explanations.
+
+These are high-level ideas and architectural patterns, not expressive code or assets.
+
+Potentially reusable after license audit
+Pure data schemas.
+
+Generic algorithms.
+
+Mod manifest structures.
+
+Validation utilities.
+
+Event-bus abstractions.
+
+Serialization helpers.
+
+Test fixtures.
+
+Icons explicitly covered by a compatible license.
+
+Content definitions that are original to the repository and licensed for reuse.
+
+Each candidate needs:
+
+Exact source file.
+
+Copyright owner.
+
+Repository license.
+
+File-specific license.
+
+Compatibility with Studio Empire’s intended license.
+
+Required attribution.
+
+Evidence that the repository owner had the right to publish it.
+
+A fork being under your GitHub account does not necessarily give you relicensing rights to the upstream code or assets.
+
+Do not copy without explicit permission and license compatibility
+Original Game Dev Tycoon code.
+
+Decompiled or reverse-engineered proprietary source.
+
+Original GDT artwork, UI, sound, text, names, or event prose.
+
+Platform logos or trademarked console presentation.
+
+OpenTTD or Simutrans code into a differently licensed product without satisfying their licenses.
+
+Workshop-mod code with no license.
+
+Mod content that bundles copyrighted base-game assets.
+
+Exact balance tables where the only source is proprietary extracted data.
+
+Screenshots as shipped product assets.
+
+The current repository already captures the right doctrine: rebuild the strongest ideas natively rather than depending on or copying old mods. 
+
+6. Backend and simulation ideas worth adopting
+6.1 A headless simulation kernel
+Use the OpenTTD/Simutrans mental model:
+
+simulation.execute(command)
+simulation.tick(period)
+simulation.query(view)
+React and Zustand should not own the simulation rules.
+
+Target boundaries:
+
+UI
+↓ issues commands
+GameSession
+↓
+Simulation services
+├── Production
+├── Staff
+├── Market
+├── Rivals
+├── Platforms
+├── Sales
+├── Finance
+├── Progression
+├── Events
+└── Post-release
+↓ emit domain events
+Projection/view-model layer
+↓
+UI
+This aligns with the repository’s planned direction of making the simulation independent of React. 
+
+6.2 Immutable historical accounting
+Adopt transport-simulation discipline:
+
+Every financial change becomes a ledger entry.
+
+Every completed sales week becomes immutable history.
+
+Every platform period stores a snapshot.
+
+Every review stores its algorithm and seed version.
+
+Every event stores its cause and effects.
+
+UI charts consume stored records rather than rerunning old algorithms.
+
+6.3 Config-driven systems
+From Simutrans and mod APIs:
+
+Simulation rules = typed code
+Balance = configuration
+Content = validated registries/packs
+Presentation = localized definitions/assets
+The local expansion plan already says balance constants should live in configuration files and that randomness must use the saved campaign seed. 
+
+6.4 Deterministic event processing
+A mature simulation loop should have a documented update order:
+
+1. Apply queued player commands
+2. Advance project production
+3. Advance staff fatigue and XP
+4. Complete research
+5. Advance platform lifecycle
+6. Advance market trends
+7. Advance rivals
+8. Resolve releases
+9. Calculate weekly sales
+10. Apply finance ledger
+11. Evaluate progression
+12. Schedule events
+13. Emit notifications
+14. Autosave
+The precise order matters because it defines causality and determinism.
+
+6.5 Content fingerprinting
+Borrow the mod/content-pack mentality:
+
+type CampaignContentFingerprint = {
+  packs: Array<{
+    id: string;
+    version: string;
+    hash: string;
+  }>;
+};
+When loading:
+
+Same fingerprint: load normally.
+
+Compatible update: migrate.
+
+Missing cosmetic content: degrade gracefully.
+
+Missing simulation-critical content: warn and offer a safe recovery path.
+
+Changed balance pack: preserve historical outcomes and version future behavior.
+
+7. UX/UI ideas worth adopting
+From OpenTTD
+Persistent simulation clock.
+
+Strong speed controls.
+
+Pause settings by event class.
+
+News/history feed.
+
+Financial breakdowns.
+
+Multi-series graphs.
+
+Entity detail panels.
+
+Comparisons over time.
+
+Dense data with clear hierarchy.
+
+Tooltips explaining values.
+
+Windows/panels that retain state while time advances.
+
+From Simutrans
+Capacity and utilization indicators.
+
+Bottleneck warnings.
+
+Historical monthly and yearly summaries.
+
+Network/dependency visualization.
+
+Filterable entity lists.
+
+Operational status colors.
+
+Backlogs and throughput.
+
+Long-period trend inspection.
+
+From gdt-modAPI
+Extensible navigation slots.
+
+Registries.
+
+Hook/event vocabulary.
+
+Content ownership labels.
+
+Version compatibility.
+
+Declarative content contributions.
+
+Debug panels that reveal which extension changed a value.
+
+From GDT Expansion Pack
+Richer research browsing.
+
+Large content catalogs with filters.
+
+Development-assistance overlays.
+
+Learn-by-doing staff views.
+
+Dynamic platform timelines.
+
+Rival standings.
+
+Awards.
+
+Post-release management.
+
+Alternate history.
+
+Community-style content packs.
+
+The combined Studio Empire interface
+A coherent shell could be:
+
+Top status
+Cash · Date · Reputation · Fans · Research · Speed
+
+Primary navigation
+Studio
+Projects
+Games
+Staff
+Research
+Market
+Platforms
+Finances
+
+Context panel
+Current project / selected entity
+
+Bottom or side event rail
+News · warnings · completed work · decisions
+
+Detail screens
+Summary
+History
+Performance
+Finances
+Relationships
+Events
+The repository’s planned shell already points toward separate Studio, Develop, Games, Staff, Research, Market, and Finances screens. 
+
+8. Recommended extraction priority
+Priority 1: GDT Expansion Pack product audit
+Because it is your favorite and closest to the desired fantasy, extract:
+
+Feature catalog.
+
+Progression order.
+
+Research categories.
+
+Engine-feature groups.
+
+Post-release actions.
+
+Platform-era content.
+
+Rival and market features.
+
+Information-assistance features.
+
+UI organization.
+
+Features that appear broad but produce no meaningful decisions.
+
+This becomes the product inspiration matrix.
+
+Priority 2: OpenTTD interaction audit
+Focus specifically on:
+
+Time controls.
+
+Pause rules.
+
+News/events.
+
+Finance screens.
+
+Graph controls.
+
+Entity inspection.
+
+List sorting/filtering.
+
+Explanation tooltips.
+
+Command/result feedback.
+
+Long-session usability.
+
+This becomes the simulation UX language.
+
+Priority 3: Simutrans systems audit
+Focus on:
+
+Capacity.
+
+Utilization.
+
+Bottlenecks.
+
+Historical accounting.
+
+Content packs.
+
+Dependency networks.
+
+World-state persistence.
+
+Long-running simulation performance.
+
+This becomes the empire-scale operations model.
+
+Priority 4: gdt-modAPI architecture audit
+Focus on:
+
+Registries.
+
+Lifecycle hooks.
+
+Namespacing.
+
+Version detection.
+
+Save extensions.
+
+Content registration.
+
+UI integration.
+
+Failure handling.
+
+Mod removal.
+
+Compatibility.
+
+This becomes the extension and first-party content architecture.
+
+9. What I would not take
+Even if found in those repositories, I would reject:
+
+A giant unlock tree with hundreds of near-identical upgrades.
+
+Exact optimal-slider automation.
+
+Arbitrary rival income.
+
+A global event system that ignores market state.
+
+Popup-heavy UI.
+
+Endless information without explanation.
+
+Staff reduced to linear stat bonuses.
+
+All late-game departments unlocked at once.
+
+Every platform following a fixed historical fate.
+
+A stock market before the core studio economy works.
+
+Multiplayer before the deterministic single-player simulation stabilizes.
+
+Any architecture that allows plugins to mutate game state without validation.
+
+The existing research reaches the same conclusion: content quantity should not replace depth, and the project should avoid fake competitors, exact optimal sliders, excessive popups, premature stock-market complexity, and premature multiplayer. 
+
+10. Final recommendation
+Use the four repositories as four layers of inspiration:
+
+GDT Expansion Pack defines what players want
+More progression.
+
+More development information.
+
+More content.
+
+Better staff growth.
+
+Post-release management.
+
+Dynamic platforms.
+
+Rivals.
+
+Events.
+
+OpenTTD defines how a complex simulation communicates
+Time.
+
+Money.
+
+History.
+
+News.
+
+Entities.
+
+Graphs.
+
+Cause and effect.
+
+Simutrans defines how the empire operates at scale
+Capacity.
+
+Utilization.
+
+Bottlenecks.
+
+Long-period accounting.
+
+Persistent world state.
+
+Data packs.
+
+gdt-modAPI defines where the seams should be
+Registries.
+
+Hooks.
+
+Namespaces.
+
+Save extensions.
+
+Compatibility.
+
+Declarative contributions.
+
+The desired result is not “Game Dev Tycoon with more topics.” It is:
+
+A deterministic game-studio simulation with GDT’s accessible project loop, OpenTTD’s legible living economy, Simutrans’s operational depth, and an expansion-ready content architecture.
+
+Investigation commands
+⚠️ git ls-remote https://github.com/DelManzueta/OpenTTD.git HEAD — GitHub access was rejected by the environment’s network tunnel.
+
+⚠️ git ls-remote https://github.com/DelManzueta/simutrans.git HEAD — GitHub access was rejected by the environment’s network tunnel.
+
+⚠️ git ls-remote https://github.com/DelManzueta/gdt-modAPI.git HEAD — GitHub access was rejected by the environment’s network tunnel.
+
+⚠️ git ls-remote https://github.com/DelManzueta/GDT-Expansion-Pack.git HEAD — GitHub access was rejected by the environment’s network tunnel.
+
+✅ rg -n -i "openttd|simutrans|gdt-modapi|expansion.pack|community expansion" . --glob '!node_modules/**' --glob '!.git/**' --glob '!.vercel/**' — identified existing repository research and expansion specifications.
+
+✅ nl -ba attachments/grok.md | sed -n '390,780p' — reviewed the existing Community Expansion, living-market, staff, rival, event, and post-release design research.
+
+✅ nl -ba attachments/grok.md | sed -n '760,1040p' — reviewed campaign progression, information modes, garage onboarding, development, and release specifications.
+
+✅ nl -ba docs/PROGRESSION_ARCHITECTURE.md | sed -n '1,240p' — reviewed the planned headless progression, registry, save, UI-shell, and feature-flag architecture.
+
+✅ nl -ba docs/PHASE_ONE_CONTENT.md | sed -n '1,240p' — reviewed current content catalogs and progressive exposure.
+
+No code or repository files were changed, so no commit or pull request was created.
+
+a big issue is the ui, ui components tokens, consistency etc. below is grok's response to the same question asked, review and tell me what you think (i'm waiting on Tesana's response):
+
+```
+**Here's what is actually useful from each of your repos for Studio Empire** (prioritized by value for our React/TS + deterministic simulation stack).\n\n### 1. GDT-Expansion-Pack (your favorite) — highest value\n\nThis is pure gold. It is the best ready-made source of both **content** and **UX/systems ideas** that map almost 1:1 onto Studio Empire.\n\n**Content we can mine / adapt immediately**\n- ~80 topics with full `genreWeightings` (6 values) + `audienceWeightings` (3 values)\n- 11 platforms (Grapple / Itara / Ninvento / Vonny / Holo / Mirconoft lines) with lifecycle dates, market points, techLevel, licence/dev costs, genre & audience weights, announcement events\n- 20+ research items gated by mission/category (Graphic, Sound, AI, Gameplay, Engine, Story, Dialogs, World Design, Level Design)\n- Random + fixed events with trigger conditions, notifications, and decision outcomes (cash / hype / fans effects)\n\nThese are already structured the way our content catalogs should be. We can curate the best ones into our Phase 1 / Phase 2 catalogs instead of inventing everything from scratch.\n\n**UX/UI patterns worth stealing**\n- **Topic search bar + usage-count badge** in the create-game picker (prefix filter). Extremely useful once the topic list grows.\n- **Custom price control** at release (player sets the price instead of fixed size-based price, with risk/reward on sales). We already have pieces of this in the commercial layer — the Expansion Pack shows a clean player-facing version.\n- **Difficulty selector** (Easy 0.8 / Normal 1.0 / Hard 1.2) that scales starting cash, costs, research costs, platform fees, unit prices, and fan growth. Simple and effective.\n- **Custom Computers** multi-step hardware lab UI (pick OS / CPU / Motherboard / GPU / RAM / Storage + cases + later peripherals). Progressive “cooler” cases, techLevel average, cost, success factor. This is an excellent blueprint for our future Hardware Lab / custom platform / custom engine builder phase.\n\n**Other systems**\n- Black Bull (staff energy consumable) → idea for staff fatigue / temporary boosts.\n- Modular component parts with techLevel + cost.\n- DataStore for persistence across saves.\n\n### 2. gdt-modAPI — architectural patterns\n\nThis is the official Greenheart Games modding surface (the one that shipped with GDT 1.5+). It is not content — it is the **extension API**.\n\nKey transferable design:\n\n- Clean registration methods: `GDT.addTopics()`, `GDT.addPlatform()`, `GDT.addEvent()`, `GDT.addResearchItem()`\n- Validated weightings (genre 6-array, audience 3-array)\n- Platform lifecycle + marketPoints + linked events\n- Notification + DecisionNotification system\n- `getDataStore()` for mod-specific persistence\n- Event hooks around review / release / week\n\n**What this means for us**  \nWe should keep our content catalogs data-driven with roughly the same shape (`id`, `name`, `genreWeightings`, `audienceWeightings`, `techLevel`, `published`/`retire`, etc.). That way we can later support content packs / DLC-style expansions cleanly, and the knowledge/report systems stay consistent.\n\n### 3. OpenTTD & Simutrans — high-level tycoon inspiration only\n\nThese are full C++ open-source transport tycoon engines (your forks of the classics). Direct code reuse is not practical in our React + TypeScript + Zustand stack.\n\n**Still useful as design references:**\n\n| Area | What we can take |\n|------|------------------|\n| UX density | Multi-panel management UIs, graphs, notification queues, status at a glance |\n| Economy | Residual income curves, network effects, industry supply chains, long-term company health |\n| Simulation philosophy | Deterministic tick simulation, strong save compatibility, AI companies as market pressure |\n| Content model | NewGRF / pakset mindset → how we package future content packs |\n| Progression feel | Long campaigns with meaningful mid- and late-game systems |\n\nThese reinforce the “garage → empire” fantasy and the importance of residual sales, market pressure, and readable information density.\n\n---\n\n### Recommended priority order for Studio Empire\n\n1. **Content** — Curate the best topics, platforms, and research items from the Expansion Pack into our catalogs (with proper weightings).\n2. **UX** — Topic search + usage badge in the picker; difficulty selector; better custom price UI at release.\n3. **Systems** — Difficulty multipliers; staff consumable / fatigue idea; decision-based event framework.\n4. **Later phases** — Custom Computers pattern → Hardware Lab / custom engine / custom platform builder.\n5. **Architecture** — Keep content registration data-driven (modAPI style) so packs stay easy.\n6. **Inspiration only** — OpenTTD/Simutrans for economy feel, UI density, and long-term progression pacing.\n\nWould you like me to start extracting the concrete topic/platform/research data tables from the Expansion Pack next (so we have them ready as reference data), or dig deeper into any specific system (custom computers, events, difficulty, pricing)? 
+```
+Copy
+My Take on Grok’s Response
+Bottom line
+Grok’s response is good as a feature-mining report, especially if it successfully inspected the four repositories directly. It identifies several high-value mechanics and concrete interface features.
+
+But it does not really answer your biggest UI problem.
+
+It tells us:
+
+Which screens and controls could be useful.
+
+Which content can be extracted.
+
+Which systems are appealing.
+
+Which UI features are worth adding.
+
+It does not establish:
+
+What Studio Empire should visually be.
+
+What the canonical design language is.
+
+Which existing mockup is authoritative.
+
+How tokens should be structured.
+
+Which UI primitives must exist.
+
+How those primitives combine into repeatable game-interface patterns.
+
+How density, responsiveness, accessibility, motion, and state are standardized.
+
+How Grok Heavy, Tesana, and I can make changes without producing three different-looking apps.
+
+That distinction is critical:
+
+Adding a topic search field to an inconsistent UI produces a better feature inside an inconsistent UI.
+
+Before mining more Expansion Pack screens, Studio Empire needs a UI constitution.
+
+1. What Grok got right
+1.1 GDT Expansion Pack appears to be the closest product reference
+If Grok’s file-level findings are accurate, it extracted highly relevant material:
+
+Topic data.
+
+Audience compatibility.
+
+Platform timelines.
+
+Research categories.
+
+Fixed and random events.
+
+Release pricing.
+
+Difficulty.
+
+Hardware-building flow.
+
+Persistence.
+
+That is far more immediately applicable than trying to port OpenTTD or Simutrans internals.
+
+The most useful UI ideas Grok surfaced are:
+
+Topic search.
+
+Usage badges.
+
+Player-set release pricing.
+
+Difficulty selection.
+
+A staged hardware configurator.
+
+These are specific enough to become real product requirements.
+
+1.2 Topic search and usage history are both valuable
+Studio Empire already has 132 topics, while the Garage slice exposes only four at first. 
+
+As more topics become visible, a simple grid will stop scaling.
+
+A good topic picker eventually needs:
+
+Search.
+
+Recent topics.
+
+Favorites.
+
+Research state.
+
+Usage count.
+
+Last-used date.
+
+Known compatibility.
+
+Knowledge confidence.
+
+Expansion/content-pack filters.
+
+Sorting.
+
+Keyboard navigation.
+
+Grok’s topic-search observation is therefore directly useful.
+
+The usage-count badge is even more valuable because it connects UI to mechanics:
+
+Space
+Used 3 times
+Last release: 42 weeks ago
+Repetition risk: low
+Known genre fit: Action ++
+That turns the picker from a content browser into a decision tool.
+
+1.3 The custom-price control maps to existing backend logic
+Studio Empire already lets the player set a launch price between $5 and $80. 
+
+The sales engine already compares price with a reference price and applies a bounded benefit for lower prices and a strong penalty for overpricing. 
+
+So this is not a speculative feature. The missing piece is a more expressive release UI showing tradeoffs such as:
+
+Reference price.
+
+Premium/discount percentage.
+
+Estimated demand effect.
+
+Gross revenue per unit.
+
+Platform fee.
+
+Publisher cut.
+
+Net revenue per unit.
+
+Positioning label: budget, standard, premium.
+
+Grok correctly identified a place where the Expansion Pack might provide practical UX inspiration for an existing system.
+
+1.4 Difficulty should be systematic rather than a cash-only toggle
+Grok’s list of possible difficulty multipliers is useful:
+
+Starting cash.
+
+Costs.
+
+Research.
+
+Platform fees.
+
+Unit economics.
+
+Fan growth.
+
+The important design refinement is that Studio Empire should not use one undifferentiated 0.8 / 1 / 1.2 multiplier for everything. That can produce unintuitive or inverted outcomes.
+
+Difficulty should have named dimensions:
+
+type DifficultyConfig = {
+  startingCapital: number;
+  developmentCosts: number;
+  payrollCosts: number;
+  researchCosts: number;
+  platformFees: number;
+  publisherStrictness: number;
+  marketCompetition: number;
+  reputationRecovery: number;
+  bankruptcyGrace: number;
+};
+And it must remain separate from information mode. The existing campaign specification already says economic difficulty and information mode are separate settings. 
+
+1.5 The hardware builder is a strong late-game UX reference
+A multi-step configurator for CPU, GPU, memory, storage, OS, case, and peripherals is exactly the kind of late-game aspirational system that can make “garage to empire” feel materially different.
+
+It is also a reusable interaction pattern:
+
+Engine builder
+Hardware builder
+Custom platform builder
+Game project setup
+DLC builder
+Publishing deal negotiator
+Office expansion planner
+The valuable thing is not only its hardware content. It is its step-based configuration pattern:
+
+Select category.
+
+Compare parts.
+
+See compatibility.
+
+See cost and technical impact.
+
+Review the assembled product.
+
+Confirm.
+
+Watch it enter production.
+
+That should become a Studio Empire system component, not a one-off Hardware Lab screen.
+
+1.6 The mod API observations are directionally correct
+Registries such as:
+
+addTopics.
+
+addPlatform.
+
+addEvent.
+
+addResearchItem.
+
+support the same data-driven direction already planned for Studio Empire.
+
+The progression architecture already calls for a validated unlock registry, configuration-driven content, filtered queries, and cycle detection. 
+
+Grok’s conclusion that Studio Empire should maintain data-driven content catalogs is correct.
+
+2. Where Grok’s response is too optimistic
+2.1 “Pure gold” and “map almost 1:1” are too strong
+Expansion Pack material may be excellent inspiration, but “maps almost 1:1” risks importing the original game’s assumptions into a simulation that has already evolved beyond them.
+
+Studio Empire differs in several ways:
+
+It has a more explicit production simulation.
+
+It has live weekly sales.
+
+It has a dynamic platform market.
+
+It has deterministic rival studios.
+
+It separates product quality from commercial awareness.
+
+It intends to avoid an unbounded historical target-score penalty.
+
+It uses knowledge confidence and post-game reporting.
+
+It is being designed for a larger empire phase.
+
+Therefore, Expansion Pack content should go through:
+
+Source feature
+→ player need
+→ underlying decision
+→ Studio Empire domain equivalent
+→ progression placement
+→ UI pattern
+→ balance adaptation
+Not:
+
+Expansion Pack record
+→ convert syntax
+→ add to Studio Empire
+2.2 “Mine/adapt immediately” is risky
+Before copying any actual data, we need to know:
+
+The repository’s license.
+
+Whether the content was original to the mod author.
+
+Whether it contains extracted Game Dev Tycoon data.
+
+Whether it contains trademarks, fictionalized trademark equivalents, or proprietary descriptions.
+
+Whether the repository license applies to assets and content as well as code.
+
+Whether attribution is required.
+
+Whether your fork preserves the original license.
+
+A GitHub fork being under your account does not automatically grant relicensing rights.
+
+This particularly affects:
+
+Topic names.
+
+Platform names.
+
+Platform histories.
+
+Exact compatibility arrays.
+
+Research names and descriptions.
+
+Event prose.
+
+Balance constants.
+
+Images and icons.
+
+Hardware cases and component art.
+
+The safer default remains what the project’s own research previously specified: reimplement high-level ideas natively rather than copy code, names, text, assets, or balance values. 
+
+2.3 The consumable-energy item is questionable
+“Black Bull” may be a recognizable mod feature, but a staff-energy consumable is not automatically a good Studio Empire mechanic.
+
+Potential problems:
+
+It trivializes fatigue.
+
+It turns a workforce-management system into an inventory click.
+
+It encourages perpetual crunch.
+
+It may introduce repetitive busywork.
+
+It could become an obvious always-use optimization.
+
+It risks tonal awkwardness if the game otherwise treats burnout seriously.
+
+The deeper mechanic worth extracting is:
+
+Temporary productivity can be purchased by creating deferred human cost.
+
+Studio Empire could express that through:
+
+Overtime.
+
+Crunch.
+
+Bonuses.
+
+Catering.
+
+Contractor support.
+
+Time off.
+
+Morale.
+
+Burnout risk.
+
+Error/bug risk.
+
+Staff retention.
+
+That is richer than copying an energy-drink button.
+
+2.4 DataStore is not necessarily a useful backend model
+A mod-scoped data store is appropriate for extending an existing proprietary game without altering its save schema.
+
+Studio Empire owns its own save model. It should use:
+
+Typed schemas.
+
+Versioned migrations.
+
+Namespaced extension state.
+
+Content fingerprints.
+
+Runtime validation.
+
+Immutable outcome history.
+
+The useful part of getDataStore() is namespaced persistence ownership, not the storage API itself.
+
+2.5 OpenTTD and Simutrans are undersold
+Grok classifies them as “high-level inspiration only.” Direct C++ code reuse is indeed impractical, but their value is deeper than aesthetics or general economy feel.
+
+They can materially inform:
+
+Simulation command boundaries.
+
+Tick ordering.
+
+Historical snapshots.
+
+Financial ledger projections.
+
+Entity inspection.
+
+Time-control semantics.
+
+Event queues.
+
+Graph interaction.
+
+Capacity and utilization.
+
+Deterministic save behavior.
+
+Content packs.
+
+Simulation debugging.
+
+So I agree with “do not port the code,” but not with treating them merely as moodboards.
+
+3. The biggest omission: Studio Empire’s design system
+This is the area where Grok’s response does not go far enough.
+
+3.1 Studio Empire currently has competing visual identities
+The active stylesheet says the product is:
+
+“Warm cream world, paper modals, orange CTAs. Room is the stage.” 
+
+The progression architecture says the target should be:
+
+Deep charcoal.
+
+Warm off-white type.
+
+Electric accent.
+
+Editorial numerals.
+
+Thin borders.
+
+No glassmorphism.
+
+No isometric presentation for now. 
+
+Meanwhile, the current mockup set includes a dark neon direction with colors such as cyan, purple, green, orange, and near-black.
+
+Those are not small variations. They are three different visual systems:
+
+Active game
+Warm cream
+Orange
+Paper
+Garage illustration
+Soft shadows
+Friendly GDT inspiration
+Architecture document
+Dark premium
+Editorial
+Thin borders
+Electric accent
+Flat 2D shell
+No glass
+V2 mockups
+Near-black
+Neon cyan
+Purple and green accents
+High-tech control room
+Glowing surfaces
+Before polishing components, the team must choose which direction is canonical.
+
+Otherwise every contributor will make locally reasonable choices that conflict globally.
+
+3.2 Existing tokens are mostly palette variables
+The active stylesheet has useful foundation tokens for:
+
+Backgrounds.
+
+Surfaces.
+
+Text.
+
+Borders.
+
+Accent.
+
+Game-state colors.
+
+Fonts.
+
+Radius.
+
+Shadows. 
+
+But this is not yet a complete design system.
+
+Missing or underdeveloped token categories include:
+
+Typography
+Display scale.
+
+Heading scale.
+
+Body scale.
+
+Caption scale.
+
+UI-label scale.
+
+Line heights.
+
+Letter spacing.
+
+Numeric styles.
+
+Font-weight roles.
+
+Spacing
+Component padding.
+
+Panel padding.
+
+Section gaps.
+
+Form gaps.
+
+Inline gaps.
+
+Page gutters.
+
+Safe areas.
+
+Sizing
+Control heights.
+
+Icon sizes.
+
+Navigation widths.
+
+Dialog widths.
+
+Panel minimums.
+
+Touch targets.
+
+Status-bar dimensions.
+
+Interaction
+Focus ring.
+
+Hover overlay.
+
+Pressed overlay.
+
+Selected state.
+
+Disabled state.
+
+Drag state.
+
+Drop target.
+
+Loading state.
+
+Elevation
+Base.
+
+Raised.
+
+Floating.
+
+Dialog.
+
+Popover.
+
+Toast.
+
+Tooltip.
+
+Motion
+Instant.
+
+Fast.
+
+Standard.
+
+Deliberate.
+
+Easing curves.
+
+Count-up timing.
+
+Panel transitions.
+
+Reduced-motion behavior.
+
+Layering
+Room art.
+
+HUD.
+
+Navigation.
+
+Dropdown.
+
+Overlay.
+
+Dialog.
+
+Toast.
+
+Debug.
+
+Tutorial coach mark.
+
+Data visualization
+Series colors.
+
+Positive/negative.
+
+Forecast.
+
+Rival.
+
+Player.
+
+Historical.
+
+Comparison.
+
+Grid.
+
+Axis.
+
+Selection.
+
+Without these, contributors continue reaching for arbitrary Tailwind classes and hex values.
+
+3.3 The primitive library is too small
+The complete reusable UI layer currently consists primarily of:
+
+Button.
+
+Input.
+
+Panel.
+
+Modal.
+
+Badge. 
+
+That is not enough for a dense management game.
+
+Missing foundational primitives include:
+
+Icon button.
+
+Checkbox.
+
+Radio group.
+
+Select.
+
+Search field.
+
+Textarea.
+
+Switch.
+
+Slider.
+
+Segmented control.
+
+Tabs.
+
+Tooltip.
+
+Popover.
+
+Dropdown.
+
+Menu item.
+
+Divider.
+
+Scroll area.
+
+Progress bar.
+
+Meter.
+
+Stat.
+
+Empty state.
+
+Skeleton.
+
+Toast.
+
+Drawer.
+
+Alert.
+
+Confirm dialog.
+
+Number input.
+
+Stepper.
+
+Table.
+
+List row.
+
+Data cell.
+
+Chart container.
+
+Entity avatar.
+
+Status dot.
+
+Timeline.
+
+Breadcrumb.
+
+Pagination.
+
+Command palette.
+
+The dependencies already include many Radix primitives, so the project can build accessible wrappers without adding a new component framework.
+
+3.4 The primitives bypass the tokens they are supposed to represent
+The CSS defines semantic tokens such as:
+
+--color-accent
+--color-accent-fg
+--color-border
+--color-paper
+--color-muted
+But Button hardcodes equivalent hex values directly into its class variants. 
+
+Modal also hardcodes:
+
+Overlay color.
+
+Border.
+
+Background.
+
+Text.
+
+Shadow.
+
+Separator.
+
+Close-button colors. 
+
+This creates two sources of truth:
+
+styles.css tokens
+and
+hardcoded component colors
+If the theme changes, the primitives do not necessarily follow.
+
+This is precisely the consistency problem you identified.
+
+3.5 There is extensive raw color usage
+The active game and mockups contain many direct hex colors and arbitrary Tailwind values.
+
+Some of that is justified:
+
+Scene illustration colors.
+
+Canvas/SVG art.
+
+Unique graph-series colors.
+
+Decorative assets.
+
+But many raw values are being used for ordinary interface elements:
+
+Text.
+
+Borders.
+
+Panels.
+
+Shadows.
+
+Buttons.
+
+Separators.
+
+Highlights.
+
+Navigation.
+
+Those should use semantic tokens.
+
+A useful rule is:
+
+Raw colors allowed
+Illustration internals.
+
+Generated artwork.
+
+Unique content art.
+
+Data-series definitions declared in one theme module.
+
+Raw colors prohibited
+Buttons.
+
+Forms.
+
+Cards.
+
+Dialogs.
+
+Text.
+
+Navigation.
+
+Badges.
+
+Focus.
+
+Generic borders.
+
+Generic shadows.
+
+3.6 Native and custom controls are mixed
+The source currently contains both shared <Button> usage and many raw <button> elements.
+
+That is not inherently wrong—selection cards and overlays may need raw semantic buttons—but there should be purpose-built components:
+
+<Button />
+<IconButton />
+<SelectionCard />
+<NavItem />
+<TabButton />
+<OverlayDismiss />
+<SpeedControl />
+<ToolbarButton />
+Without those patterns, each raw button independently invents:
+
+Radius.
+
+Hover.
+
+Focus.
+
+Selected state.
+
+Spacing.
+
+Icon alignment.
+
+Disabled appearance.
+
+Touch size.
+
+The same issue exists for raw inputs versus the shared Input.
+
+3.7 Accessibility is not systematized
+The existing modal has basic dialog roles and an overlay close button, which is a good start. 
+
+But the primitive does not visibly implement:
+
+Focus trapping.
+
+Focus restoration.
+
+Escape dismissal.
+
+Initial focus.
+
+aria-labelledby.
+
+Description association.
+
+Scroll locking.
+
+Nested-dialog behavior.
+
+Buttons also lack a standardized visible focus-ring class.
+
+A design system is not only visual consistency. It also standardizes behavior that individual feature authors routinely miss.
+
+4. What Grok’s recommendations would look like through a real design system
+4.1 Topic picker
+Grok says:
+
+Add topic search and usage badges.
+
+Correct, but the reusable system should be:
+
+<EntityPicker>
+  <EntityPicker.Header>
+    <SearchField />
+    <FilterMenu />
+    <SortMenu />
+  </EntityPicker.Header>
+
+  <EntityPicker.Grid>
+    <EntityChoiceCard
+      title="Space"
+      metadata={[
+        { label: "Used", value: "3" },
+        { label: "Last release", value: "42w ago" },
+      ]}
+      knowledge="known"
+      compatibility="great"
+      selected
+    />
+  </EntityPicker.Grid>
+</EntityPicker>
+The same pattern can select:
+
+Topics.
+
+Genres.
+
+Platforms.
+
+Engines.
+
+Staff.
+
+Research.
+
+Publishers.
+
+Hardware parts.
+
+That is how we turn one borrowed UX feature into a consistent system.
+
+4.2 Release pricing
+Instead of one unique slider:
+
+<DecisionPanel
+  title="Launch price"
+  summary={<MoneyValue value={29.99} />}
+>
+  <PriceControl />
+  <ImpactPreview />
+  <FeeBreakdown />
+  <RiskNotice />
+</DecisionPanel>
+Reusable components:
+
+MoneyValue.
+
+NumberStepper.
+
+ImpactPreview.
+
+BreakdownList.
+
+RiskBadge.
+
+DecisionPanel.
+
+4.3 Difficulty selection
+Instead of a generic select:
+
+<ChoiceCardGroup>
+  <ChoiceCard
+    title="Story"
+    description="More forgiving finances and slower rivals."
+    metrics={[
+      ["Starting capital", "+30%"],
+      ["Development cost", "−15%"],
+      ["Bankruptcy grace", "Extended"],
+    ]}
+  />
+</ChoiceCardGroup>
+The same pattern supports:
+
+Difficulty.
+
+Campaign length.
+
+Information mode.
+
+Historical volatility.
+
+Founder archetype.
+
+Publisher deals.
+
+Event choices.
+
+4.4 Hardware configurator
+Instead of a completely custom page:
+
+<ConfiguratorShell>
+  <ConfiguratorSteps />
+  <PartBrowser />
+  <SelectionSummary />
+  <CompatibilityIssues />
+  <CostSummary />
+  <ConfiguratorActions />
+</ConfiguratorShell>
+That shell can later power engines, platforms, offices, DLC, and publishing packages.
+
+5. The UI work that should happen before more feature extraction
+Phase 0: choose the visual identity
+The team must select one canonical direction:
+
+Option A: Refined warm studio
+Keep:
+
+Cream paper.
+
+Garage art.
+
+Orange accent.
+
+Friendly tactile surfaces.
+
+Refine toward:
+
+Better typography.
+
+Cleaner spacing.
+
+Fewer arbitrary colors.
+
+More editorial data presentation.
+
+Less GDT mimicry.
+
+Option B: Dark premium management console
+Use:
+
+Charcoal surfaces.
+
+Warm off-white text.
+
+One electric accent.
+
+Thin borders.
+
+High information density.
+
+Minimal decorative effects.
+
+This is closest to the architecture document. 
+
+Option C: Era-adaptive system
+Use the same component geometry and semantic tokens, but allow era themes:
+
+Garage era:
+warm, analog, paper, orange
+
+Office era:
+neutral graphite, blue accent
+
+Technology era:
+dark, precise, electric accent
+
+Hardware era:
+industrial, deep charcoal, technical grid
+The component architecture remains identical. Only theme values and limited texture change.
+
+This is my recommendation, but it is also the hardest to execute well. The architecture document already suggests stable layout with era-specific accent texture/grid changes. 
+
+Phase 1: semantic tokens
+Establish token families:
+
+color
+type
+space
+size
+radius
+border
+shadow
+motion
+layer
+breakpoint
+chart
+Separate primitive values from semantic roles:
+
+--palette-amber-500
+--palette-stone-950
+
+--color-action-primary
+--color-surface-raised
+--color-text-secondary
+--color-status-warning
+Components consume semantic roles, not palette values.
+
+Phase 2: primitives
+Build and document:
+
+Button.
+
+IconButton.
+
+Input.
+
+SearchField.
+
+Select.
+
+Checkbox.
+
+Switch.
+
+Slider.
+
+Tabs.
+
+Tooltip.
+
+Popover.
+
+Dropdown.
+
+Dialog.
+
+Drawer.
+
+Badge.
+
+Progress.
+
+Meter.
+
+Table.
+
+Toast.
+
+Scroll area.
+
+Phase 3: management-game patterns
+Build compositions:
+
+Status bar.
+
+Resource stat.
+
+Metric card.
+
+Entity row.
+
+Entity card.
+
+Selection card.
+
+Filter bar.
+
+Empty state.
+
+Decision panel.
+
+Breakdown list.
+
+Warning panel.
+
+Timeline.
+
+Event item.
+
+Notification inbox.
+
+Chart panel.
+
+Data table.
+
+Configurator shell.
+
+Inspector panel.
+
+Workspace shell.
+
+Phase 4: page templates
+Standardize:
+
+Dashboard.
+
+Catalog/list.
+
+Entity detail.
+
+Configuration wizard.
+
+Development workspace.
+
+Market analytics.
+
+Finance analytics.
+
+Research tree.
+
+Settings.
+
+Phase 5: migrate existing screens
+Migrate one vertical slice first:
+
+Main menu
+→ Garage dashboard
+→ New game picker
+→ Development stages
+→ Pre-release
+→ Reviews
+→ First sales week
+→ Game report
+Do not rebuild every secondary screen simultaneously.
+
+6. A shared contract for Grok Heavy, Tesana, and me
+Before anyone writes production UI, the team should agree on one document containing:
+
+Product principles
+Management density without spreadsheet hostility.
+
+Explain cause and effect.
+
+Progressive disclosure.
+
+Player choice before automation.
+
+One primary action per decision surface.
+
+Historical data is always inspectable.
+
+Use color semantically, not decoratively.
+
+The simulation continues unless a decision truly requires pausing.
+
+Visual direction
+Canonical theme.
+
+Typography.
+
+Surface hierarchy.
+
+Radius philosophy.
+
+Shadow philosophy.
+
+Icon style.
+
+Illustration role.
+
+Data-density target.
+
+Mobile behavior.
+
+Token contract
+Exact token names and intended usage.
+
+Component contract
+For every primitive:
+
+Variants.
+
+Sizes.
+
+States.
+
+Accessibility behavior.
+
+Mobile behavior.
+
+Allowed composition.
+
+Disallowed overrides.
+
+Page contract
+Maximum page width.
+
+Navigation structure.
+
+Panel grid.
+
+Status-bar behavior.
+
+Scroll ownership.
+
+Mobile transformation.
+
+Dialog versus drawer rules.
+
+Content contract
+Capitalization.
+
+Number formatting.
+
+Money formatting.
+
+Time formatting.
+
+Status terminology.
+
+Error language.
+
+Tooltip style.
+
+Notification severity.
+
+Review checklist
+Every UI change must answer:
+
+Does it use tokens?
+
+Does an existing component cover it?
+
+Does it introduce a new reusable pattern?
+
+Does it work with keyboard navigation?
+
+Does it work at mobile preview width?
+
+Does it show loading, empty, error, disabled, and selected states?
+
+Does it explain the relevant simulation effect?
+
+Does it preserve the visual hierarchy?
+
+Does it use actual domain data?
+
+Does it avoid embedding business logic in the component?
+
+7. My scoring of Grok’s response
+Area	Score	Assessment
+Feature discovery	9/10	Concrete and useful
+Expansion Pack analysis	8/10	Strong, though too enthusiastic about direct adaptation
+Mod API analysis	8/10	Correct architectural direction
+OpenTTD/Simutrans analysis	6/10	Correct but understates their architectural value
+Legal/licensing caution	3/10	“Mine/adapt immediately” is too risky
+UI feature ideas	8/10	Good individual features
+Visual-system analysis	2/10	Almost entirely absent
+Token strategy	1/10	Not addressed
+Component-system strategy	2/10	Registration APIs discussed, UI primitives not discussed
+Consistency strategy	1/10	No answer for preventing fragmentation
+Accessibility	1/10	Not addressed
+Responsive behavior	1/10	Not addressed
+Integration order	6/10	Sensible feature order, but UI foundations should come first
+Overall
+Strong repository-mining answer; incomplete product-design-system answer.
+
+8. What I want to compare with Tesana’s answer
+When Tesana responds, I would evaluate whether it answers these missing questions:
+
+Which existing Studio Empire visual direction should become canonical?
+
+Should the game remain warm and illustrative, become dark and analytical, or support era themes?
+
+Which tokens are missing?
+
+Which components are missing?
+
+How should dense desktop screens collapse on mobile?
+
+What is the main application shell?
+
+How do we distinguish page, panel, card, dialog, drawer, and inspector?
+
+How should charts and tables look?
+
+How do design tokens prevent raw-color drift?
+
+How do we migrate the existing game without a full rewrite?
+
+What accessibility contract applies to every primitive?
+
+How are new features from Expansion Pack expressed through reusable patterns?
+
+What is the first vertical slice to migrate?
+
+How do three collaborating systems avoid producing incompatible UI?
+
+If Tesana answers those well, its response may complement Grok’s almost perfectly:
+
+Grok:
+what features and content to take
+
+Tesana:
+what the product and interface system should become
+
+Our synthesis:
+how to encode it as tokens, components, patterns, and migration rules
+9. My recommendation right now
+Do not ask Grok to extract all Expansion Pack data tables yet.
+
+First ask it to produce a read-only Expansion Pack interface inventory:
+
+Screens.
+
+Dialogs.
+
+Pickers.
+
+Controls.
+
+Lists.
+
+Tables.
+
+Configuration flows.
+
+Information hierarchy.
+
+States.
+
+Repeated patterns.
+
+Interaction strengths.
+
+Interaction weaknesses.
+
+Screenshots or file references.
+
+Which patterns are unique versus reusable.
+
+Which patterns depend on GDT’s original UI.
+
+In parallel, use Tesana’s response to settle the visual direction.
+
+Then create a single approved deliverable:
+
+Studio Empire UI Foundation Specification
+Containing:
+
+Design principles.
+
+Canonical visual direction.
+
+Semantic tokens.
+
+Typography scale.
+
+Spacing scale.
+
+Surface/elevation hierarchy.
+
+Primitive inventory.
+
+Game-pattern inventory.
+
+Application shell.
+
+Responsive rules.
+
+Accessibility contract.
+
+Migration sequence.
+
+Expansion Pack pattern mapping.
+
+Visual QA checklist.
+
+Only after that should implementation or broad content extraction begin.
+
+That order prevents us from building a larger game on top of an inconsistent component foundation.
+
+Repository evidence reviewed
+The active product defines a warm cream, paper, and orange visual system in its primary stylesheet. 
+
+The same stylesheet currently contains only a partial token set and several globally defined one-off visual utilities. 
+
+The reusable UI layer currently consists mainly of Button, Input, Panel, Modal, and Badge. 
+
+Button variants duplicate semantic palette values as hardcoded hexadecimal colors rather than consuming the declared theme tokens. 
+
+The modal similarly hardcodes background, border, overlay, separator, text, and shadow values. 
+
+The planned architecture describes a different dark premium visual direction and a modular shell/screens/panels organization that has not yet become the active component system. 
+
+The existing content scale—132 topics and 40 timeline platforms—supports Grok’s conclusion that search, filtering, and scalable selection patterns will be necessary. 
+
+The existing expansion research already calls for Classic, Assisted, and Analyst information modes, which should become a foundational presentation rule rather than a one-off picker feature. 
+
+Inspection commands
+✅ nl -ba src/styles.css | sed -n '1,300p' — reviewed the active theme variables, base styles, utilities, range controls, and motion behavior.
+
+✅ nl -ba src/components/ui/primitives.tsx | sed -n '1,360p' — reviewed the complete shared primitive layer and its hardcoded visual values.
+
+✅ rg -o "#[0-9a-fA-F]{3,8}|(?:bg|text|border|shadow|ring)-\\[[^]]+\\]" src/components src/routes --glob '*.{ts,tsx}' | sort | uniq -c | sort -nr — audited raw color and arbitrary-value usage across active UI and mockups.
+
+✅ rg -c '<button' src/components src/routes --glob '*.{tsx,ts}' — inspected the distribution of raw button elements.
+
+✅ rg -c '<Button' src/components src/routes --glob '*.{tsx,ts}' — compared raw button use with the shared button primitive.
+
+✅ rg -c '<input' src/components src/routes --glob '*.{tsx,ts}' — inspected raw input use.
+
+✅ rg -c '<Input' src/components src/routes --glob '*.{tsx,ts}' — compared raw input use with the shared input primitive.
+
+✅ find src/components -maxdepth 4 -type f | sort — reviewed the current component inventory.
+
+No files were changed, so no commit or pull request was created.
+
+well, you're my tech lead so what you decide is final. i asked grok to do this ``Extract Expansion Pack data tables AND Analyze GDT Mod API structure, and `Analyze Studio Empire economy`` this the responses:
+
+````
+**Extracted Expansion Pack data tables + GDT Mod API structure analysis**\n\nGenre order used throughout (standard GDT):  \n`[Action, Adventure, RPG, Simulation, Strategy, Casual]`\n\nAudience order:  \n`[Young, Everyone, Mature]`\n\n---\n\n## 1. Expansion Pack Data Tables\n\n### Topics (~69 with full weightings)\n\n| Topic | Genre Weightings | Audience Weightings |\n|-------|------------------|---------------------|\n| Alternate World | [0.7, 1, 0.9, 1, 0.8, 0.8] | [0.7, 0.9, 1] |\n| Archery | [1, 0.6, 0.9, 1, 1, 0.7] | [0.8, 0.8, 1] |\n| Assassin | [1, 0.9, 0.8, 1, 1, 0.6] | [0.6, 0.7, 1] |\n| Astronaut | [0.8, 1, 0.6, 1, 1, 0.8] | [0.8, 1, 0.8] |\n| Athletics | [0.8, 0.6, 1, 0.8, 1, 0.9] | [0.8, 1, 0.8] |\n| Baking | [0.6, 0.6, 0.6, 1, 0.9, 1] | [1, 0.9, 0.7] |\n| Biathlon | [0.8, 1, 0.6, 1, 0.9, 1] | [0.8, 1, 0.9] |\n| Beat-em-up | [1, 0.6, 0.9, 0.6, 0.8, 0.9] | [0.6, 0.8, 1] |\n| Board Game | [0.8, 0.6, 0.7, 0.6, 0.9, 1] | [1, 1, 0.8] |\n| Bobsleigh | [1, 0.6, 0.9, 0.8, 0.9, 0.7] | [0.6, 0.8, 1] |\n| Canoeing | [0.8, 0.9, 1, 0.7, 1, 0.8] | [0.8, 1, 0.9] |\n| Card Game | [0.6, 0.6, 1, 0.8, 0.9, 1] | [1, 1, 0.9] |\n| Cavemen | [0.9, 1, 1, 0.6, 0.6, 0.9] | [1, 1, 0.9] |\n| Chess | [0.6, 0.6, 0.6, 1, 1, 1] | [0.6, 1, 0.9] |\n| Construction | [0.6, 0.6, 0.7, 1, 0.9, 1] | [1, 0.8, 0.7] |\n| Crime | [1, 0.8, 0.7, 1, 0.7, 0.9] | [0.6, 0.8, 1] |\n| Cycling | [0.9, 1, 0.8, 0.8, 1, 0.9] | [0.8, 1, 0.9] |\n| Dark Fantasy | [1, 0.8, 1, 0.6, 1, 0.6] | [0.6, 0.6, 1] |\n| Demons | [1, 0.8, 1, 0.6, 0.6, 0.6] | [0.6, 0.7, 1] |\n| Dinosaurs | [1, 0.9, 0.6, 0.9, 0.7, 0.6] | [1, 0.9, 0.7] |\n| Doctor | [0.6, 0.6, 0.9, 1, 1, 0.7] | [0.6, 0.8, 1] |\n| Doomsday | [1, 1, 0.8, 0.6, 0.7, 0.6] | [0.6, 0.7, 1] |\n| E-Sports | [1, 0.6, 1, 1, 1, 0.6] | [1, 1, 1] |\n| Educational | [0.6, 0.6, 0.6, 1, 0.8, 1] | [1, 0.8, 0.6] |\n| Fairy Tale | [0.8, 1, 0.8, 0.8, 0.6, 1] | [1, 0.8, 0.6] |\n| Fishing | [0.6, 0.7, 0.9, 1, 1, 0.8] | [0.7, 1, 0.9] |\n| Football | [1, 0.7, 1, 0.8, 1, 0.9] | [0.9, 1, 0.9] |\n| Formula 1 | [1, 0.8, 0.8, 0.8, 1, 1] | [0.7, 1, 1] |\n| Game Pack | [0.8, 0.8, 0.8, 0.8, 0.8, 1] | [0.8, 1, 0.7] |\n| Ghosts | [0.8, 1, 0.9, 0.6, 0.6, 0.8] | [1, 0.8, 0.9] |\n| Goblin | [0.9, 1, 1, 0.8, 0.6, 1] | [0.9, 1, 0.9] |\n| Gods | [1, 1, 1, 0.7, 0.8, 0.6] | [0.7, 1, 0.9] |\n| Hide and Seek | [0.6, 1, 0.7, 0.8, 0.7, 1] | [1, 0.9, 0.6] |\n| Hockey | [0.8, 0.6, 0.7, 1, 1, 0.7] | — |\n| Horse Racing | [1, 0.7, 0.9, 0.8, 1, 0.7] | — |\n| Ice Hockey | [1, 0.6, 0.9, 0.8, 1, 0.7] | — |\n| Judo | [1, 0.6, 0.8, 1, 1, 0.7] | — |\n| Karate | [1, 0.7, 1, 0.7, 1, 0.7] | — |\n| Maze | [0.8, 0.8, 0.9, 1, 0.9, 1] | — |\n| Mining | [0.8, 1, 0.9, 0.8, 0.7, 1] | — |\n| Motorcross | — | — |\n| Modern | — | — |\n| Mummies | — | — |\n| Parkour | — | — |\n| Point & Click | — | — |\n| Police | — | — |\n| Politics | — | — |\n| Puzzle | — | — |\n| Rage | — | — |\n| Robot | — | — |\n| Rugby | — | — |\n| Sailing | — | — |\n| Samurais | — | — |\n| Science | — | — |\n| Steampunk | — | — |\n| Skiing | — | — |\n| Super Villain | — | — |\n| Surfing | — | — |\n| Survival | — | — |\n| Swimming | — | — |\n| Table Tennis | — | — |\n| Tennis | — | — |\n| Tower Defense | — | — |\n| Vikings | — | — |\n| War | — | — |\n| Warlocks | — | — |\n| Witches | — | — |\n| Wizzards | — | — |\n| Wrestling | — | — |\n\n*(Full numerical weightings for the remaining topics exist in `source.js` and follow the same shape.)*\n\n### Platforms (11)\n\n| Name | Company | Tech | Published | Retire | Licence | Genre Weightings |\n|------|---------|------|-----------|--------|---------|------------------|\n| Grapintosh | Grapple | 1 | 1/7/4 | 4/6/2 | 20k | [1, 0.8, 0.9, 1, 1, 0.7] |\n| grMac | Grapple | 6 | 16/8/1 | 260/12/4 | 40k | [1, 0.9, 1, 1, 1, 0.8] |\n| Itara Backflash | Itara | 2 | 12/11/3 | 16/1/2 | 150k | [0.8, 1, 0.6, 0.7, 1, 0.6] |\n| Itara 5200 | Itara | 1 | 2/11/2 | 6/4/2 | 45k | [0.8, 1, 1, 0.9, 0.7, 1] |\n| 3GS | Ninvento | 4 | 21/9/3 | 24/5/1 | 100k | [0.7, 1, 0.8, 1, 0.6, 1] |\n| 2GS | Ninvento | 5 | 23/4/2 | 29/2/1 | 250k | [0.7, 0.8, 0.9, 1, 0.6, 1] |\n| Gameling Color | Ninvento | 3 | 9/11/2 | 15/2/1 | 15k | [0.7, 0.9, 1, 0.9, 0.6, 1] |\n| Viva Playsystem | Vonny | 6 | 22/6/2 | 29/2/1 | 750k | [0.7, 0.8, 0.9, 1, 0.6, 1] |\n| Playsystem 2 Slim | Vonny | 5 | 12/2/2 | 19/1/3 | 350k | [1, 0.8, 1, 0.9, 0.7, 0.9] |\n| Holo Box | Holo Corp | 7 | 20/1/1 | 260/12/4 | 250k | [0.9, 0.8, 0.7, 1, 0.7, 0.6] |\n| mBox 360 Slim | Mirconoft | 5 | 17/4/4 | 24/9/3 | 500k | [1, 0.9, 1, 0.9, 0.7, 0.9] |\n\nEach platform also carries `startAmount`, `unitsSold`, `marketKeyPoints` / `marketPoints`, `developmentCosts`, `audienceWeightings`, `iconUri`, and optional announcement events.\n\n### Research Items (22)\n\n| ID | Category | v | Requirement |\n|----|----------|---|-------------|\n| Realistic Particles | Graphic | 6 | Graphic > 7 |\n| Advanced Shaders | Graphic | 6 | Graphic > 5 |\n| Animated Textures | Graphic | 2 | Graphic > 3 |\n| Basic Holograms | Graphic | 4 | Graphic > 4 |\n| Advanced Holograms | Graphic | 8 | Graphic > 6 |\n| Interactive Holograms | Graphic | 10 | Graphic > 8 |\n| Realistic Sound | Sound | 6 | Sound > 6 |\n| Copywritten Music | Sound | 8 | Sound > 7 |\n| Superior AI | AI | 8 | AI > 7 |\n| AI Difficulty | AI | 4 | AI > 4 |\n| Cheat Codes | Gameplay | 4 | Gameplay > 3 |\n| Premium Content | Gameplay | 8 | Gameplay > 6 |\n| Quick Saving | Engine | 2 | Engine > 3 |\n| Seasons | Engine | 6 | Engine > 6 |\n| Collectables | Story/Quests | 2 | Story/Quests > 2 |\n| Simple quests | Story/Quests | 2 | Story/Quests > 3 |\n| Advanced quests | Story/Quests | 6 | Story/Quests > 6 |\n| Language Settings | Dialogs | 4 | Dialogs > 4 |\n| Realistic Water | World Design | 4 | World Design > 3 |\n| Realistic Plant Life | World Design | 6 | World Design > 6 |\n| Bosses | Level Design | 2 | Level Design > 2 |\n| Swift Loading | Level Design | 4 | Level Design > 5 |\n\n`v` must be one of `{1, 2, 4, 6, 8, 10, 12, 14}` (drives research point cost, dev cost, engine points).\n\n### Events (8)\n\n| Function | Style | Notes |\n|----------|-------|-------|\n| Celebration | Random, maxTriggers 1 | Garage level, progress 0.8–0.9 → party decision (cash/hype) |\n| Curiosity | — | Info-style |\n| Vac | — | Vacuum cleaner related |\n| Billy | — | “Billy the kid” style |\n| MovieGame | — | Movie deal |\n| Fire | — | Office fire |\n| FirstMagazine | — | Magazine interview |\n| SecMagazine | — | Second magazine |\n\nEvent shape:\n```js\n{\n  id, isRandom?, maxTriggers?,\n  trigger(company) → boolean,\n  getNotification(company) → Notification { header, text, options[] },\n  complete(decision) → side-effects (cash, hype, fans, etc.)\n}\n```\n\n### Difficulty System\n\n| Mode | Multiplier | Starting Cash | Effects |\n|------|------------|---------------|---------|\n| Easy | 0.8 | 100 000 | Lower monthly costs, research costs, platform fees; higher unit prices |\n| Normal | 1.0 | default | Baseline |\n| Hard | 1.2 | 50 000 | Higher costs, lower unit prices, scaled fans/research |\n\nScales: monthly costs, research points/dev/engine costs, platform licence + development costs, inverse unit prices (`Sales.smallUnitPrice` etc.), fan growth.\n\n### Other Systems\n\n- **Custom Price**: Player-settable launch price UI that overrides size-based defaults (with sales risk).\n- **Black Bull**: Staff context-menu consumable that restores some energy (less than a vacation).\n- **Custom Computers** (`CC_AddOn.js`, ~98 kB): Multi-step hardware lab (OS / CPU / Motherboard / GPU / RAM / Storage + cases + later peripherals). Produces techLevel average, cost, success factor. Progressive “cooler” case textures.\n- **Topic Search** (`Search_AddOn.js`): Prefix filter + usage-count badge in the topic picker.\n\n---\n\n## 2. GDT Mod API Structure Analysis\n\n**Entry point** (`modAPI.js`):\nLoads in order:\n1. `helpers/checks.js` (validation)\n2. `api/persistence.js`\n3. `api/events.js`\n4. `api/platforms.js`\n5. `api/topics.js`\n6. `api/research.js`\n7. `examples/examples.js`\n\n**Public surface** (added to global `GDT`):\n\n| Method | Purpose |\n|--------|---------|\n| `GDT.addTopics(array)` | Bulk-add topic objects |\n| `GDT.addPlatform(object)` | Add one platform (+ auto-registers its events) |\n| `GDT.addEvent(object)` | Add decision/notification event |\n| `GDT.addResearchItem(object)` | Add engine research item |\n| `GDT.getDataStore(pluginId)` | Per-plugin persistence |\n\n**Validation rules** (`checks.js`):\n- Topics require: `id`, `name`, `genreWeightings[6]` (0–1), `audienceWeightings[3]` (0–1)\n- Platforms require the full set: `id`, `name`, `startAmount`, `unitsSold`, `licencePrize`, `published`, `platformRetireDate`, `developmentCosts`, `genreWeightings`, `audienceWeightings`, `techLevel`, `iconUri` + valid dates (`y/m/w`)\n- Research `v` ∈ `{1,2,4,6,8,10,12,14}`\n- Uniqueness on `id` (and usually `name`)\n- Optional `missionOverrides` validated separately\n\n**Persistence model**:\n```js\nvar store = GDT.getDataStore("MyMod");\nstore.data["key"] = value;      // per-save-game\nstore.settings["key"] = value;  // app-wide / global\n```\nAuto-hooks:\n- `saves.loading` → restores `data`\n- `saves.saving` → writes `data` into `modData`\n- `saves.newGame` → clears `data`\n\n**Event lifecycle**:\n1. `trigger(company)` → should this fire?\n2. `getNotification(company)` → returns `Notification` with options\n3. Player chooses → `complete(decision)` applies effects (`adjustCash`, `adjustHype`, etc.)\n\n**Platform shape** (canonical):\n```js\n{\n  id, name, company,\n  startAmount, unitsSold,\n  marketKeyPoints / marketPoints: [{date, amount}],\n  licencePrize, developmentCosts,\n  published, platformRetireDate,   // "y/m/w"\n  genreWeightings[6], audienceWeightings[3],\n  techLevel, iconUri,\n  events: [ /* announcement events */ ]\n}\n```\n\n**Research shape**:\n```js\n{\n  id, name, v,           // v drives cost tables\n  category, categoryDisplayName,\n  canResearch(company) → boolean\n}\n```\n\n---\n\n### Direct applicability to Studio Empire\n\n1. **Content catalogs** — Use the exact weighting shape (`genreWeightings[6]`, `audienceWeightings[3]`) and the extracted topic/platform/research tables as the starting data set.\n2. **API design** — Mirror the `add*` + validation + `getDataStore` pattern for our own content packs / future moddability.\n3. **Difficulty** — Simple multiplier system is ready to port.\n4. **Events** — Decision-notification-complete pattern maps cleanly onto our knowledge/report and market-event systems.\n5. **UX** — Topic search + usage badge, custom price control, and the Custom Computers multi-step builder are high-value references for later phases.\n\nI can next produce a cleaned JSON/TypeScript version of any of these tables (topics, platforms, research) ready to drop into Studio Empire’s content catalogs, or go deeper on Custom Computers / Search / Black Bull implementation details. Just say which.**Extracted Expansion Pack data tables + GDT Mod API structure analysis**\n````
+
+\n
+Genre order used throughout (standard GDT): &#x20;\n
+\`[Action, Adventure, RPG, Simulation, Strategy, Casual]\`\n
+\n
+Audience order: &#x20;\n
+\`[Young, Everyone, Mature]\`\n
+\n
+\---\n
+\n
+\## 1. Expansion Pack Data Tables\n
+\n
+\### Topics (\~69 with full weightings)\n
+\n
+\| Topic | Genre Weightings | Audience Weightings |\n
+\|-------|------------------|---------------------|\n
+\| Alternate World | [0.7, 1, 0.9, 1, 0.8, 0.8] | [0.7, 0.9, 1] |\n
+\| Archery | [1, 0.6, 0.9, 1, 1, 0.7] | [0.8, 0.8, 1] |\n
+\| Assassin | [1, 0.9, 0.8, 1, 1, 0.6] | [0.6, 0.7, 1] |\n
+\| Astronaut | [0.8, 1, 0.6, 1, 1, 0.8] | [0.8, 1, 0.8] |\n
+\| Athletics | [0.8, 0.6, 1, 0.8, 1, 0.9] | [0.8, 1, 0.8] |\n
+\| Baking | [0.6, 0.6, 0.6, 1, 0.9, 1] | [1, 0.9, 0.7] |\n
+\| Biathlon | [0.8, 1, 0.6, 1, 0.9, 1] | [0.8, 1, 0.9] |\n
+\| Beat-em-up | [1, 0.6, 0.9, 0.6, 0.8, 0.9] | [0.6, 0.8, 1] |\n
+\| Board Game | [0.8, 0.6, 0.7, 0.6, 0.9, 1] | [1, 1, 0.8] |\n
+\| Bobsleigh | [1, 0.6, 0.9, 0.8, 0.9, 0.7] | [0.6, 0.8, 1] |\n
+\| Canoeing | [0.8, 0.9, 1, 0.7, 1, 0.8] | [0.8, 1, 0.9] |\n
+\| Card Game | [0.6, 0.6, 1, 0.8, 0.9, 1] | [1, 1, 0.9] |\n
+\| Cavemen | [0.9, 1, 1, 0.6, 0.6, 0.9] | [1, 1, 0.9] |\n
+\| Chess | [0.6, 0.6, 0.6, 1, 1, 1] | [0.6, 1, 0.9] |\n
+\| Construction | [0.6, 0.6, 0.7, 1, 0.9, 1] | [1, 0.8, 0.7] |\n
+\| Crime | [1, 0.8, 0.7, 1, 0.7, 0.9] | [0.6, 0.8, 1] |\n
+\| Cycling | [0.9, 1, 0.8, 0.8, 1, 0.9] | [0.8, 1, 0.9] |\n
+\| Dark Fantasy | [1, 0.8, 1, 0.6, 1, 0.6] | [0.6, 0.6, 1] |\n
+\| Demons | [1, 0.8, 1, 0.6, 0.6, 0.6] | [0.6, 0.7, 1] |\n
+\| Dinosaurs | [1, 0.9, 0.6, 0.9, 0.7, 0.6] | [1, 0.9, 0.7] |\n
+\| Doctor | [0.6, 0.6, 0.9, 1, 1, 0.7] | [0.6, 0.8, 1] |\n
+\| Doomsday | [1, 1, 0.8, 0.6, 0.7, 0.6] | [0.6, 0.7, 1] |\n
+\| E-Sports | [1, 0.6, 1, 1, 1, 0.6] | [1, 1, 1] |\n
+\| Educational | [0.6, 0.6, 0.6, 1, 0.8, 1] | [1, 0.8, 0.6] |\n
+\| Fairy Tale | [0.8, 1, 0.8, 0.8, 0.6, 1] | [1, 0.8, 0.6] |\n
+\| Fishing | [0.6, 0.7, 0.9, 1, 1, 0.8] | [0.7, 1, 0.9] |\n
+\| Football | [1, 0.7, 1, 0.8, 1, 0.9] | [0.9, 1, 0.9] |\n
+\| Formula 1 | [1, 0.8, 0.8, 0.8, 1, 1] | [0.7, 1, 1] |\n
+\| Game Pack | [0.8, 0.8, 0.8, 0.8, 0.8, 1] | [0.8, 1, 0.7] |\n
+\| Ghosts | [0.8, 1, 0.9, 0.6, 0.6, 0.8] | [1, 0.8, 0.9] |\n
+\| Goblin | [0.9, 1, 1, 0.8, 0.6, 1] | [0.9, 1, 0.9] |\n
+\| Gods | [1, 1, 1, 0.7, 0.8, 0.6] | [0.7, 1, 0.9] |\n
+\| Hide and Seek | [0.6, 1, 0.7, 0.8, 0.7, 1] | [1, 0.9, 0.6] |\n
+\| Hockey | [0.8, 0.6, 0.7, 1, 1, 0.7] | — |\n
+\| Horse Racing | [1, 0.7, 0.9, 0.8, 1, 0.7] | — |\n
+\| Ice Hockey | [1, 0.6, 0.9, 0.8, 1, 0.7] | — |\n
+\| Judo | [1, 0.6, 0.8, 1, 1, 0.7] | — |\n
+\| Karate | [1, 0.7, 1, 0.7, 1, 0.7] | — |\n
+\| Maze | [0.8, 0.8, 0.9, 1, 0.9, 1] | — |\n
+\| Mining | [0.8, 1, 0.9, 0.8, 0.7, 1] | — |\n
+\| Motorcross | — | — |\n
+\| Modern | — | — |\n
+\| Mummies | — | — |\n
+\| Parkour | — | — |\n
+\| Point & Click | — | — |\n
+\| Police | — | — |\n
+\| Politics | — | — |\n
+\| Puzzle | — | — |\n
+\| Rage | — | — |\n
+\| Robot | — | — |\n
+\| Rugby | — | — |\n
+\| Sailing | — | — |\n
+\| Samurais | — | — |\n
+\| Science | — | — |\n
+\| Steampunk | — | — |\n
+\| Skiing | — | — |\n
+\| Super Villain | — | — |\n
+\| Surfing | — | — |\n
+\| Survival | — | — |\n
+\| Swimming | — | — |\n
+\| Table Tennis | — | — |\n
+\| Tennis | — | — |\n
+\| Tower Defense | — | — |\n
+\| Vikings | — | — |\n
+\| War | — | — |\n
+\| Warlocks | — | — |\n
+\| Witches | — | — |\n
+\| Wizzards | — | — |\n
+\| Wrestling | — | — |\n
+\n
+\*(Full numerical weightings for the remaining topics exist in \`source.js\` and follow the same shape.)\*\n
+\n
+\### Platforms (11)\n
+\n
+\| Name | Company | Tech | Published | Retire | Licence | Genre Weightings |\n
+\|------|---------|------|-----------|--------|---------|------------------|\n
+\| Grapintosh | Grapple | 1 | 1/7/4 | 4/6/2 | 20k | [1, 0.8, 0.9, 1, 1, 0.7] |\n
+\| grMac | Grapple | 6 | 16/8/1 | 260/12/4 | 40k | [1, 0.9, 1, 1, 1, 0.8] |\n
+\| Itara Backflash | Itara | 2 | 12/11/3 | 16/1/2 | 150k | [0.8, 1, 0.6, 0.7, 1, 0.6] |\n
+\| Itara 5200 | Itara | 1 | 2/11/2 | 6/4/2 | 45k | [0.8, 1, 1, 0.9, 0.7, 1] |\n
+\| 3GS | Ninvento | 4 | 21/9/3 | 24/5/1 | 100k | [0.7, 1, 0.8, 1, 0.6, 1] |\n
+\| 2GS | Ninvento | 5 | 23/4/2 | 29/2/1 | 250k | [0.7, 0.8, 0.9, 1, 0.6, 1] |\n
+\| Gameling Color | Ninvento | 3 | 9/11/2 | 15/2/1 | 15k | [0.7, 0.9, 1, 0.9, 0.6, 1] |\n
+\| Viva Playsystem | Vonny | 6 | 22/6/2 | 29/2/1 | 750k | [0.7, 0.8, 0.9, 1, 0.6, 1] |\n
+\| Playsystem 2 Slim | Vonny | 5 | 12/2/2 | 19/1/3 | 350k | [1, 0.8, 1, 0.9, 0.7, 0.9] |\n
+\| Holo Box | Holo Corp | 7 | 20/1/1 | 260/12/4 | 250k | [0.9, 0.8, 0.7, 1, 0.7, 0.6] |\n
+\| mBox 360 Slim | Mirconoft | 5 | 17/4/4 | 24/9/3 | 500k | [1, 0.9, 1, 0.9, 0.7, 0.9] |\n
+\n
+Each platform also carries \`startAmount\`, \`unitsSold\`, \`marketKeyPoints\` / \`marketPoints\`, \`developmentCosts\`, \`audienceWeightings\`, \`iconUri\`, and optional announcement events.\n
+\n
+\### Research Items (22)\n
+\n
+\| ID | Category | v | Requirement |\n
+\|----|----------|---|-------------|\n
+\| Realistic Particles | Graphic | 6 | Graphic > 7 |\n
+\| Advanced Shaders | Graphic | 6 | Graphic > 5 |\n
+\| Animated Textures | Graphic | 2 | Graphic > 3 |\n
+\| Basic Holograms | Graphic | 4 | Graphic > 4 |\n
+\| Advanced Holograms | Graphic | 8 | Graphic > 6 |\n
+\| Interactive Holograms | Graphic | 10 | Graphic > 8 |\n
+\| Realistic Sound | Sound | 6 | Sound > 6 |\n
+\| Copywritten Music | Sound | 8 | Sound > 7 |\n
+\| Superior AI | AI | 8 | AI > 7 |\n
+\| AI Difficulty | AI | 4 | AI > 4 |\n
+\| Cheat Codes | Gameplay | 4 | Gameplay > 3 |\n
+\| Premium Content | Gameplay | 8 | Gameplay > 6 |\n
+\| Quick Saving | Engine | 2 | Engine > 3 |\n
+\| Seasons | Engine | 6 | Engine > 6 |\n
+\| Collectables | Story/Quests | 2 | Story/Quests > 2 |\n
+\| Simple quests | Story/Quests | 2 | Story/Quests > 3 |\n
+\| Advanced quests | Story/Quests | 6 | Story/Quests > 6 |\n
+\| Language Settings | Dialogs | 4 | Dialogs > 4 |\n
+\| Realistic Water | World Design | 4 | World Design > 3 |\n
+\| Realistic Plant Life | World Design | 6 | World Design > 6 |\n
+\| Bosses | Level Design | 2 | Level Design > 2 |\n
+\| Swift Loading | Level Design | 4 | Level Design > 5 |\n
+\n
+\`v\` must be one of \`{1, 2, 4, 6, 8, 10, 12, 14}\` (drives research point cost, dev cost, engine points).\n
+\n
+\### Events (8)\n
+\n
+\| Function | Style | Notes |\n
+\|----------|-------|-------|\n
+\| Celebration | Random, maxTriggers 1 | Garage level, progress 0.8–0.9 → party decision (cash/hype) |\n
+\| Curiosity | — | Info-style |\n
+\| Vac | — | Vacuum cleaner related |\n
+\| Billy | — | “Billy the kid” style |\n
+\| MovieGame | — | Movie deal |\n
+\| Fire | — | Office fire |\n
+\| FirstMagazine | — | Magazine interview |\n
+\| SecMagazine | — | Second magazine |\n
+\n
+Event shape:\n
+\`\`\`js\n
+{\n
+  id, isRandom?, maxTriggers?,\n
+  trigger(company) → boolean,\n
+  getNotification(company) → Notification { header, text, options[] },\n
+  complete(decision) → side-effects (cash, hype, fans, etc.)\n
+}\n
+\`\`\`\n
+\n
+\### Difficulty System\n
+\n
+\| Mode | Multiplier | Starting Cash | Effects |\n
+\|------|------------|---------------|---------|\n
+\| Easy | 0.8 | 100 000 | Lower monthly costs, research costs, platform fees; higher unit prices |\n
+\| Normal | 1.0 | default | Baseline |\n
+\| Hard | 1.2 | 50 000 | Higher costs, lower unit prices, scaled fans/research |\n
+\n
+Scales: monthly costs, research points/dev/engine costs, platform licence + development costs, inverse unit prices (\`Sales.smallUnitPrice\` etc.), fan growth.\n
+\n
+\### Other Systems\n
+\n
+\- \*\*Custom Price\*\*: Player-settable launch price UI that overrides size-based defaults (with sales risk).\n
+\- \*\*Black Bull\*\*: Staff context-menu consumable that restores some energy (less than a vacation).\n
+\- \*\*Custom Computers\*\* (\`CC\_AddOn.js\`, \~98 kB): Multi-step hardware lab (OS / CPU / Motherboard / GPU / RAM / Storage + cases + later peripherals). Produces techLevel average, cost, success factor. Progressive “cooler” case textures.\n
+\- \*\*Topic Search\*\* (\`Search\_AddOn.js\`): Prefix filter + usage-count badge in the topic picker.\n
+\n
+\---\n
+\n
+\## 2. GDT Mod API Structure Analysis\n
+\n
+\*\*Entry point\*\* (\`modAPI.js\`):\n
+Loads in order:\n
+1\. \`helpers/checks.js\` (validation)\n
+2\. \`api/persistence.js\`\n
+3\. \`api/events.js\`\n
+4\. \`api/platforms.js\`\n
+5\. \`api/topics.js\`\n
+6\. \`api/research.js\`\n
+7\. \`examples/examples.js\`\n
+\n
+\*\*Public surface\*\* (added to global \`GDT\`):\n
+\n
+\| Method | Purpose |\n
+\|--------|---------|\n
+\| \`GDT.addTopics(array)\` | Bulk-add topic objects |\n
+\| \`GDT.addPlatform(object)\` | Add one platform (+ auto-registers its events) |\n
+\| \`GDT.addEvent(object)\` | Add decision/notification event |\n
+\| \`GDT.addResearchItem(object)\` | Add engine research item |\n
+\| \`GDT.getDataStore(pluginId)\` | Per-plugin persistence |\n
+\n
+\*\*Validation rules\*\* (\`checks.js\`):\n
+\- Topics require: \`id\`, \`name\`, \`genreWeightings[6]\` (0–1), \`audienceWeightings[3]\` (0–1)\n
+\- Platforms require the full set: \`id\`, \`name\`, \`startAmount\`, \`unitsSold\`, \`licencePrize\`, \`published\`, \`platformRetireDate\`, \`developmentCosts\`, \`genreWeightings\`, \`audienceWeightings\`, \`techLevel\`, \`iconUri\` + valid dates (\`y/m/w\`)\n
+\- Research \`v\` ∈ \`{1,2,4,6,8,10,12,14}\`\n
+\- Uniqueness on \`id\` (and usually \`name\`)\n
+\- Optional \`missionOverrides\` validated separately\n
+\n
+\*\*Persistence model\*\*:\n
+\`\`\`js\n
+var store = GDT.getDataStore("MyMod");\n
+store.data["key"] = value;      // per-save-game\n
+store.settings["key"] = value;  // app-wide / global\n
+\`\`\`\n
+Auto-hooks:\n
+\- \`saves.loading\` → restores \`data\`\n
+\- \`saves.saving\` → writes \`data\` into \`modData\`\n
+\- \`saves.newGame\` → clears \`data\`\n
+\n
+\*\*Event lifecycle\*\*:\n
+1\. \`trigger(company)\` → should this fire?\n
+2\. \`getNotification(company)\` → returns \`Notification\` with options\n
+3\. Player chooses → \`complete(decision)\` applies effects (\`adjustCash\`, \`adjustHype\`, etc.)\n
+\n
+\*\*Platform shape\*\* (canonical):\n
+\`\`\`js\n
+{\n
+  id, name, company,\n
+  startAmount, unitsSold,\n
+  marketKeyPoints / marketPoints: [{date, amount}],\n
+  licencePrize, developmentCosts,\n
+  published, platformRetireDate,   // "y/m/w"\n
+  genreWeightings[6], audienceWeightings[3],\n
+  techLevel, iconUri,\n
+  events: [ /\* announcement events \*/ ]\n
+}\n
+\`\`\`\n
+\n
+\*\*Research shape\*\*:\n
+\`\`\`js\n
+{\n
+  id, name, v,           // v drives cost tables\n
+  category, categoryDisplayName,\n
+  canResearch(company) → boolean\n
+}\n
+\`\`\`\n
+\n
+\---\n
+\n
+\### Direct applicability to Studio Empire\n
+\n
+1\. \*\*Content catalogs\*\* — Use the exact weighting shape (\`genreWeightings[6]\`, \`audienceWeightings[3]\`) and the extracted topic/platform/research tables as the starting data set.\n
+2\. \*\*API design\*\* — Mirror the \`add\*\` + validation + \`getDataStore\` pattern for our own content packs / future moddability.\n
+3\. \*\*Difficulty\*\* — Simple multiplier system is ready to port.\n
+4\. \*\*Events\*\* — Decision-notification-complete pattern maps cleanly onto our knowledge/report and market-event systems.\n
+5\. \*\*UX\*\* — Topic search + usage badge, custom price control, and the Custom Computers multi-step builder are high-value references for later phases.\n
+\n
+I can next produce a cleaned JSON/TypeScript version of any of these tables (topics, platforms, research) ready to drop into Studio Empire’s content catalogs, or go deeper on Custom Computers / Search / Black Bull implementation details. Just say which.
+
+````
+**Studio Empire Economy Analysis**\n\nThe economy is a **layered, deterministic commercial simulation** with clear separation between quality/reviews and commercial success. Cash flow is auditable via an append-only ledger. Outcomes are frozen at release (`OutcomeTrace`) so save/load never re-rolls sales.\n\n---\n\n## 1. High-Level Model\n\n```\nQuality / Reviews (frozen at release)\n        ↓\nCommercial Layers (marketPotential × qualityDemand × awareness × hype × priceFit × distribution × lifecycle)\n        ↓\nWeekly Units → Gross Revenue → Platform Fee → Publisher Cut → Studio Revenue\n        ↓\nFans growth/churn + Research Points + Knowledge\n```\n\n**Key design principle:** Marketing and distribution affect *reach/awareness*, never quality or reviews. Weak games can still sell with reach; great games can underperform with zero awareness.\n\n---\n\n## 2. Commercial Layers (core formula)\n\nFrom `commercial/layers.ts` + `weeklySales.ts` / `algorithmV2/sales.ts`:\n\n| Layer | What it does | Key inputs |\n|-------|--------------|------------|\n| **marketPotential** | Addressable player pool | Size base × platform market × genre demand × topic fatigue × platform age × competition × trends |\n| **qualityDemand** | Conversion from reviews | Soft power curve on avgReview (6→~0.48, 9→~0.90, 10→1.0) |\n| **awareness** | How many people know the game | Organic + fans (log) + marketing (diminishing) + hype + publisher — **not quality** |\n| **hypeFactor** | Short-term launch energy | Front-loaded first ~6 weeks, decays |\n| **priceFit** | Elasticity vs size reference | Overpricing punishes weak games harder |\n| **distribution** | Reach mult + revenue share | Self vs publisher trade-off |\n| **lifecycle** | Platform age + shelf fade | Older platforms and late-shelf weeks reduce volume |\n\n**Size base market potential (before platform mult):**\n- Small ≈ 40k  \n- Medium ≈ 90k  \n- Large ≈ 180k  \n- AAA ≈ 320k  \n\n**Reference prices (elasticity baseline):**\n- Small $25 · Medium $40 · Large $50 · AAA $60  \n\n**Revenue share:**\n- Self-publish: studio keeps **70%**\n- Publisher default: studio keeps **~45%** (deals vary 30–60%)\n\n---\n\n## 3. Weekly Sales Engine\n\nTwo coordinated systems:\n\n1. **Plan generation at release** (`generateSalesPlanV2`) — builds a deterministic weekly unit curve from layers + seed. Stored in `OutcomeTrace.weeklySalesPlan`.\n2. **Live tick** (`calculateWeeklySales` / `tickReleasedSales`) — either follows the plan or runs the live `weekly_v3` formula with marketing state, fan conversion, and dormancy.\n\n**Title lifecycle phases:**\n- Launch window (week ≤1) → Growth (≤4) → Mature (≤11) → Long tail → Dormant\n\n**Dormancy:** ≤15 units for 6 consecutive weeks → off sale. No hard 14-week delist; long tail is real.\n\n**Variance:** Deterministic 0.94–1.06 from `hashSeed(campaignSeed, gameId, "sales", week)`.\n\n**Revenue math (per week):**\n```\ngross = units × price\nplatformFee = gross × platformFeeRate (typically ~0.30)\nafterPlatform = gross − platformFee\npublisherCut = afterPlatform × publisherCutRate\nstudioRevenue = afterPlatform − publisherCut\n```\n\n---\n\n## 4. Pricing & Elasticity\n\n- Player can set **launch price** (custom price system exists; defaults to size reference).\n- `computePriceFit`: ratio vs reference; elasticity rises when quality is low.\n- Underpricing slightly boosts units; overpricing a weak game is heavily punished.\n- Matches the spirit of your Expansion Pack’s custom-price feature.\n\n---\n\n## 5. Marketing (awareness only)\n\nCampaign catalog (garage → early office):\n\n| Campaign | Cost | Duration | Focus |\n|----------|------|----------|-------|\n| Garage Flyer Run | $1.5k | 14d | Cheap local awareness |\n| Magazine Ad | $8k | 28d | Steady trade press |\n| Demo Push | $15k | 21d | Strong hype spike |\n| Influencer Blitz | $45k | 21d | High reach (can flop if game is weak) |\n\n- Awareness and hype **decay daily**.\n- One-time release marketing spend converts to starting awareness points (diminishing returns).\n- Marketing never touches quality, bugs, or review scores.\n\n---\n\n## 6. Fans Economy\n\nFans are an economic asset (awareness + launch floor + conversion), not pure vanity.\n\n**Launch reaction** (`launchFanDelta`):\n- Strong reviews + commercial scale → large fan gains (capped).\n- Bombs shed fans (capped % of base so one flop can’t wipe the studio).\n- Scrutiny increases with existing fanbase size.\n\n**Weekly conversion** (`salesFanDelta`):\n- Hits convert buyers → fans at higher rates.\n- Bombs churn some buyers even while selling.\n- Heavy marketing on mediocre games converts poorly.\n\n**Fan tiers** (UI labels): Unknown → Niche → Growing → Recognized indie → Established → Major indie → Hit maker → Industry force.\n\n**First office gate** uses fans heavily: 25k fans + $1M cash + 5 releases + year/month threshold.\n\n---\n\n## 7. Publishing Board\n\nUnlock: ≥1 release **or** ≥500 fans.\n\n- Seasonal board (12 weeks) with 3 deals.\n- Trade-off: higher reach/awareness vs lower royalty + possible minimum score / genre / size requirements.\n- Upfront payment + royalty rate + penalty on failure.\n- Refresh costs $2k (once per season).\n\nPublishers example range: Hobbyist Distro (high share, low reach) ↔ Blue Chip (high reach, lower share, bigger upfront).\n\n---\n\n## 8. Costs & Cash Flow\n\n**Ledger categories** (append-only, idempotent by `ref`):\n`sales | marketing | development | payroll | rent | research | contract | publisher | office | cheat | other`\n\nCash is mirrored on `GameState.cash`; ledger is the audit trail (last 500 entries). Never re-rolls.\n\n**Known cost drivers:**\n- Development / production\n- Marketing campaigns\n- Research\n- Payroll / rent (office stages)\n- Office move (first office gate: $1M)\n- Publishing refresh / penalties\n- Platform licence / development costs (content-driven)\n\n**Income drivers:**\n- Weekly studio revenue from active titles (residual)\n- Publisher upfront\n- Contracts (if present)\n- Passive market RP while titles are on sale (not cash, but progression resource)\n\n---\n\n## 9. Market Dynamics\n\n- Platform installed base × lifecycle × availability\n- Genre/topic demand + topic repetition fatigue\n- Competition & trend modifiers (seeded)\n- Seasonal sine wave (±6%)\n- Rivals module exists (`market/rivals.ts`, `market/tick.ts`) for competitive pressure\n- Platform age steadily reduces lifecycle factor\n\n---\n\n## 10. Research Points (RP) Economic Side\n\nNot pure cash, but tightly coupled:\n\n- **Release spike:** `max(2, round(avgReview × 1.5))`\n- **Weekly market RP** while titles sell (size-scaled)\n- Founder activity RP (developing / researching / reporting / contract)\n- Employee production RP by office stage\n\n---\n\n## 11. Strengths of the Current Design\n\n1. **Clean separation** — Quality/reviews vs commercial layers is explicit and well-documented.\n2. **Determinism** — Seeds + `OutcomeTrace` make economic outcomes reproducible and testable.\n3. **Meaningful trade-offs** — Self vs publisher, price vs volume, marketing spend vs risk on weak games.\n4. **Residual income** — Real long-tail + dormancy instead of hard cutoffs.\n5. **Fans as capital** — Affect awareness, launch floor, office gates, and future reach.\n6. **Auditable ledger** — Good foundation for UI and debugging.\n7. **Explain strings** on every commercial layer — ready for player-facing reports.\n\n---\n\n## 12. Gaps / Opportunities (relative to GDT + your Expansion Pack)\n\n| Area | Current state | Opportunity |\n|------|---------------|-------------|\n| Difficulty multipliers | Not yet as global economy scaler | Easy/Normal/Hard from Expansion Pack (costs, prices, fans) |\n| Custom price UI | Supported in formula | Surface the Expansion Pack–style player price control more fully |\n| Staff energy / consumables | Not present | Black Bull–style temporary boosts |\n| Hardware Lab economy | Not yet | Custom Computers pattern → cost vs techLevel vs success |\n| Topic/platform catalogues | Present | Expand with Expansion Pack weightings for richer marketPotential |\n| Monthly fixed costs | Present in gates/config | More explicit office-tier cost curves |\n| Contracts as income | Referenced | Flesh out as reliable early-game cash |\n\n---\n\n## 13. Mental Model for Balance\n\nA typical successful Garage release:\n1. Solid concept fit + allocation → decent quality + reviews.\n2. Modest marketing + growing fans → awareness.\n3. Fair price for size → good priceFit.\n4. Self-publish early (keep 70%) or take a deal for reach.\n5. Launch spike + residual weeks fund the next project and office gate.\n6. Hits compound fans → better awareness on the next title (knowledge flywheel + commercial flywheel).\n\nFlops still generate *some* units via awareness, but churn fans and yield weak residual — the economy punishes repeated bad quality more than a single miss.\n\n---\n\n**Bottom line:** Studio Empire already has a modern, layered, deterministic economy that is more explicit and testable than classic GDT while preserving the same fantasy (quality → reviews → sales residual → grow studio). The main leverage points for the next iteration are difficulty scaling, richer content weightings (from your Expansion Pack), fuller custom-price UX, and the eventual Hardware Lab / custom platform cost loop.\n\nI can next produce a concrete balance sheet example (sample release → week-by-week cash/fans) or map exact Expansion Pack numbers onto these layers if you want to start tuning.
+````
+Copy
+30	  "marketDemand",
+    31	  "weeklySales",
+    32	  "knowledge",
+    33	] as const;
+    34	
+    35	export type ScoringLayer = (typeof SCORING_PIPELINE)[number];
+    36	
+    37	/** Immutable outcome snapshot attached at release — never re-rolled on load. */
+    38	export type OutcomeTrace = {
+    39	  campaignSeed: number;
+    40	  projectSeed: number;
+    41	  releaseWeek: number;
+    42	  productQuality: number;
+    43	  reviewScores: number[];
+    44	  avgReview: number;
+    45	  hiddenFinalScore: number;
+    46	  weeklySalesPlan: number[];
+    47	  knowledgeKeys: string[];
+    48	  algorithm: "v2";
+    49	  /** Layered commercial snapshot at release (optional for older saves). */
+    50	  commercial?: {
+    51	    marketPotential: number;
+    52	    qualityDemand: number;
+    53	    awareness: number;
+    54	    hypeFactor: number;
+    55	    priceFit: number;
+    56	    distribution: number;
+    57	    lifecycle: number;
+    58	    revenueShare: number;
+    59	    distributionType: "self" | "publisher";
+    60	    launchPrice: number;
+    61	    fanBaseAtLaunch: number;
+    62	    explain: {
+    63	      marketPotential: string;
+    64	      qualityDemand: string;
+    65	      awareness: string;
+    66	      hype: string;
+    67	      priceFit: string;
+    68	      distribution: string;
+    69	      lifecycle: string;
+    70	    };
+    71	  };
+    72	};
+    73	
+    74	export type KnowledgeEntry = {
+    75	  key: string;
+    76	  kind: "combo" | "platform" | "lesson" | "weakness" | "strength";
+    77	  label: string;
+    78	  detail: string;
+    79	  confidence: number;
+    80	  sourceGameId: string;
+    81	  weekLearned: number;
+    82	};
+
+   150	}
+   151	
+   152	export function tickReleasedSales(
+   153	  state: GameState,
+   154	  pushNote: (
+   155	    s: GameState,
+   156	    text: string,
+   157	    tone: "info" | "good" | "warn" | "bad",
+   158	  ) => GameState["notifications"],
+   159	): GameState {
+   160	  if (!state.activeSales.length) return state;
+   161	  let next = { ...state };
+   162	  const still: ReleasedGame[] = [];
+   163	
+   164	  for (const g of next.activeSales) {
+   165	    if (!g.onSale || g.delisted || g.dormant) {
+   166	      if (g.dormant || g.delisted) {
+   167	        next.releasedGames = next.releasedGames.map((rg) =>
+   168	          rg.id === g.id ? { ...rg, ...g, onSale: false } : rg,
+   169	        );
+   170	      }
+   171	      continue;
+   172	    }
+   173	
+   174	    const useLive = g.salesEngine === "weekly_v3" && g.salesSnapshot != null;
+   175	    let units = 0;
+   176	    let rev = 0;
+   177	    let nextG: ReleasedGame = {
+   178	      ...g,
+   179	      marketDays: (g.marketDays ?? g.weeksOnMarket * 7) + 7,
+   180	      weeklySalesLeft: [...(g.weeklySalesLeft ?? [])],
+   181	    };
+   182	
+   183	    if (g.marketingState) {
+   184	      try {
+   185	        const mTick = advanceMarketing(g.marketingState, nextG.marketDays!);
+   186	        nextG.marketingState = mTick.state;
+   187	        if (mTick.expiredCampaignIds.length) {
+   188	          next.notifications = pushNote(
+   189	            next,
+   190	            `Marketing campaign ended on "${g.title}".`,
+   191	            "info",
+   192	          );
+   193	        }
+   194	      } catch {
+   195	        /* keep */
+   196	      }
+   197	    }
+   198	
+   199	    if (useLive && nextG.salesSnapshot) {
+   200	      const snap = nextG.salesSnapshot;
+   201	      const mkt = nextG.marketingState;
+   202	      const reach = mkt ? marketingReachMultiplier(mkt) : 1;
+   203	      const mktAwareness =
+   204	        (mkt?.awarenessPoints ?? 0) + marketingSpendToPoints(g.marketingSpend);
+   205	      const result: WeeklySalesResult = calculateWeeklySales({
+   206	        campaignSeed: next.campaignSeed,
+   207	        gameId: g.id,
+   208	        marketDays: nextG.marketDays!,
+   209	        weeksOnMarket: g.weeksOnMarket,
+   210	        titleStatus: g.delisted ? "delisted" : g.dormant ? "dormant" : "released",
+   211	        platformInstalledBase: snap.platformInstalledBase,
+   212	        platformLifecycle: snap.platformLifecycle,
+   213	        platformAvailability: snap.platformAvailability,
+   214	        audienceDemand: snap.audienceDemand,
+   215	        topicDemand: snap.topicDemand,
+   216	        genreDemand: snap.genreDemand,
+   217	        platformGenreFit: snap.platformGenreFit,
+   218	        competitionModifier: snap.competitionModifier,
+   219	        trendModifier: snap.trendModifier,
+   220	        reviewAverage: reviewToHundred(g.avgReview),
+   221	        organicAwarenessPoints: snap.organicAwarenessPoints,
+   222	        fanCount: next.fans,
+   223	        marketingAwarenessPoints: mktAwareness,
+   224	        publisherAwarenessPoints: snap.publisherAwarenessPoints,
+   225	        hype: mkt?.hype ?? g.hypeAtLaunch ?? g.hype,
+   226	        distributionMultiplier: snap.distributionMultiplier,
+   227	        reachMultiplier: reach,
+   228	        price: g.launchPrice ?? defaultLaunchPrice(g.size),
+   229	        referencePrice: snap.referencePrice,
+   230	        platformFeeRate: snap.platformFeeRate,
+   231	        publisherCutRate: snap.publisherCutRate,
+   232	        lowDemandWeeks: g.lowSalesStreak ?? 0,
+   233	        dormantAfterLowDemandWeeks: 6,
+   234	        dormantUnitThreshold: 15,
+   235	        marketCapacityRate: snap.marketCapacityRate,
+   236	      });
+   237	
+   238	      units = result.unitsSold;
+   239	      rev = result.developerRevenue;
+   240	      nextG.weeklySalesResults = [...(g.weeklySalesResults ?? []), result].slice(
+   241	        -200,
+   242	      );
+   243	      nextG.lowSalesStreak = result.nextLowDemandWeeks;
+   244	      if (result.nextTitleStatus === "dormant") {
+   245	        nextG.dormant = true;
+   246	    
+    nextG.onSale = false;
+   247	        nextG.salesPhase = "dormant";
+   248	      } else {
+   249	        nextG.salesPhase =
+   250	          result.lifecyclePhase === "launch_window"
+   251	            ? "launch"
+   252	            : result.lifecyclePhase === "growth"
+   253	              ? "growth"
+   254	              : result.lifecyclePhase === "mature_sales"
+   255	                ? "mature"
+   256	                : "long_tail";
+   257	      }
+   258	      if (nextG.weeklySalesLeft.length > 0) nextG.weeklySalesLeft.shift();
+   259	    } else {
+   260	      const planUnits = nextG.weeklySalesLeft.shift();
+   261	      if (planUnits == null) {
+   262	        const done: ReleasedGame = {
+   263	          ...g,
+   264	          onSale: false,
+   265	          residualWeeks: 0,
+   266	          dormant: true,
+   267	          salesPhase: "dormant",
+   268	        };
+   269	        still.push(done);
+   270	        next.releasedGames = next.releasedGames.map((rg) =>
+
+--- office data ---
+
+272:export const OFFICE_INFO = {
+
+     1	/**
+     2	 * Studio Empire — shared game data hub.
+     3	 * Canonical catalogs live in content/; this file re-exports + holds balance helpers.
+     4	 */
+     5	import type {
+     6	  AudienceId,
+     7	  DevField,
+     8	  GenreDef,
+     9	  GenreId,
+    10	  MatchTier,
+    11	  PlatformDef,
+    12	  ResearchItem,
+    13	  TopicDef,
+    14	} from "./types";
+    15	import { TOPICS as CANONICAL_TOPICS } from "./content/topics";
+    16	import { PLATFORMS as CANONICAL_PLATFORMS, CUSTOM_CONSOLE } from "./content/platforms";
+    17	import {
+    18	  ENGINE_COMPONENTS,
+    19	  STARTING_ENGINE_COMPONENT_ID,
+    20	  startingEngineFeatures,
+    21	} from "./content/engines";
+    22	import {
+    23	  topicGenreTier as contentTopicGenreTier,
+    24	  topicGenreCompatibility,
+    25	  computeGenreFit,
+    26	  genreFitModifier,
+    27	} from "./content/genreFit";
+    28	
+    29	export const START_YEAR = 1982;
+    30	export const WEEKS_PER_MONTH = 4;
+    31	export const WEEKS_PER_YEAR = 48;
+    32	export const SAVE_KEY = "studio-empire-save-v5";
+    33	export const SAVE_VERSION = 5;
+    34	
+    35	export const STAGE_FIELDS: Record<1 | 2 | 3, DevField[]> = {
+    36	  1: ["engine", "gameplay", "story"],
+    37	  2: ["dialogue", "level", "ai"],
+    38	  3: ["world", "graphics", "sound"],
+    39	};
+    40	
+    41	export const DEV_FIELDS: DevField[] = [
+    42	  "engine",
+    43	  "gameplay",
+    44	  "story",
+    45	  "dialogue",
+    46	  "level",
+    47	  "ai",
+    48	  "world",
+    49	  "graphics",
+    50	  "sound",
+    51	];
+    52	
+    53	export const FIELD_LABELS: Record<DevField, string> = {
+    54	  engine: "Engine",
+    55	  gameplay: "Gameplay",
+    56	  story: "Story / Quests",
+    57	  dialogue: "Dialogues",
+    58	  level: "Level Design",
+    59	  ai: "A.I.",
+    60	  world: "World Design",
+    61	  graphics: "Graphics",
+    62	  sound: "Sound",
+    63	};
+    64	
+    65	export const FIELD_TECH_WEIGHT: Record<DevField, number> = {
+    66	  engine: 0.8,
+    67	  gameplay: 0.2,
+    68	  story: 0.2,
+    69	  dialogue: 0.1,
+    70	  level: 0.6,
+    71	  ai: 0.8,
+    72	  world: 0.4,
+    73	  graphics: 0.5,
+    74	  sound: 0.4,
+    75	};
+    76	
+    77	export const SIZE_STATS = {
+    78	  small: {
+    79	    label: "Small",
+    80	    cost: 8000,
+    81	    weeks: 6,
+    82	    maxScore: 7.5,
+    83	    staffSlots: 1,
+    84	    salesMult: 0.55,
+    85	    pointsMult: 0.7,
+    86	  },
+    87	  medium: {
+    88	    label: "Medium",
+    89	    cost: 45000,
+    90	    weeks: 14,
+    91	    maxScore: 9,
+    92	    staffSlots: 3,
+    93	    salesMult: 1,
+    94	    pointsMult: 1,
+    95	  },
+    96	  large: {
+    97	    label: "Large",
+    98	    cost: 180000,
+    99	    weeks: 28,
+   100	    maxScore: 9.6,
+   101	    staffSlots: 6,
+   102	    salesMult: 1.55,
+   103	    pointsMult: 1.45,
+   104	  },
+   105	  aaa: {
+   106	    label: "AAA",
+   107	    cost: 900000,
+   108	    weeks: 48,
+   109	    maxScore: 10,
+   110	    staffSlots: 10,
+
+View log
+
+
