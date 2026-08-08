@@ -24,3 +24,4 @@ export {
   garageTopics,
   garagePlatforms,
 } from "./garageSlice";
+export { platformArt, platformThumb, PLATFORM_ART, PLATFORM_THUMB, VENA_BRAND_ART } from "./platformArt";
