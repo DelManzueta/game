@@ -22,6 +22,7 @@ function t(
   name: string,
   homeGenre: GenreId,
   ranks: [GenreId, GenreId, GenreId, GenreId, GenreId, GenreId],
+  /** Research provenance only — never player-facing pack framing. All topics are core. */
   source: "vanilla" | "expansion",
   startUnlocked = false,
   researchCost = 40,
@@ -170,6 +171,12 @@ export const TOPICS: TopicDef[] = [
   t("rhythm", "Rhythm", "casual", ["casual", "simulation", "action", "adventure", "strategy", "rpg"], "expansion", false, 35),
   t("school", "School", "casual", ["casual", "simulation", "adventure", "strategy", "action", "rpg"], "expansion", false, 35),
   t("vocabulary", "Vocabulary", "casual", ["casual", "simulation", "strategy", "adventure", "action", "rpg"], "expansion", false, 35),
+  // Media partnerships (Netflix-style licensed topics — original titles)
+  t("media_orange_block", "Orange Block ★", "adventure", ["adventure", "rpg", "action", "strategy", "simulation", "casual"], "expansion", false, 80),
+  t("media_squish_run", "Squish Run ★", "action", ["action", "casual", "adventure", "strategy", "rpg", "simulation"], "expansion", false, 90),
+  t("media_crown_circuit", "Crown Circuit ★", "simulation", ["simulation", "strategy", "adventure", "casual", "rpg", "action"], "expansion", false, 85),
+  t("media_stranger_pixels", "Stranger Pixels ★", "adventure", ["adventure", "action", "rpg", "strategy", "simulation", "casual"], "expansion", false, 85),
+  t("media_witcher_ward", "Witcher Ward ★", "rpg", ["rpg", "adventure", "action", "strategy", "simulation", "casual"], "expansion", false, 95),
 ];
 
 export const TOPIC_COUNT = TOPICS.length;

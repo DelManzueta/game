@@ -25,7 +25,7 @@ export type DevField =
   | "sound";
 
 export type MatchTier = "great" | "good" | "ok" | "poor" | "bad";
-export type OfficeTier = 1 | 2 | 3 | 4;
+export type OfficeTier = 1 | 2 | 3 | 4 | 5;
 export type Speed = 0 | 1 | 2 | 4;
 
 /** Development state machine */
@@ -67,7 +67,8 @@ export type ModalId =
   | "event"
   | "report"
   | "loopGuide"
-  | "notifications";
+  | "notifications"
+  | "officeOffer";
 
 export type UnlockId =
   | "research"
@@ -124,6 +125,8 @@ export interface EngineComponentDef {
   engineFeature?: string;
   designBoost?: number;
   techBoost?: number;
+  /** Industry year before this component can be researched. */
+  minYear?: number;
 }
 
 export interface GenreDef {
@@ -203,6 +206,14 @@ export interface StaffMember {
   fieldExperience?: Partial<Record<DevField, number>>;
   busy: boolean;
   energy: number;
+  /** Active training enrollment (in-game weeks). */
+  training?: {
+    courseId: string;
+    weeksLeft: number;
+    totalWeeks: number;
+  } | null;
+  /** Permanent QA boost from training / specialty (0–0.5). */
+  bugFixBonus?: number;
 }
 
 export interface StageSliderSet {
@@ -230,6 +241,10 @@ export interface GameProject {
   isSequel?: boolean;
   sequelOf?: string;
   isExpansion?: boolean;
+  /** Part 2: project pillar reshapes production priorities. */
+  pillar?: import("./research/types").ProjectPillar;
+  /** Part 2: per-product pricing (immutable snapshot at release). */
+  pricing?: import("./research/types").ProductPricing | null;
   /** Legacy numeric stage for scoring helpers */
   stage: 1 | 2 | 3 | "done";
   stageProgress: number;
@@ -266,6 +281,15 @@ export interface GameProject {
   production?: import("./production/algorithm").ProductionState;
   /** Quality calculated after candidate build (not reviews). */
   qualityResult?: import("./quality/algorithm").QualityResult;
+  /**
+   * Immutable engine snapshot captured at project start (Part 3).
+   * Later engine upgrades never rewrite this game's historical data.
+   */
+  engineSnapshot?: import("./engine/types").GameEngineSnapshot | null;
+  /** Part 4 — performance budgets, bugs class, certification, readiness. */
+  techSpec?: import("./optimization/types").ProjectTechSpec | null;
+  /** Part 2: effective field importance snapshot at project start. */
+  fieldImportance?: Partial<Record<DevField, number>> | null;
 }
 
 export interface WeeklySalePoint {
@@ -326,6 +350,8 @@ export interface ReleasedGame {
   /** Frozen at release — load must not recompute. */
   outcomeTrace?: import("./contracts").OutcomeTrace;
   launchPrice?: number;
+  /** Part 2: immutable per-product pricing snapshot. */
+  pricing?: import("./research/types").ProductPricing | null;
   /** Commercial spine (Phase commercial build). */
   distributionType?: "self" | "publisher";
   publisherId?: string | null;
@@ -383,6 +409,8 @@ export interface ReleasedGame {
   reviewResult?: import("./quality/algorithm").ReviewResult;
   /** ALGORITHM 3 platform snapshot at release. */
   platformSnapshotAtRelease?: import("./platforms/lifecycle").PlatformWeekSnapshot;
+  /** Frozen engine snapshot from development (Part 3 immutability). */
+  engineSnapshot?: import("./engine/types").GameEngineSnapshot | null;
 }
 
 
@@ -404,6 +432,9 @@ export interface GameEvent {
   title: string;
   body: string;
   choices?: { label: string; effect: string }[];
+  /** Part 2 decision event id when from research/events catalog. */
+  decisionDefId?: string;
+  decisionChoices?: import("./research/types").DecisionEventChoice[];
 }
 
 export interface Notification {
@@ -439,6 +470,14 @@ export interface GameSettings {
   forcePerfectScore?: boolean;
   /** QA: force ~2.0 reviews on next releases (toggle). */
   forceBadScore?: boolean;
+  /** CheatMod: no bugs during development */
+  noBugsMode?: boolean;
+  /** CheatMod: research completes almost instantly */
+  fastResearchMode?: boolean;
+  /** CheatMod: show all hints / analyst density */
+  showAllHints?: boolean;
+  /** CheatMod: staff never need vacation */
+  noVacationMode?: boolean;
 }
 
 export interface GameState {
@@ -465,6 +504,11 @@ export interface GameState {
   /** Progressive system unlocks */
   unlocks: Record<string, UnlockState>;
   engines: EngineDef[];
+  /**
+   * Full engine workshop (families, immutable versions, active build).
+   * engines[] remains the scoring/UI bridge derived from versions.
+   */
+  engineWorkshop?: import("./engine/types").EngineWorkshopState;
   staff: StaffMember[];
   currentProject: GameProject | null;
   releasedGames: ReleasedGame[];
@@ -508,11 +552,21 @@ export interface GameState {
     rndLab: boolean;
     hardwareLab: boolean;
   };
+  /** External market buffs (trade shows, creators, waves). */
+  external?: {
+    marketingMult: number;
+    marketingUntilWeek: number;
+    bookedCreatorId: string | null;
+    creatorUntilWeek: number;
+    mediaTopicsUnlocked: string[];
+  };
   draft?: Partial<GameProject> | null;
   lastComboKey?: string;
   consecutiveSameCombo: number;
   tutorialStep: number;
   cheatsEnabled: boolean;
+  /** Append-only cheat audit (CheatMod). */
+  cheatLog?: { week: number; action: string; detail?: string }[];
   dirty: boolean;
   lastSavedWeek: number;
   /** Deterministic campaign seed for scoring/sales. */
@@ -529,10 +583,21 @@ export interface GameState {
   activePublisherDealId?: string | null;
   /** Fractional RP accumulator (founder activity + market). */
   researchPointsFrac?: number;
+  /** Part 2: research lifecycle pipeline (not a purchase menu). */
+  researchPipeline?: import("./research/types").ResearchPipelineState;
+  /** Part 2: campaign difficulty (economy/uncertainty only). */
+  difficulty?: import("./research/types").DifficultyConfig;
+  /** Part 2: proprietary hardware projects (bottlenecked axes). */
+  hardwareProjects?: import("./hardware/types").HardwareProject[];
   /** Series franchise reputation map. */
   seriesRecords?: Record<string, import("./commercial/sequels").SeriesRecord>;
   /** Append-only finance ledger (mirrors cash). */
   ledger?: import("./finance/ledger").FinanceLedger;
+  /**
+   * Authoritative studio progression (bible Checkpoint 1+).
+   * Optional on legacy saves — migrated on load.
+   */
+  progression?: import("./progression/types").StudioProgressionState;
 }
 
 

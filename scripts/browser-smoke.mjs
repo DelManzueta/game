@@ -6,13 +6,21 @@
  *
  * Screenshots default under /workspace/screenshots/ (never /tmp) so they live on
  * the workspace volume and stay readable by agent tools.
+ *
+ * Targets are restricted (browser-guard.mjs): http/https loopback, PNG under
+ * /workspace. A rejected target exits 1.
  */
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { chromium } from "playwright";
+import { checkedOutputPath, checkedUrl } from "./browser-guard.mjs";
+import { computeBrandWarnings } from "./brand-check.mjs";
 
-const url = process.argv[2] || "http://127.0.0.1:8080/";
-const outPng = process.argv[3] || "/workspace/screenshots/app-builder-preview.png";
+const url = checkedUrl(process.argv[2] || "http://127.0.0.1:8080/");
+const outPng = checkedOutputPath(
+  process.argv[3] || "/workspace/screenshots/app-builder-preview.png",
+  ["/workspace"],
+);
 const timeoutMs = Number(process.env.BROWSER_SMOKE_TIMEOUT_MS || 45000);
 
 mkdirSync(dirname(outPng), { recursive: true });
@@ -42,6 +50,10 @@ try {
 
   await page.screenshot({ path: outPng, fullPage: false });
 
+  // Brand-asset gate (best-effort heuristic, never changes the exit code) —
+  // logic lives in brand-check.mjs so it is unit-testable without a browser.
+  const brandWarnings = computeBrandWarnings({ hasCanvas });
+
   console.log(
     JSON.stringify(
       {
@@ -52,12 +64,14 @@ try {
         bodyTextLen,
         consoleErrors,
         pageErrors,
+        brandWarnings,
         screenshot: outPng,
       },
       null,
       2,
     ),
   );
+  for (const w of brandWarnings) console.error(w);
 
   if (status >= 400 || status === 0) process.exit(1);
   if (pageErrors.length || consoleErrors.length) process.exit(2);

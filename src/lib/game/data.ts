@@ -13,7 +13,16 @@ import type {
   TopicDef,
 } from "./types";
 import { TOPICS as CANONICAL_TOPICS } from "./content/topics";
-import { PLATFORMS as CANONICAL_PLATFORMS, CUSTOM_CONSOLE } from "./content/platforms";
+import {
+  PLATFORMS as CANONICAL_PLATFORMS,
+  CUSTOM_CONSOLE,
+  TIMELINE_END_YEAR,
+  decadeLabel,
+  platformDecade,
+  platformTimelineEntries,
+  platformsUpcoming,
+} from "./content/platforms";
+export { TIMELINE_END_YEAR, decadeLabel, platformDecade, platformTimelineEntries, platformsUpcoming };
 import {
   ENGINE_COMPONENTS,
   STARTING_ENGINE_COMPONENT_ID,
@@ -29,8 +38,8 @@ import {
 export const START_YEAR = 1982;
 export const WEEKS_PER_MONTH = 4;
 export const WEEKS_PER_YEAR = 48;
-export const SAVE_KEY = "studio-empire-save-v5";
-export const SAVE_VERSION = 5;
+export const SAVE_KEY = "studio-empire-save-v6";
+export const SAVE_VERSION = 6;
 
 export const STAGE_FIELDS: Record<1 | 2 | 3, DevField[]> = {
   1: ["engine", "gameplay", "story"],
@@ -77,41 +86,48 @@ export const FIELD_TECH_WEIGHT: Record<DevField, number> = {
 export const SIZE_STATS = {
   small: {
     label: "Small",
-    cost: 8000,
-    weeks: 6,
+    cost: 10000,
+    /** ~2 in-game months (8 weeks @ 4 weeks/month). */
+    weeks: 8,
     maxScore: 7.5,
     staffSlots: 1,
-    salesMult: 0.55,
+    salesMult: 0.48,
     pointsMult: 0.7,
   },
   medium: {
     label: "Medium",
-    cost: 45000,
-    weeks: 14,
+    cost: 50000,
+    /** ~4 in-game months. */
+    weeks: 16,
     maxScore: 9,
     staffSlots: 3,
-    salesMult: 1,
+    salesMult: 0.9,
     pointsMult: 1,
   },
   large: {
     label: "Large",
-    cost: 180000,
+    cost: 200000,
+    /** ~7 in-game months. */
     weeks: 28,
     maxScore: 9.6,
     staffSlots: 6,
-    salesMult: 1.55,
+    salesMult: 1.35,
     pointsMult: 1.45,
   },
   aaa: {
     label: "AAA",
-    cost: 900000,
-    weeks: 48,
+    cost: 950000,
+    /** ~11 in-game months production (bugs extra). */
+    weeks: 44,
     maxScore: 10,
     staffSlots: 10,
-    salesMult: 2.4,
+    salesMult: 1.9,
     pointsMult: 2.1,
   },
 } as const;
+
+/** Max signing package for any hire ($2M). */
+export const MAX_HIRE_BUDGET = 2_000_000;
 
 export const AUDIENCES: { id: AudienceId; name: string }[] = [
   { id: "young", name: "Young" },
@@ -247,6 +263,7 @@ function engineResearchItems(): ResearchItem[] {
     designBoost: c.category.includes("Story") || c.category === "Dialogue" || c.category === "Gameplay" ? 3 : undefined,
     techBoost: c.category === "Graphics" || c.category === "Engine" || c.category.includes("Intelligence") ? 3 : undefined,
     weeks: 2,
+    minYear: c.minYear,
   }));
 }
 
@@ -271,20 +288,54 @@ export const REVIEWER_NAMES = [
 
 export const OFFICE_INFO = {
   1: {
-    name: "Garage",
+    name: "Founder Garage",
     rent: 0,
+    /** Total HQ seats including founder (bible §2). */
     capacity: 1,
-    upgradeCost: 1_000_000,
-    fanRequirement: 25_000,
+    upgradeCost: 150_000,
+    fanRequirement: 1_000,
     gamesRequirement: 5,
     cashRequirement: 1_000_000,
-    /** Earliest calendar: Year 2 Month 10 (pacing floor only). */
-    minYear: 1983,
+    /** Earliest: campaign year 3 (1979 start → 1981 M10 floor). */
+    minYear: 1981,
     minMonth: 10,
   },
-  2: { name: "Small Office", rent: 2000, capacity: 4, upgradeCost: 1_200_000, fanRequirement: 0, gamesRequirement: 0, cashRequirement: 0 },
-  3: { name: "Downtown Studio", rent: 8000, capacity: 8, upgradeCost: 5_000_000, fanRequirement: 0, gamesRequirement: 0, cashRequirement: 0 },
-  4: { name: "HQ Campus", rent: 25000, capacity: 14, upgradeCost: 0, fanRequirement: 0, gamesRequirement: 0, cashRequirement: 0 },
+  2: {
+    name: "First Office",
+    rent: 2_000,
+    capacity: 4, // founder + 3
+    upgradeCost: 500_000,
+    fanRequirement: 0,
+    gamesRequirement: 0,
+    cashRequirement: 0,
+  },
+  3: {
+    name: "Upgraded Office",
+    rent: 5_000,
+    capacity: 5, // founder + 4
+    upgradeCost: 8_000_000,
+    fanRequirement: 0,
+    gamesRequirement: 0,
+    cashRequirement: 0,
+  },
+  4: {
+    name: "Technology Park",
+    rent: 15_000,
+    capacity: 6, // founder + 5
+    upgradeCost: 50_000_000,
+    fanRequirement: 0,
+    gamesRequirement: 0,
+    cashRequirement: 0,
+  },
+  5: {
+    name: "Expanded Technology Campus",
+    rent: 40_000,
+    capacity: 8, // founder + 5 + 2 directors
+    upgradeCost: 0,
+    fanRequirement: 0,
+    gamesRequirement: 0,
+    cashRequirement: 0,
+  },
 } as const;
 
 /** Map compatibility rank / MatchTier → 0.6–1.0 product space. */

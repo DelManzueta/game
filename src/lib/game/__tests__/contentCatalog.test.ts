@@ -59,10 +59,13 @@ describe("content catalog validation", () => {
     }
   });
 
-  it("40 fixed platforms include PC and Commodore; Custom Console separate", () => {
-    assert.equal(PLATFORMS.length, 40);
-    assert.equal(PLATFORM_COUNT, 40);
+  it("50 fixed platforms include PC, Itara, and Commodore; Custom Console separate", () => {
+    assert.equal(PLATFORMS.length, 50);
+    assert.equal(PLATFORM_COUNT, 50);
     assert.ok(PLATFORMS.some((p) => p.id === "pc"));
+    assert.ok(PLATFORMS.some((p) => p.id === "itara"));
+    assert.ok(PLATFORMS.some((p) => p.id === "intelli"));
+    assert.ok(PLATFORMS.some((p) => p.id === "odyssey"));
     assert.ok(PLATFORMS.some((p) => p.id === "commodore"));
     assert.equal(CUSTOM_CONSOLE.id, "custom_console");
     assert.ok(CUSTOM_CONSOLE.isCustom);

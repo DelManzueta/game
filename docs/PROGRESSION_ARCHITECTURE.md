@@ -1,7 +1,9 @@
 # Studio Empire — Progression & UI Architecture
 
-Status: **Plan + design mockups only** (no full progression wiring yet).  
+Status: **Partial live** — unlock registry + CP0/CP1 office ladder wired; later CPs flag-dark.  
 Preserves: scoring engine, develop-week sim, experience, existing store loop.
+
+See [PROGRESSION_UNLOCKS.md](./PROGRESSION_UNLOCKS.md) for the live unlock state machine.
 
 ---
 

@@ -617,32 +617,93 @@ export function generateGameTitle(topic: string, genre: string): string {
   return pick(templates);
 }
 
-export function generateStaff(levelBias = 1): StaffMember {
-  const first = pick([
-    "Alex", "Sam", "Jordan", "Riley", "Casey", "Morgan", "Quinn", "Avery",
-    "Jamie", "Taylor", "Kai", "Nova", "Remy", "Sage", "Drew", "Parker",
-  ]);
-  const last = pick([
-    "Chen", "Okada", "Reyes", "Singh", "Novak", "Baker", "Ito", "Mensah",
-    "Costa", "Nguyen", "Petrov", "Walsh", "Kim", "Hassan", "Berg", "Diaz",
-  ]);
-  const design = Math.round(rand(25, 55) * levelBias);
-  const tech = Math.round(rand(25, 55) * levelBias);
-  const speed = Math.round(rand(30, 60) * levelBias);
-  const salary = Math.round((design + tech + speed) * 18 + 400);
+/** Recent candidate names — avoid repetitive shortlists. */
+const RECENT_CANDIDATE_NAMES: string[] = [];
+
+const STAFF_FIRST = [
+  "Alex", "Sam", "Jordan", "Riley", "Casey", "Morgan", "Quinn", "Avery",
+  "Jamie", "Taylor", "Kai", "Nova", "Remy", "Sage", "Drew", "Parker",
+  "Blake", "Cameron", "Devon", "Ellis", "Finley", "Harper", "Indigo", "Jules",
+  "Kit", "Lane", "Marley", "Nico", "Oakley", "Phoenix", "Reed", "Shay",
+  "Tatum", "Val", "Winter", "Zion", "Ari", "Bea", "Cory", "Dani",
+];
+const STAFF_LAST = [
+  "Chen", "Okada", "Reyes", "Singh", "Novak", "Baker", "Ito", "Mensah",
+  "Costa", "Nguyen", "Petrov", "Walsh", "Kim", "Hassan", "Berg", "Diaz",
+  "Sato", "Moreau", "Kowalski", "Andersson", "Patel", "Okafor", "Silva", "Yamamoto",
+  "Rossi", "Khan", "Fischer", "Larsson", "Nakamura", "Brooks", "Castillo", "Vogel",
+];
+const SPECS: Array<import("./types").DevField | null> = [
+  "engine", "gameplay", "story", "graphics", "sound", "ai", "level", "world", "dialogue", null, null,
+];
+
+/**
+ * Generate a hireable candidate.
+ * @param levelBias relative strength (1 = typical first-office hire)
+ * @param year industry year — later eras field stronger talent
+ * @param opts.forceStar guarantee high-level surprise hire
+ */
+export function generateStaff(
+  levelBias = 1,
+  year = 1985,
+  opts?: { forceStar?: boolean },
+): StaffMember {
+  const eraBoost = 1 + Math.max(0, year - 1979) * 0.008;
+  // ~12% chance of a higher-level "find" (or forced)
+  const isStar = opts?.forceStar || Math.random() < 0.12;
+  const isSolid = !isStar && Math.random() < 0.35;
+  let level = 1;
+  if (isStar) level = Math.round(rand(4, 8));
+  else if (isSolid) level = Math.round(rand(2, 4));
+  else level = Math.round(rand(1, 3));
+  level = Math.max(1, Math.min(10, Math.round(level * Math.min(1.4, levelBias))));
+
+  // Stronger base stats — not weak garage rejects
+  const baseMin = 38 + level * 3;
+  const baseMax = 58 + level * 5;
+  const starBump = isStar ? 12 : isSolid ? 5 : 0;
+  let design = Math.round(rand(baseMin, baseMax) * eraBoost + starBump + rand(-4, 8));
+  let tech = Math.round(rand(baseMin, baseMax) * eraBoost + starBump + rand(-4, 8));
+  let speed = Math.round(rand(baseMin + 2, baseMax + 4) * eraBoost + starBump * 0.6 + rand(-3, 6));
+  // One standout stat for identity
+  const standout = Math.floor(Math.random() * 3);
+  if (standout === 0) design = Math.min(98, design + Math.round(rand(6, 14)));
+  if (standout === 1) tech = Math.min(98, tech + Math.round(rand(6, 14)));
+  if (standout === 2) speed = Math.min(98, speed + Math.round(rand(6, 14)));
+  design = clamp(design, 32, 100);
+  tech = clamp(tech, 32, 100);
+  speed = clamp(speed, 35, 100);
+
+  // Salary scales with power; hard-capped at $2M hire budget later
+  let salary = Math.round((design + tech + speed) * (22 + level * 4) + 800 + level * 400);
+  if (isStar) salary = Math.round(salary * 1.35);
+  salary = Math.min(salary, 1_800_000); // leave room under 2M signing package
+
+  let name = `${pick(STAFF_FIRST)} ${pick(STAFF_LAST)}`;
+  let guard = 0;
+  while (RECENT_CANDIDATE_NAMES.includes(name) && guard < 20) {
+    name = `${pick(STAFF_FIRST)} ${pick(STAFF_LAST)}`;
+    guard++;
+  }
+  RECENT_CANDIDATE_NAMES.push(name);
+  if (RECENT_CANDIDATE_NAMES.length > 24) RECENT_CANDIDATE_NAMES.shift();
+
+  const specialization = isStar || isSolid ? pick(SPECS.filter(Boolean) as import("./types").DevField[]) : pick(SPECS);
+
   return {
     id: uid("staff"),
     energy: 100,
-    name: `${first} ${last}`,
-    design: clamp(design, 15, 100),
-    tech: clamp(tech, 15, 100),
-    speed: clamp(speed, 20, 100),
+    name,
+    design,
+    tech,
+    speed,
     salary,
-    specialization: null,
-    level: 1,
-    xp: 0,
+    specialization: specialization ?? null,
+    level,
+    xp: level > 1 ? level * 40 : 0,
     fieldExperience: {},
     busy: false,
+    bugFixBonus: specialization === "engine" || specialization === "ai" ? 0.05 : 0,
   };
 }
 
@@ -728,6 +789,7 @@ export function toReleased(
     weeksOnMarket: 0,
     onSale: true,
     reportDone: false,
+    engineSnapshot: project.engineSnapshot ?? null,
   };
 }
 

@@ -40,6 +40,13 @@ broken, or ugly, that is their whole experience.
 
 ---
 
+## Project instructions
+
+If `AGENTS.project.md` exists in this workspace, it contains the user's
+project instructions; follow it with the same priority as this file.
+
+---
+
 ## 1. Your environment / workspace (for you, never surfaced to the user)
 
 ### Where you are
@@ -115,10 +122,18 @@ revive and live work stay identical.
 - **`screenshots/`** — write agent QA screenshots here (never under `/tmp`).
 - **`vite.config.ts` + `tsconfig.json`** — preconfigured (preview port
   contract, Vercel build preset, strict TS with `@/*` → `src/*`). Edit if you
-  must, but keep the port and the build-gated nitro plugin (see §"Build &
-  deploy target").
+  must, but keep the port, the build-gated nitro plugin (see §"Build &
+  deploy target"), and the Grok PWA plugin (`grokPwaPlugin`).
+- **`public/__grok/`, `server/`, and `scripts/grok-pwa-*`** — platform Add to
+  Home Screen chrome (template icon, install page + assets, the Vite plugin,
+  and the Nitro middleware that serves it on deployed apps). Do not delete or
+  overwrite any of them. `?install=1&platform=ios` shows the install tutorial,
+  not app UI; if you add your own server routes, put them in `src/routes/`,
+  never in `server/`.
 - **No app routes/UI yet** — only the pre-wired `src/lib` data/auth helpers
-  (see "Data & auth"); build the app around them, don't delete them.
+  (see "Data & auth"), `src/lib/error-component.tsx` (the router's
+  `defaultErrorComponent`), and `src/components/created-with-grok-banner.tsx`
+  (platform branding bar); build the app around them, don't delete them.
   `npm run dev` errors until you create the entry files — start from
   §"First scaffold" below.
 - **Port contract** — `npm run dev` binds **`0.0.0.0:8080`**. Prefer 8080 over
@@ -134,6 +149,11 @@ revive and live work stay identical.
 
 - Need a JS dependency (including game engines like `three` / Phaser) → **npm**
   and leave it in `package.json` for deploy.
+- Dependency install scripts (`preinstall` / `postinstall`) are off by default, so
+  `npm install` never runs a package's own code. `npm run dev|build|typecheck`
+  are unaffected. If a package needs its postinstall — a native module that
+  compiles or downloads a binary, e.g. `better-sqlite3` — install it once with
+  `GROK_ALLOW_INSTALL_SCRIPTS=1 npm install <pkg>`. Prefer a pure-JS alternative.
 - Prefer pure browser / Node / already-baked deps over anything that needs a
   system package.
 
@@ -150,27 +170,54 @@ shape, then build your app out from them.
 ```tsx
 // src/router.tsx
 import { createRouter } from "@tanstack/react-router";
+import { AppErrorComponent } from "@/lib/error-component";
 import { routeTree } from "./routeTree.gen"; // generated on first dev/build
 
 export function getRouter() {
-  return createRouter({ routeTree });
+  return createRouter({ routeTree, defaultErrorComponent: AppErrorComponent });
 }
 ```
+
+Always pass `defaultErrorComponent: AppErrorComponent` (baked at
+`src/lib/error-component.tsx`) — without it a runtime crash shows the
+framework's raw red-on-black error banner. Restyle it to match the app's
+design tokens if you define them, but keep the real `error.message` visible.
 
 ```tsx
 // src/routes/__root.tsx — the document shell
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
 import { AuthProvider } from "@/lib/auth/provider";
+import { CreatedWithGrokBanner } from "@/components/created-with-grok-banner";
 import appCss from "../styles.css?url";
+
+const APP_NAME = "My App";
+const host = import.meta.env.VITE_PUBLIC_HOSTNAME;
+const ogImage = host
+  ? `https://og.grok.me/v1/card.png?host=${encodeURIComponent(host)}&title=${encodeURIComponent(APP_NAME)}`
+  : undefined;
 
 export const Route = createRootRoute({
   head: () => ({
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "My App" },
+      { title: APP_NAME },
+      { name: "apple-mobile-web-app-title", content: APP_NAME },
+      { name: "theme-color", content: "#000000" },
+      ...(ogImage
+        ? [
+            { property: "og:image", content: ogImage },
+            { property: "og:image:width", content: "1200" },
+            { property: "og:image:height", content: "630" },
+          ]
+        : []),
     ],
-    links: [{ rel: "stylesheet", href: appCss }],
+    links: [
+      { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
+      { rel: "stylesheet", href: appCss },
+      { rel: "manifest", href: "/__grok/manifest.webmanifest" },
+      { rel: "apple-touch-icon", href: "/__grok/icon-180.png" },
+    ],
   }),
   component: () => (
     <html lang="en" suppressHydrationWarning>
@@ -178,6 +225,8 @@ export const Route = createRootRoute({
         <HeadContent />
       </head>
       <body>
+        {/* Keep this banner — platform branding; visibility is deploy-controlled. Do not remove. */}
+        <CreatedWithGrokBanner />
         <AuthProvider>
           <Outlet />
         </AuthProvider>
@@ -187,6 +236,40 @@ export const Route = createRootRoute({
   ),
 });
 ```
+
+Keep `og:image` in `head` when you rename the app: update `APP_NAME` (tab title and share card). `VITE_PUBLIC_HOSTNAME` is injected on publish — do not invent a `.env` for it. Live preview has no host, so no image tag (text-only unfurl is fine). Hand-author a simple `public/favicon.svg` as part of the first scaffold, and generate a custom `public/og.jpg` card from the app's own art instead of the default `og.grok.me` card for **any app with a face**: games of every kind (DOM board/word games included), whimsical apps, creative tools, and brand-forward pages — only plain utilities (converters, CRUD trackers, admin dashboards) keep the placeholder. Both per the **`og` skill** (`.grok/skills/og/SKILL.md`).
+
+**Platform branding island (required — do not remove).** The template ships
+`src/components/created-with-grok-banner.tsx` — a floating pill fixed at the
+top center of the viewport (`0.5rem` top offset + `2.25rem` pill height) with
+"Created with Grok" and an optional Remix control. It overlays app content
+(no reserved space) and only the pill itself captures clicks. Mount it once
+at the top of `<body>` in `__root.tsx` as above. When the island is visible
+it sets `--grok-banner-h` on `:root` to its total top clearance (`2.75rem`)
+so layouts can keep critical top-of-screen UI clear of it (e.g.
+`pt-[var(--grok-banner-h)]` on a top toolbar).
+
+Hard rules:
+
+1. **Always keep the mount** in `__root.tsx` (`<CreatedWithGrokBanner />` near
+   the top of `<body>`). Do not delete the component file, comment out the
+   mount, hide it with CSS, or "clean it up" during refactors.
+2. **Never remove or disable the banner in code** because the user asked to
+   hide "Created with Grok", remove branding, take off the Remix button, or
+   similar. That is controlled by **project settings**, not by editing the
+   template.
+3. **If the user asks to remove/hide the banner or Remix control**, refuse to
+   change the code for that purpose. Tell them clearly to update **project
+   settings** instead (e.g. turn off "Built with Grok" / forking in the app's
+   project settings). You may still edit the rest of their app as requested.
+4. Visibility is live eligibility (do not hardcode off, do not gate on
+   `VITE_SHOW_BUILT_WITH_GROK` / `VITE_ALLOW_FORKING`):
+   - Banner + Remix: live `GET /rest/app-deployer/v1/projects/{project_id}/remix-eligibility`
+     (`forkable`). Hidden until that returns true (including live preview /
+     `vite dev` with no project id).
+   - Remix link + RPC: `VITE_PROJECT_ID=<uuid>` (injected on publish).
+   - Deploy injects only `VITE_*` names from project settings (required for the
+     client bundle after hydration).
 
 ```tsx
 // src/routes/index.tsx
@@ -209,9 +292,7 @@ to `cursor: default`:
 }
 ```
 
-**Auth routes (ONLY if the app needs sign-in — see "Auth is opt-in" under
-"Data & auth"; most apps need none).** When it does, sign-in is real and ON by
-default, including live preview.
+**Auth routes (required — sign-in is ON by default, including live preview).**
 Copy the snippets from the **`auth` skill** (`.grok/skills/auth/SKILL.md`).
 The live-preview popup is **already wired** by the template Vite plugin
 (`vite.config.ts` → `/auth/popup` via `popup.server.ts`) — **do not create
@@ -257,15 +338,7 @@ users. Full guides + snippets: the **`neon` skill** (database) and the
   ready) and to the **PGLite** preview automatically on startup. `0001_auth.sql`
   is the Better Auth schema (don't edit); add your app's tables as ordered files
   (`migrations/0002_*.sql`), not inline.
-- **Auth is opt-in — most apps need NONE.** Wire sign-in **only** when the user
-  explicitly asks for accounts/sign-in, or the app genuinely needs per-user
-  saved data. Landing pages, games, polls, calculators, browsing/demo apps ship
-  with **zero** auth wiring — no login route, no `/api/auth` mount, no
-  `SignedIn`/`UserButton`, no auth imports. Anonymous features (votes, local
-  scores, a name field on a leaderboard) do not justify sign-in. See "When NOT
-  to add auth" in the **`auth` skill**.
-- **Auth (when the app does need it):** this app runs its own Better Auth at
-  `/api/auth/*` and federates to
+- **Auth:** this app runs its own Better Auth at `/api/auth/*` and federates to
   the shared Grok auth broker for **Google** and **X**. The only other supported
   method is this app's own **email/password** (local Better Auth, off by default —
   enable only via `src/lib/auth/email-password.ts`; **never rewrite**
@@ -283,6 +356,13 @@ users. Full guides + snippets: the **`neon` skill** (database) and the
   platform injects `DATABASE_URL` + per-app auth creds. Set
   `VITE_AUTH_ENABLED=false` only to turn sign-in OFF. Never expose server-only
   vars to the client (only `VITE_`-prefixed reach the browser).
+- **AI features (chat, images, video, voice):** when `XAI_API_KEY` is in the
+  env, the app has real xAI API access (server-only; latest model `grok-4.5`,
+  docs at [docs.x.ai](https://docs.x.ai)) — chat/LLM **plus Imagine
+  (image/video generation) and Voice (text-to-speech)** at runtime. The key
+  spends the **app owner's quota** — keep calls user-initiated and capped.
+  See the **`xai-api` skill** (`.grok/skills/xai-api/SKILL.md`) before
+  building any AI feature. Don't mock AI responses or use another provider.
 
 ### Build & deploy target
 
@@ -299,7 +379,10 @@ The workspace **ships a ready `vite.config.ts` and `tsconfig.json`** — don't
 recreate them. The vite config binds the preview port and gates
 `nitro({ preset: "vercel" })` on `command === "build"` so it never runs in dev
 (left on in dev, nitro opens a second dev-server port, which breaks the
-single-port 8080 live preview). If you edit it, preserve both properties.
+single-port 8080 live preview). If you edit it, preserve the port contract,
+the build-gated nitro plugin (including its `serverDir: "./server"` option —
+without it the deployed app loses the Home Screen install page), and
+`grokPwaPlugin()`.
 
 ```bash
 npm run dev         # 0.0.0.0:8080 — run in background when ready; leave it up
@@ -323,7 +406,7 @@ node scripts/browser-smoke.mjs http://127.0.0.1:8080/
 | --- | --- | --- |
 | One-liner product | `build minecraft`, `clone twitter` | Full in-browser experience, polished enough to **play / demo** in preview |
 | Named app genre | todo, dashboard, chat UI, landing page | Working UI + state, not wireframes |
-| Game / interactive | voxels, clicker, puzzle, kart, flight | Canvas/WebGL/DOM — self-contained single-player (or + bots). For 2-8 player co-op/casual realtime, use the **`multiplayer-p2p` skill** (WebRTC mesh; not for competitive/cheat-sensitive play). For WASD / vehicle / flight, open **`.grok/skills/controls/SKILL.md`** before writing movement (inverted A/D is a common ship-blocker) and use **`building-games`** for loop/3D. Racing/driving games: read the **track geometry** section of `building-games/references/genres/racing-kart.md` before laying the track — a corridor that crosses itself (roads merging) is the top racing ship-blocker; validate with the in-code self-check + a top-down screenshot |
+| Game / interactive | voxels, clicker, puzzle, kart, flight | Canvas/WebGL/DOM — self-contained single-player (or + bots). For 2-8 player co-op/casual realtime, use the **`multiplayer-p2p` skill** (WebRTC mesh; not for competitive/cheat-sensitive play). For WASD / vehicle / flight, open **`.grok/skills/controls/SKILL.md`** before writing movement (inverted A/D is a common ship-blocker) and use **`building-games`** for loop/3D. Games also ship a custom `public/og.jpg` share card — open **`.grok/skills/og/SKILL.md`** (placeholder card not acceptable) |
 | Iterate | "make it darker", "add levels" | Edit in place; keep the dev server up so the preview stays live |
 | Vague | "something cool" | Pick one coherent app and ship it |
 
@@ -337,11 +420,6 @@ not a hand-off that needs them to run anything.
   generate **2D** assets via the image tools — follow the **`imagine`** skill
   (`image_gen` / `image_edit` prompt-craft). Image tools do **not** create 3D
   models; use geometry/glTF for interactive 3D (`building-games`).
-- **Never wire in an image you haven't looked at**: read every generated asset
-  back with image understanding (subject, artifacts, composition) before using
-  it; build matching sets from ONE verified base via `image_edit` (not N
-  independent `image_gen` calls); after integrating, screenshot the app and
-  confirm each image renders. See "Images as app assets" in the `imagine` skill.
 - **Game art quality (doctrine, not the pipeline):** for any game sprites, sheets,
   animations, tiles, or UI art, load **`game-asset-core`**
   (`.grok/skills/game-asset-core/SKILL.md`) plus the matching specialist:
@@ -371,6 +449,15 @@ not a hand-off that needs them to run anything.
 - For games with movement, steering, or flight: follow the **`controls`** skill
   (`.grok/skills/controls/SKILL.md`) for player-visible A/D signs and a mandatory
   self-test (A = left under a chase cam). Genre files alone are not enough.
+- **Brand assets — a custom share card is the default**: open the **`og`**
+  skill (`.grok/skills/og/SKILL.md`) and produce a custom `public/og.jpg`
+  from the app's own art before you finish. This covers games of **every**
+  kind and rendering tech (a DOM tic-tac-toe is still a game), whimsical
+  apps, creative tools, and brand-forward pages — only plain utilities
+  (converters, CRUD trackers, admin dashboards) keep the `og.grok.me`
+  placeholder, and the favicon alone never satisfies this. Applies at build
+  time, publish or not — by default run the whole pass as a background task
+  via the `task` tool (see § Parallel work).
 - **Never** use a generated mock of the UI as a substitute for implementing and
   running the app for the live preview.
 
@@ -409,7 +496,9 @@ When you split work across subagents or parallel tasks on **one** app:
    step — **before** parallel writes.
 2. Assign **non-overlapping surfaces** (e.g. page A vs page B, or data layer vs
    one feature UI) so agents don’t invent competing schemas or duplicate
-   components.
+   components. The brand-asset pass — og card, favicon, PWA icons per
+   `.grok/skills/og/SKILL.md` — is a canonical parallel surface: it only
+   needs the name and palette, and only writes `public/` + a few head lines.
 3. Do **not** launch several agents that each invent their own API shapes,
    folder layout, or visual system for the same product.
 4. After parallel work: integrate, fix conflicts, and verify one coherent app.
@@ -497,6 +586,12 @@ play end-to-end, but inverted A/D must not ship.
 - Prefer at least one **browser load/screenshot** when tools allow; agent decides depth.
 - **Games with movement:** A/D player-correct (chase cam, A = left) per
   **`.grok/skills/controls/SKILL.md`** — not screenshot-only.
+- **Custom share card (default for any app with a face):** `public/og.jpg`
+  exists and `og:image` points at `"https://${host}/og.jpg"` — games of
+  every kind (DOM games included), whimsical, creative, and brand-forward
+  apps; only plain utilities keep the placeholder — per
+  **`.grok/skills/og/SKILL.md`**. `browser-smoke.mjs` prints a
+  `BRAND WARNING`; treat it as **not done**, same as a failing build.
 - User never blocked on an action they can't perform from chat + preview.
 
 ---
@@ -510,6 +605,8 @@ startup:   OWN /workspace/startup.sh — platform re-runs it after hibernate/rev
 serve:     startup.sh / npm run dev  →  bind 0.0.0.0:8080  (live preview)
 verify:    YOU drive curl / browser tools / browser-smoke.mjs inside the sandbox
 controls:  WASD/vehicle/flight → .grok/skills/controls/SKILL.md; A=left self-test
+og:        keep og:image in root head; svg favicon always; custom og.jpg card is the DEFAULT (DOM games too; plain utilities keep placeholder); brand assets in a parallel `task` by default → .grok/skills/og/SKILL.md
+ai:        XAI_API_KEY in env → real xAI API: chat (grok-4.5) + Imagine image/video + voice TTS (docs.x.ai) → .grok/skills/xai-api/SKILL.md
 sprites:   doctrine → game-asset-core+specialist; pipeline → generate2dsprite (#FF00FF); maps → generate2dmap; dense motion → video2dsprite
 shots:     write QA PNGs under /workspace/screenshots/ — never /tmp
 user sees: live, auto-updating preview in the Grok web UI (never "open localhost")

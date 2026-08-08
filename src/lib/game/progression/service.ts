@@ -1,35 +1,21 @@
 import type { GameState, ScreenId, UnlockState } from "../types";
+import {
+  SYSTEM_UNLOCKS,
+  evaluateAllSystemUnlocks,
+  describeUnlockRequirements,
+  resolveUnlockState,
+  getSystemUnlockDef,
+} from "./unlockRegistry";
+import { isFeatureEnabled } from "./featureFlags";
 
 const STARTING_OWNED = new Set(["research", "engines"]);
 
-/** Fresh campaign unlock map — research + engines owned; rest hidden. */
+/** Fresh campaign unlock map — research + engines owned; rest from registry defaults. */
 export function initialUnlocks(): Record<string, UnlockState> {
-  const u: Record<string, UnlockState> = {
-    research: "owned",
-    reports: "hidden",
-    engines: "owned",
-    hiring: "hidden",
-    training: "hidden",
-    medium_games: "hidden",
-    publishing: "hidden",
-    audience: "hidden",
-    marketing: "hidden",
-    sequels: "hidden",
-    large_games: "hidden",
-    multi_genre: "hidden",
-    multi_platform: "hidden",
-    ports: "hidden",
-    advanced_marketing: "hidden",
-    rnd: "hidden",
-    aaa: "hidden",
-    post_release: "hidden",
-    online: "hidden",
-    mmo: "hidden",
-    hardware: "hidden",
-    consoles: "hidden",
-    contracts: "hidden",
-    market: "hidden",
-  };
+  const u: Record<string, UnlockState> = {};
+  for (const def of SYSTEM_UNLOCKS) {
+    u[def.id] = def.startOwned ? "owned" : "hidden";
+  }
   return u;
 }
 
@@ -38,88 +24,41 @@ export function isOwned(state: GameState, id: string): boolean {
   return s === "owned" || (STARTING_OWNED.has(id) && !state.unlocks);
 }
 
-/** Evaluate progression after meaningful events (release, office, etc.). */
+/** Whether a system is at least visible (teased+) for UI chrome. */
+export function isUnlockVisible(state: GameState, id: string): boolean {
+  const s = state.unlocks?.[id];
+  return s === "teased" || s === "discovered" || s === "researchable" || s === "owned";
+}
+
+/** Whether the player can act on the system. */
+export function isUnlockOwned(state: GameState, id: string): boolean {
+  return isOwned(state, id);
+}
+
+/**
+ * Evaluate progression after meaningful events (release, office move, hire, research).
+ * Uses declarative registry: hidden → teased → discovered → researchable → owned.
+ */
 export function evaluateProgression(state: GameState): {
   unlocks: Record<string, UnlockState>;
   notes: string[];
 } {
-  const unlocks = { ...(state.unlocks ?? initialUnlocks()) };
-  const notes: string[] = [];
-  const own = (id: string, reason: string) => {
-    if (unlocks[id] !== "owned") {
-      unlocks[id] = "owned";
-      notes.push(reason);
-    }
-  };
-  const discover = (id: string) => {
-    if (unlocks[id] === "hidden" || !unlocks[id]) unlocks[id] = "discovered";
-  };
+  const base = { ...(state.unlocks ?? initialUnlocks()) };
+  // Ensure all registry ids exist
+  for (const def of SYSTEM_UNLOCKS) {
+    if (!base[def.id]) base[def.id] = def.startOwned ? "owned" : "hidden";
+  }
+  const { unlocks, notes } = evaluateAllSystemUnlocks({ ...state, unlocks: base });
 
   // Always reinforce garage systems
-  own("research", "Research desk is open.");
-  own("engines", "Engine workshop available in the garage.");
-
-  // After first release: reports, market, contracts, publishing board
-  if (state.gamesPublished >= 1) {
-    own("market", "Market overview unlocked — watch sales, platforms, and rivals.");
-    own("reports", "Game Reports unlocked — review what you learned.");
-    own("contracts", "Contract board open under Money — slow refresh, 5 offers.");
-    own("publishing", "Publishing board open — reach vs margin deals.");
-  }
-  if (state.fans >= 500) {
-    own("publishing", "Publishing board open — fan base qualifies.");
-  }
-
-  // Office 2+: hiring
-  if (state.office >= 2) {
-    own("hiring", "Hiring unlocked with your new office.");
-    own("training", "Staff training is available.");
-  }
-  // Medium path: office + team (2+) + research — research alone is not enough
-  if (state.office >= 2 && state.staff.length >= 2) {
-    discover("medium_games");
-  }
-  if (
-    state.researched.includes("medium_games") &&
-    state.office >= 2 &&
-    state.staff.length >= 2
-  ) {
-    own("medium_games", "Medium games unlocked — office, team, and research ready.");
-  } else if (state.researched.includes("medium_games") && state.staff.length < 2) {
-    discover("medium_games");
-    // keep not owned until team exists
-  }
-  // Audience / marketing
-  if (state.gamesPublished >= 4 || state.fans >= 5000) {
-    discover("audience");
-    discover("marketing");
-  }
-  if (state.flags.audience || state.researched.some((r) => r.includes("audience"))) {
-    own("audience", "Target audiences unlocked.");
-  }
-  if (state.flags.marketing) own("marketing", "Marketing unlocked.");
-  // Sequels: after 2 releases OR research / flag
-  if (state.gamesPublished >= 2) {
-    discover("sequels");
-    own("sequels", "Sequels unlocked — ship a follow-up from Games → Released.");
-  }
-  if (state.flags.sequels || state.researched.includes("sequels") || state.researched.includes("series_continuity")) {
-    own("sequels", "Sequels unlocked (Series Continuity).");
-  }
-
-  // Large
-  if (state.office >= 3 && state.fans >= 100000) {
-    discover("large_games");
-  }
-  if (state.researched.includes("large_games")) own("large_games", "Large Games available.");
-  if (state.flags.multiGenre) own("multi_genre", "Multi-genre unlocked.");
+  unlocks.research = "owned";
+  unlocks.engines = "owned";
 
   return { unlocks, notes };
 }
 
 export function visibleScreens(state: GameState): ScreenId[] {
   const u = state.unlocks ?? initialUnlocks();
-  // Garage day-one: studio, develop, engines, staff (founder), research, platforms, finances, settings
   const base: ScreenId[] = [
     "studio",
     "develop",
@@ -134,14 +73,17 @@ export function visibleScreens(state: GameState): ScreenId[] {
     base.splice(2, 0, "games");
   }
   if (u.market === "owned" || state.gamesPublished >= 1) {
-    // before settings
     const si = base.indexOf("settings");
     base.splice(si, 0, "market");
+  }
+  // Late systems: only add screens when owned and checkpoint live
+  if (u.rnd === "owned" && isFeatureEnabled("techParkLabs")) {
+    // future: labs screen id
   }
   return [...new Set(base)];
 }
 
-/** Tech visibility: only owned + researchable next in chain + 1-2 teased */
+/** Tech / research catalog visibility: owned + researchable next + teased. */
 export function isTechVisible(
   item: { id: string; requires?: string[]; minYear?: number; chain?: string; chainOrder?: number },
   state: GameState,
@@ -154,8 +96,28 @@ export function isTechVisible(
     if (missing.length === 1) return "teased";
     return "hidden";
   }
-  if (item.chain && item.chainOrder && item.chainOrder > 1) {
-    // available only if lower orders done — simplified: if requires met
+  // Studio research for gated sizes: respect system unlock researchable state
+  if (item.id === "medium_games") {
+    const s = state.unlocks?.medium_games;
+    if (s === "hidden") return "hidden";
+    if (s === "teased") return "teased";
+    if (s === "owned") return "owned";
+    // discovered / researchable → available
+    return "available";
+  }
+  if (item.id === "large_games") {
+    const s = state.unlocks?.large_games;
+    if (!s || s === "hidden") return "hidden";
+    if (s === "teased") return "teased";
+    if (s === "owned") return "owned";
+    return "available";
+  }
+  if (item.id === "aaa_games") {
+    const s = state.unlocks?.aaa;
+    if (!s || s === "hidden") return "hidden";
+    if (s === "teased") return "teased";
+    if (s === "owned") return "owned";
+    return "available";
   }
   return "available";
 }
@@ -163,34 +125,40 @@ export function isTechVisible(
 export function migrateUnlocks(raw: Partial<GameState>): Record<string, UnlockState> {
   const base = initialUnlocks();
   if (raw.unlocks && typeof raw.unlocks === "object") {
-    return { ...base, ...raw.unlocks, engines: "owned", research: "owned" };
+    Object.assign(base, raw.unlocks);
   }
   base.research = "owned";
   base.engines = "owned";
-  if ((raw.gamesPublished ?? 0) >= 1) {
-    base.reports = "owned";
-    base.contracts = "owned";
-    base.market = "owned";
-  }
-  if ((raw.gamesPublished ?? 0) >= 2) base.sequels = "owned";
-  if ((raw.office ?? 1) >= 2) {
-    base.hiring = "owned";
-    base.training = "owned";
-  }
-  if (raw.flags?.marketing) base.marketing = "owned";
-  if (raw.flags?.audience) base.audience = "owned";
-  if (raw.flags?.sequels) base.sequels = "owned";
-  if (raw.flags?.multiGenre) base.multi_genre = "owned";
-  if (raw.flags?.contracts) base.contracts = "owned";
-  if (
-    (raw.researched ?? []).includes("medium_games") &&
-    (raw.office ?? 1) >= 2 &&
-    ((raw.staff as { length?: number } | undefined)?.length ?? 1) >= 2
-  ) {
-    base.medium_games = "owned";
-  }
-  if ((raw.researched ?? []).includes("large_games") && (raw.office ?? 1) >= 3) {
-    base.large_games = "owned";
-  }
-  return base;
+
+  // Re-evaluate from migrated stats so mid-campaign saves pick up new registry
+  const pseudo = {
+    ...raw,
+    unlocks: base,
+    gamesPublished: raw.gamesPublished ?? 0,
+    fans: raw.fans ?? 0,
+    office: raw.office ?? 1,
+    staff: raw.staff ?? [{ id: "founder" }],
+    researched: raw.researched ?? [],
+    flags: raw.flags ?? {
+      multiGenre: false,
+      sequels: false,
+      expansions: false,
+      marketing: false,
+      contracts: false,
+      audience: false,
+      rndLab: false,
+      hardwareLab: false,
+    },
+    year: raw.year ?? 1979,
+    month: raw.month ?? 1,
+    week: raw.week ?? 0,
+    releasedGames: raw.releasedGames ?? [],
+  } as GameState;
+
+  const { unlocks } = evaluateAllSystemUnlocks(pseudo);
+  unlocks.research = "owned";
+  unlocks.engines = "owned";
+  return unlocks;
 }
+
+export { describeUnlockRequirements, getSystemUnlockDef, resolveUnlockState, SYSTEM_UNLOCKS };

@@ -32,15 +32,17 @@ function req(
   return { id, label, met, detail };
 }
 
-/** First office: calendar floor + fans + releases + cash + move cost. */
+/** First office: bible proofs + liquid cash + move cost (not calendar alone). */
 export function evaluateFirstOfficeGate(state: GameState): SystemGateResult {
   const minWeek = firstOfficeMinWeek(START_YEAR);
+  const released = state.releasedGames ?? [];
+  const profitable = released.some((g) => (g.revenue ?? 0) > (g.developmentCost ?? 5_000));
   const requirements: GateRequirement[] = [
     req(
-      "calendar",
-      "Calendar floor",
+      "campaign_year",
+      "Campaign year 3+",
       state.week >= minWeek,
-      `Year ${FIRST_OFFICE_GATE.minYear} Month ${FIRST_OFFICE_GATE.minMonth}+ (week ${minWeek}+)`,
+      `Week ${state.week} / ${minWeek}`,
     ),
     req(
       "releases",
@@ -53,6 +55,12 @@ export function evaluateFirstOfficeGate(state: GameState): SystemGateResult {
       "Fans",
       state.fans >= FIRST_OFFICE_GATE.minFans,
       `${state.fans.toLocaleString()} / ${FIRST_OFFICE_GATE.minFans.toLocaleString()}`,
+    ),
+    req(
+      "profitable",
+      "One profitable title",
+      profitable,
+      profitable ? "Met" : "Need a title that pays for itself",
     ),
     req(
       "cash",
@@ -75,7 +83,7 @@ export function evaluateFirstOfficeGate(state: GameState): SystemGateResult {
     requirements,
     summary: available
       ? "Ready to leave the garage."
-      : "Office needs time, fans, releases, and cash together.",
+      : "Office needs releases, fans, a profitable title, year 3+, and cash together.",
   };
 }
 
@@ -131,20 +139,20 @@ export function evaluateSequelsGate(state: GameState): SystemGateResult {
   };
 }
 
-/** Marketing full screen: Year 4 + first office + marketing research + cash buffer. Locked in garage. */
+/** Marketing full screen: industry year START+3 + first office + marketing research. Locked in garage. */
 export function evaluateMarketingGate(state: GameState): SystemGateResult {
-  const yearOk = state.year > 1985 || (state.year === 1985 && state.month >= 5);
+  const yearAnchor = START_YEAR + 3;
+  const yearOk = state.year > yearAnchor || (state.year === yearAnchor && state.month >= 1);
   const officeOk = state.office >= 2;
   const researchOk =
     state.flags.marketing ||
     state.researched.includes("marketing") ||
     state.unlocks.marketing === "owned";
   const requirements: GateRequirement[] = [
-    req("calendar", "Year 4+ (anchor)", yearOk, `Year ${state.year} M${state.month}`),
+    req("calendar", `Industry year ${yearAnchor}+`, yearOk, `Year ${state.year} M${state.month}`),
     req("office", "First office", officeOk, `Office tier ${state.office}`),
     req("research", "Marketing researched", researchOk, "Research Marketing 101"),
   ];
-  // Garage: marketing spend slider may unlock earlier as basic; full campaigns stay locked
   const available = yearOk && officeOk && researchOk;
   return {
     systemId: "marketing_campaigns",
@@ -153,7 +161,7 @@ export function evaluateMarketingGate(state: GameState): SystemGateResult {
     requirements,
     summary: available
       ? "Marketing campaigns available."
-      : "Full marketing campaigns need office + research + time.",
+      : "Full marketing campaigns need office + research + calendar.",
   };
 }
 
@@ -180,6 +188,73 @@ export function evaluateMediumGamesGate(state: GameState): SystemGateResult {
   };
 }
 
+/** Large games: upgraded office + research + team of 3. */
+export function evaluateLargeGamesGate(state: GameState): SystemGateResult {
+  const officeOk = state.office >= 3;
+  const researchOk =
+    state.researched.includes("large_games") || state.unlocks.large_games === "owned";
+  const teamOk = state.staff.length >= 3;
+  const fanOk = state.fans >= 100_000;
+  const requirements: GateRequirement[] = [
+    req("office", "Upgraded office", officeOk, `Office tier ${state.office}`),
+    req("fans", "100k fans (path)", fanOk, `${state.fans.toLocaleString()} fans`),
+    req("research", "Large Games research", researchOk, "Research Large Games"),
+    req("team", "Team (3+)", teamOk, `${state.staff.length} staff`),
+  ];
+  const available = officeOk && researchOk && teamOk;
+  return {
+    systemId: "large_games",
+    available,
+    locked: !available,
+    requirements,
+    summary: available
+      ? "Large games unlocked."
+      : "Needs upgraded office, Large research, and a larger team.",
+  };
+}
+
+/** AAA: tech park + research + year 2005 + staff 5 — multi-condition only. */
+export function evaluateAaaGate(state: GameState): SystemGateResult {
+  const officeOk = state.office >= 4;
+  const researchOk =
+    state.researched.includes("aaa_games") || state.unlocks.aaa === "owned";
+  const teamOk = state.staff.length >= 5;
+  const yearOk = state.year >= 2005;
+  const requirements: GateRequirement[] = [
+    req("office", "Technology park", officeOk, `Office tier ${state.office}`),
+    req("calendar", "Year 2005+", yearOk, `Year ${state.year}`),
+    req("research", "AAA Production research", researchOk, "Research AAA Production"),
+    req("team", "Team (5+)", teamOk, `${state.staff.length} staff`),
+  ];
+  const available = officeOk && researchOk && teamOk && yearOk;
+  return {
+    systemId: "aaa",
+    available,
+    locked: !available,
+    requirements,
+    summary: available
+      ? "AAA production unlocked."
+      : "AAA needs tech park, 2005+, research, and a large team.",
+  };
+}
+
+/** Hiring: first office only (garage hard-locked). */
+export function evaluateHiringGate(state: GameState): SystemGateResult {
+  const officeOk = state.office >= 2;
+  const requirements: GateRequirement[] = [
+    req("office", "First office", officeOk, state.office === 1 ? "Still in garage" : `Office tier ${state.office}`),
+  ];
+  return {
+    systemId: "hiring",
+    available: officeOk,
+    locked: !officeOk,
+    requirements,
+    summary: officeOk
+      ? "Hiring open — fill HQ seats deliberately."
+      : "Hiring is unavailable in the garage.",
+  };
+}
+
 export function evaluateAllGates(state: GameState): SystemGateResult[] {
   return [
     evaluateFirstOfficeGate(state),
@@ -187,29 +262,57 @@ export function evaluateAllGates(state: GameState): SystemGateResult[] {
     evaluateSequelsGate(state),
     evaluateMarketingGate(state),
     evaluateMediumGamesGate(state),
+    evaluateLargeGamesGate(state),
+    evaluateAaaGate(state),
+    evaluateHiringGate(state),
   ];
 }
 
-/** Map gate results into unlock discover/own hints (non-destructive). */
+/**
+ * Map gate results into unlock hints (non-destructive).
+ * Prefer evaluateProgression / unlockRegistry as the authoritative path;
+ * this remains for commercial UI checklists.
+ */
 export function applyGateUnlockHints(
   unlocks: Record<string, UnlockState>,
   state: GameState,
 ): Record<string, UnlockState> {
   const next = { ...unlocks };
+  const rank: Record<UnlockState, number> = {
+    hidden: 0,
+    teased: 1,
+    discovered: 2,
+    researchable: 3,
+    owned: 4,
+  };
   const set = (id: string, v: UnlockState) => {
-    const cur = next[id];
-    if (cur === "owned") return;
-    if (v === "owned") next[id] = "owned";
-    else if (v === "discovered") next[id] = "discovered";
+    const cur = (next[id] ?? "hidden") as UnlockState;
+    if (rank[v] > rank[cur]) next[id] = v;
   };
   if (evaluatePublishingGate(state).available) set("publishing", "owned");
+  else if (state.gamesPublished >= 1 || state.fans >= 250) set("publishing", "discovered");
+
   if (evaluateSequelsGate(state).available) set("sequels", "owned");
+  else if (state.gamesPublished >= 1) set("sequels", "teased");
+
   if (evaluateMarketingGate(state).available) set("marketing", "owned");
+  else if (state.office >= 2) set("marketing", "researchable");
+
   if (evaluateMediumGamesGate(state).available) set("medium_games", "owned");
-  if (state.office >= 3 && state.fans >= 100000) set("large_games", "discovered");
-  if (state.office >= 2) {
+  else if (state.office >= 2 && state.staff.length >= 2) set("medium_games", "researchable");
+  else if (state.office >= 2) set("medium_games", "teased");
+
+  if (evaluateLargeGamesGate(state).available) set("large_games", "owned");
+  else if (state.office >= 3 && state.fans >= 100_000) set("large_games", "discovered");
+  else if (state.office >= 2 && state.fans >= 25_000) set("large_games", "teased");
+
+  if (evaluateAaaGate(state).available) set("aaa", "owned");
+  else if (state.office >= 4 && state.fans >= 500_000) set("aaa", "discovered");
+
+  if (evaluateHiringGate(state).available) {
     set("hiring", "owned");
-    set("training", "owned");
+    if (state.staff.length >= 2) set("training", "owned");
+    else set("training", "discovered");
   }
   return next;
 }

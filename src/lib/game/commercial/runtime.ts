@@ -20,6 +20,16 @@ import {
   type WeeklySalesResult,
 } from "./index";
 
+/** Soft-cap runaway 90s fortunes: later decades stay winnable via fans/platforms not raw cash. */
+function eraSalesDampener(year: number): number {
+  if (year < 1988) return 1;
+  if (year < 1992) return 0.82;
+  if (year < 1996) return 0.68;
+  if (year < 2000) return 0.72;
+  if (year < 2008) return 0.78;
+  return 0.85;
+}
+
 export function initReleasedCommercial(opts: {
   released: ReleasedGame;
   state: GameState;
@@ -235,8 +245,8 @@ export function tickReleasedSales(
         marketCapacityRate: snap.marketCapacityRate,
       });
 
-      units = result.unitsSold;
-      rev = result.developerRevenue;
+      units = Math.floor(result.unitsSold * eraSalesDampener(next.year));
+      rev = result.developerRevenue * (units / Math.max(1, result.unitsSold));
       nextG.weeklySalesResults = [...(g.weeklySalesResults ?? []), result].slice(
         -200,
       );
@@ -272,7 +282,7 @@ export function tickReleasedSales(
         );
         continue;
       }
-      units = planUnits;
+      units = Math.floor(planUnits * eraSalesDampener(next.year));
       const price = g.launchPrice ?? defaultLaunchPrice(g.size);
       const share = g.publisherRoyalty ?? 0.7;
       rev = units * price * share;

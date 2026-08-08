@@ -79,7 +79,10 @@ export type ProductionPhase =
 export type FounderProfile = {
   skills: Record<string, number>;
   mastery: Record<string, number>;
+  /** Team QA / training bonus — speeds bug clearing (0–0.5+). */
+  bugFixBonus?: number;
 };
+
 
 export function founderCapability(founder: FounderProfile, discipline: string): number {
   const skill = clamp(founder.skills[discipline] ?? 0, 0, 100);
@@ -104,28 +107,35 @@ export type ProductionBalance = {
   polishRequiredWork: number;
   polishWorkPerDay: number;
   polishDailyCost: number;
+  sizeSwuFactor: Record<string, number>;
+  /** Multiplier on bug spawn rate by size (small ships cleaner / fewer). */
+  sizeBugFactor: Record<string, number>;
 };
 
 export const DEFAULT_PRODUCTION_BALANCE: ProductionBalance = {
-  // Multi-week stages (garage feel). ~180 SWU/day × allocation × capability ≈ 45–55/discipline/day.
-  // Stage 1 base 2800 → ~4 weeks at focused founder pace; scope/mismatch can stretch further.
-  stageBaseSwu: { 1: 2800, 2: 3200, 3: 3000 },
-  dailyWorkUnits: 180,
-  dailyCashCost: 75,
+  // Small ~2 months stages+polish; AAA ~10–13 months production (bugs extra).
+  stageBaseSwu: { 1: 2200, 2: 2400, 3: 2300 },
+  dailyWorkUnits: 200,
+  dailyCashCost: 70,
   scopeSwuMultiplier: 0.2,
   scopeCostMultiplier: 0.35,
   scopeBugMultiplier: 0.5,
   mismatchSwuMultiplier: 0.15,
   mismatchCostMultiplier: 0.2,
-  lowSkillBugMultiplier: 0.75,
-  bugProbabilityPerWorkUnit: 0.00055,
-  bugFixWorkPerSeverity: 100,
-  bugFixWorkPerDay: 90,
+  lowSkillBugMultiplier: 0.8,
+  bugProbabilityPerWorkUnit: 0.00042,
+  bugFixWorkPerSeverity: 95,
+  bugFixWorkPerDay: 115,
   bugFixDailyCost: 60,
-  polishRequiredWork: 450,
-  polishWorkPerDay: 110,
-  polishDailyCost: 65,
+  polishRequiredWork: 380,
+  polishWorkPerDay: 140,
+  polishDailyCost: 55,
+  // SWU scale by size — AAA lands ~11 months pure production.
+  sizeSwuFactor: { small: 1, medium: 2.15, large: 3.9, aaa: 7.4 },
+  // Small: light bug load so first garage ship ≈ 2 months total; AAA bugs extra.
+  sizeBugFactor: { small: 0.62, medium: 1, large: 1.15, aaa: 1.35 },
 };
+
 
 export function normalizedDistribution(
   values: Record<string, number>,
@@ -215,10 +225,14 @@ export type ProductionState = {
   asOfDay: number;
   phase: ProductionPhase;
   currentStage: 1 | 2 | 3;
+  /** Project size for SWU / polish / bug scaling. */
+  size: string;
   activeProgress: StageProgress | null;
   completedStages: StageProgress[];
   bugs: ProductionBug[];
   polishProgress: number;
+  /** Size-scaled polish target. */
+  polishRequired: number;
   candidateBuild: CandidateBuild | null;
   history: ProductionTick[];
 };
@@ -227,17 +241,22 @@ export function createProductionState(
   gameId: string,
   campaignSeed: string | number,
   asOfDay = 0,
+  size = "small",
 ): ProductionState {
+  const bal = DEFAULT_PRODUCTION_BALANCE;
+  const sf = bal.sizeSwuFactor[size] ?? 1;
   return {
     gameId,
     campaignSeed: String(campaignSeed),
     asOfDay,
     phase: PHASE_PLANNING,
     currentStage: 1,
+    size,
     activeProgress: null,
     completedStages: [],
     bugs: [],
     polishProgress: 0,
+    polishRequired: Math.round(bal.polishRequiredWork * (0.55 + 0.45 * sf)),
     candidateBuild: null,
     history: [],
   };
@@ -250,6 +269,7 @@ export function planStage(
     rawIntent: Record<string, number>;
     demand: Record<string, number>;
     balance?: ProductionBalance;
+    size?: string;
   },
 ): ProductionState {
   const balance = opts.balance ?? DEFAULT_PRODUCTION_BALANCE;
@@ -278,8 +298,10 @@ export function planStage(
   const rawTotal = disciplines.reduce((s, d) => s + Number(opts.rawIntent[d]), 0);
   const scopePressure = Math.max(0, rawTotal / 100 - 1);
   const demandFit = distributionFit(allocation, demand);
+  const sizeFactor = balance.sizeSwuFactor[opts.size ?? "small"] ?? 1;
   const totalRequired =
     balance.stageBaseSwu[opts.stage] *
+    sizeFactor *
     (1 + balance.scopeSwuMultiplier * scopePressure) *
     (1 + balance.mismatchSwuMultiplier * (1 - demandFit));
   const requiredSwu: Record<string, number> = {};
@@ -299,8 +321,13 @@ export function planStage(
     plan,
     workDone: Object.fromEntries(disciplines.map((d) => [d, 0])),
   };
+  const size = opts.size ?? state.size ?? "small";
+  const sf = balance.sizeSwuFactor[size] ?? 1;
+  const polishRequired = Math.round(balance.polishRequiredWork * (0.55 + 0.45 * sf));
   return {
     ...state,
+    size,
+    polishRequired,
     phase: PHASE_DEVELOPING,
     activeProgress: progress,
   };
@@ -347,16 +374,72 @@ export function advanceDevelopmentDay(
     (1 + balance.mismatchCostMultiplier * (1 - plan.demandFit));
 
   for (const discipline of STAGE_DISCIPLINES[progress.stage]) {
+    workApplied[discipline] = 0;
+  }
+
+  // Pass 1 — allocated focus work
+  let leftover = 0;
+  for (const discipline of STAGE_DISCIPLINES[progress.stage]) {
     const capability = founderCapability(opts.founder, discipline);
-    const work = balance.dailyWorkUnits * (plan.allocation[discipline] ?? 0) * capability;
+    const intended = balance.dailyWorkUnits * (plan.allocation[discipline] ?? 0) * capability;
     const previous = workDone[discipline] ?? 0;
-    const updated = Math.min(plan.requiredSwu[discipline] ?? 0, previous + work);
-    workDone[discipline] = updated;
-    workApplied[discipline] = updated - previous;
+    const room = Math.max(0, (plan.requiredSwu[discipline] ?? 0) - previous);
+    const applied = Math.min(room, intended);
+    workDone[discipline] = previous + applied;
+    workApplied[discipline] = applied;
+    leftover += intended - applied;
+  }
+
+  // Pass 2 — redistributes leftover so unbalanced sliders don't stall the stage
+  // (focus still shapes quality via allocation/demandFit; progress stays smooth)
+  if (leftover > 0.01) {
+    const incomplete = STAGE_DISCIPLINES[progress.stage].filter((d) => {
+      const req = plan.requiredSwu[d] ?? 0;
+      return (workDone[d] ?? 0) < req - 0.001;
+    });
+    if (incomplete.length) {
+      // Prefer remaining need weight so bottlenecks clear
+      let needSum = 0;
+      const needs: Record<string, number> = {};
+      for (const d of incomplete) {
+        const n = Math.max(0, (plan.requiredSwu[d] ?? 0) - (workDone[d] ?? 0));
+        needs[d] = n;
+        needSum += n;
+      }
+      let pool = leftover;
+      for (const d of incomplete) {
+        if (pool <= 0 || needSum <= 0) break;
+        const capability = founderCapability(opts.founder, d);
+        const share = (needs[d]! / needSum) * leftover * (0.85 + 0.15 * capability);
+        const applied = Math.min(pool, needs[d]!, share);
+        workDone[d] = (workDone[d] ?? 0) + applied;
+        workApplied[d] = (workApplied[d] ?? 0) + applied;
+        pool -= applied;
+      }
+      // Any remainder: dump into first incomplete with room
+      if (pool > 0.01) {
+        for (const d of incomplete) {
+          const room = Math.max(0, (plan.requiredSwu[d] ?? 0) - (workDone[d] ?? 0));
+          if (room <= 0) continue;
+          const applied = Math.min(pool, room);
+          workDone[d] = (workDone[d] ?? 0) + applied;
+          workApplied[d] = (workApplied[d] ?? 0) + applied;
+          pool -= applied;
+          if (pool <= 0.01) break;
+        }
+      }
+    }
+  }
+
+  for (const discipline of STAGE_DISCIPLINES[progress.stage]) {
+    const capability = founderCapability(opts.founder, discipline);
+    const applied = workApplied[discipline] ?? 0;
+    if (applied <= 0) continue;
 
     let bugProbability =
       balance.bugProbabilityPerWorkUnit *
-      workApplied[discipline]! *
+      applied *
+      (balance.sizeBugFactor[state.size] ?? 1) *
       (1 + balance.scopeBugMultiplier * plan.scopePressure) *
       (1 + balance.lowSkillBugMultiplier * (1 - capability));
     bugProbability = clamp(bugProbability, 0, 0.5);
@@ -458,9 +541,10 @@ export function advancePolishDay(
   const avgCap =
     relevant.reduce((s, d) => s + founderCapability(opts.founder, d), 0) / relevant.length;
   const work = balance.polishWorkPerDay * avgCap;
-  const updatedProgress = Math.min(balance.polishRequiredWork, state.polishProgress + work);
+  const polishNeed = state.polishRequired ?? balance.polishRequiredWork;
+  const updatedProgress = Math.min(polishNeed, state.polishProgress + work);
   const nextPhase: ProductionPhase =
-    updatedProgress >= balance.polishRequiredWork ? PHASE_FINALIZE_BUILD : PHASE_POLISH;
+    updatedProgress >= polishNeed ? PHASE_FINALIZE_BUILD : PHASE_POLISH;
 
   const tick: ProductionTick = {
     day: opts.day,
@@ -550,7 +634,10 @@ export function advanceBugFixingDay(
   const avgCap =
     active.reduce((s, b) => s + founderCapability(opts.founder, b.discipline), 0) /
     active.length;
-  let capacity = balance.bugFixWorkPerDay * avgCap;
+  // Training / QA: each 0.1 bugFixBonus ≈ +20% clear rate (stacks, capped).
+  const qaMult = 1 + Math.min(1.2, (opts.founder.bugFixBonus ?? 0) * 2);
+  let capacity = balance.bugFixWorkPerDay * avgCap * qaMult;
+
   const fixedBugIds: string[] = [];
   const workApplied: Record<string, number> = {};
 
@@ -632,19 +719,35 @@ export function founderFromStaff(staff: {
   speed?: number;
   fieldExperience?: Record<string, number>;
   level?: number;
+  bugFixBonus?: number;
 }[]): FounderProfile {
-  const m = staff[0] ?? {};
-  const design = m.skills?.design ?? m.design ?? 40;
-  const tech = m.skills?.tech ?? m.tech ?? 40;
-  const level = (m.level ?? 1) * 8;
-  const fe = m.fieldExperience ?? {};
+  const members = staff.length ? staff : [{}];
+  let design = 0;
+  let tech = 0;
+  let level = 0;
+  let qaBonus = 0;
+  const fe: Record<string, number> = {};
+  for (const m of members) {
+    design += m.skills?.design ?? m.design ?? 40;
+    tech += m.skills?.tech ?? m.tech ?? 40;
+    level += (m.level ?? 1) * 8;
+    qaBonus += m.bugFixBonus ?? 0;
+    for (const [k, v] of Object.entries(m.fieldExperience ?? {})) {
+      fe[k] = (fe[k] ?? 0) + (v as number);
+    }
+  }
+  const n = members.length;
+  design /= n;
+  tech /= n;
+  level /= n;
+  qaBonus = Math.min(0.45, qaBonus);
   const skills: Record<string, number> = {};
   const mastery: Record<string, number> = {};
   for (const d of DISCIPLINES) {
     const isDesign = ["story", "gameplay", "dialogues", "level_design", "world"].includes(d);
-    skills[d] = clamp((isDesign ? design : tech) + level * 0.3, 0, 100);
+    skills[d] = clamp((isDesign ? design : tech) + level * 0.3 + qaBonus * 20, 0, 100);
     const field = DISCIPLINE_TO_FIELD[d];
-    mastery[d] = clamp((fe[field] ?? 0) * 0.1 + level * 0.5, 0, 100);
+    mastery[d] = clamp((fe[field] ?? 0) * 0.08 + level * 0.5 + qaBonus * 15, 0, 100);
   }
-  return { skills, mastery };
+  return { skills, mastery, bugFixBonus: qaBonus };
 }

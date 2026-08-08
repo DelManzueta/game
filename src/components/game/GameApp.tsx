@@ -2,11 +2,12 @@
  * Studio Empire — GDT-inspired Garage presentation
  * Room-first layout. Domain mutations via useGame only.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   AUDIENCES,
   FIELD_LABELS,
   GENRES,
+  OFFICE_INFO,
   PLATFORMS,
   RESEARCH,
   REVIEWER_NAMES,
@@ -17,6 +18,22 @@ import {
   getTopic,
 } from "@/lib/game/data";
 import { isGarageTopic } from "@/lib/game/content/garageSlice";
+import { ENGINE_COMPONENTS } from "@/lib/game/content/engines";
+import {
+  SELECTABLE_MODULES,
+  PURPOSE_LABEL,
+  ARCH_LABEL,
+  SUPPORT_STATE_LABEL,
+  type EnginePurpose,
+  type ArchitectureStyle,
+} from "@/lib/game/engine";
+import {
+  MENU_ROOM_ART,
+  roomArtForOffice as roomArtDefForOffice,
+  screenRoomArt,
+} from "@/lib/game/content/roomArt";
+import { platformArt, platformThumb } from "@/lib/game/content/platformArt";
+import { genreIconSrc } from "@/lib/game/content/genreArt";
 import { evaluateCombo, formatCash, formatFans, generateGameTitle } from "@/lib/game/simulation";
 import { availableSizes, hasSave, useGame } from "@/lib/game/store";
 import {
@@ -25,11 +42,19 @@ import {
   studioOverview,
   stageFieldsForProject,
   explainSales,
+  calendarHudLabel,
 } from "@/lib/game/viewModels";
-import { disciplineProgress } from "@/lib/game/production/bridge";
+import { disciplineProgress, overallProjectProgress } from "@/lib/game/production/bridge";
+import {
+  PILLAR_LABELS,
+  TECH_CATALOG,
+  type DifficultyPreset,
+  type ProjectPillar,
+} from "@/lib/game/research";
 import type { AudienceId, DevField, GameSize, GenreId, ScreenId } from "@/lib/game/types";
 import { Badge, Button, Input, Modal, SearchField, cnJoin } from "@/components/ui/primitives";
 import { GarageLoopFlowchart, ScoringPipelineFlow } from "@/components/game/LoopFlowchart";
+import { MarketScreen } from "@/components/game/MarketScreen";
 import {
   FlaskConical,
   Gamepad2,
@@ -45,7 +70,8 @@ import {
   Bug,
   Cpu,
   Palette,
-  Beaker,
+  CalendarDays,
+  Diamond,
 } from "lucide-react";
 
 const BAR_COLORS = ["#e86a4a", "#3aaa6a", "#3aa0d8", "#e8941a", "#9b6ad8", "#4ecb8a"];
@@ -59,7 +85,8 @@ export function GameApp() {
 
   useEffect(() => {
     if (phase !== "playing" || speed === 0) return;
-    const ms = speed === 1 ? 900 : speed === 2 ? 450 : 220;
+    // Tuned so a small (~8 in-game weeks) lands near ~1–1.5 min at 1× with stage pauses
+    const ms = speed === 1 ? 1100 : speed === 2 ? 520 : 260;
     const id = window.setInterval(() => useGame.getState().tick(), ms);
     return () => window.clearInterval(id);
   }, [phase, speed, tick]);
@@ -78,6 +105,7 @@ export function GameApp() {
       <EventModal />
       <LoopGuideModal />
       <NotificationsInbox />
+      <OfficeOfferModal />
     </>
   );
 }
@@ -90,6 +118,7 @@ function MainMenu() {
   const deleteSave = useGame((s) => s.deleteSave);
   const [name, setName] = useState("Foundry Games");
   const [pirate, setPirate] = useState(false);
+  const [difficulty, setDifficulty] = useState<DifficultyPreset>("standard");
   const [has, setHas] = useState(false);
   const [err, setErr] = useState("");
 
@@ -98,50 +127,113 @@ function MainMenu() {
   }, []);
 
   return (
-    <div className="room-void relative flex min-h-[100dvh] flex-col items-center justify-center px-4 py-12">
-      <div className="w-full max-w-md text-center">
-        <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-accent">Phase One · Garage</p>
-        <h1 className="mt-2 text-4xl font-bold tracking-tight text-fg sm:text-5xl">Studio Empire</h1>
-        <p className="mx-auto mt-3 max-w-sm text-sm text-muted">
-          One founder. One garage. Plan stages, ship games, grow fans — until you earn the office.
-        </p>
+    <div className="relative flex min-h-[100dvh] flex-col text-fg">
+      {/* Full-bleed 2D garage scene */}
+      <div className="absolute inset-0 overflow-hidden">
+        <img
+          src={MENU_ROOM_ART}
+          alt=""
+          className="h-full w-full object-cover object-[center_42%]"
+          draggable={false}
+        />
+        <div className="absolute inset-0 bg-gradient-to-t from-[#1a1208]/85 via-[#1a1208]/35 to-[#1a1208]/25" />
       </div>
-      <div className="mt-8 w-full max-w-md space-y-4 rounded-2xl border border-border bg-paper p-6 shadow-[var(--shadow-soft)]">
-        <div>
-          <label className="mb-1.5 block text-center text-xs font-bold uppercase tracking-wide text-subtle">
-            Company name
-          </label>
-          <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={32} className="!bg-elevated !text-fg" />
+
+      <div className="relative z-10 flex flex-1 flex-col items-center justify-end px-4 pb-10 pt-16 sm:justify-center sm:pb-16">
+        <div className="mb-5 flex flex-col items-center text-center">
+          <p className="text-[11px] font-bold uppercase tracking-[0.28em] text-accent drop-shadow">Phase One · Garage</p>
+          <h1 className="mt-1 font-display text-4xl font-bold tracking-tight text-white drop-shadow sm:text-5xl">
+            Studio Empire
+          </h1>
+          <p className="mx-auto mt-2 max-w-sm text-sm text-white/85">
+            One founder. One garage. Ship games, grow fans, earn the office.
+          </p>
         </div>
-        <label className="flex items-center justify-center gap-2 text-sm text-muted">
-          <input type="checkbox" className="h-4 w-4 accent-[var(--color-accent)]" checked={pirate} onChange={(e) => setPirate(e.target.checked)} />
-          Pirate mode (harder sales)
-        </label>
-        {err && <p className="text-center text-sm text-bad">{err}</p>}
-        <Button
-          className="w-full"
-          size="lg"
-          onClick={() => {
-            if (!name.trim()) {
-              setErr("Name your studio.");
-              return;
-            }
-            newGame(name, pirate);
-          }}
-        >
-          <Sparkles className="h-4 w-4" />
-          New Campaign
-        </Button>
-        {has && (
-          <div className="grid grid-cols-2 gap-2">
-            <Button variant="secondary" onClick={() => { if (!loadGame()) setErr("Could not load save."); }}>
-              Continue
-            </Button>
-            <Button variant="ghost" onClick={() => { deleteSave(); setHas(false); }}>
-              Delete save
-            </Button>
+
+        <div className="game-panel w-full max-w-md space-y-4 p-5 sm:p-6">
+          <div>
+            <label className="mb-1.5 block text-center text-xs font-bold uppercase tracking-wide text-muted">
+              Company name
+            </label>
+            <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={32} />
           </div>
-        )}
+          <label className="flex items-center justify-center gap-2 text-sm text-fg">
+            <input
+              type="checkbox"
+              className="h-4 w-4 accent-[var(--color-accent)]"
+              checked={pirate}
+              onChange={(e) => setPirate(e.target.checked)}
+            />
+            Pirate mode (harder sales)
+          </label>
+          <div>
+            <label className="mb-1.5 block text-center text-xs font-bold uppercase tracking-wide text-muted">
+              Difficulty
+            </label>
+            <div className="grid grid-cols-3 gap-1.5">
+              {(
+                [
+                  ["creative", "Creative"],
+                  ["standard", "Standard"],
+                  ["executive", "Executive"],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={cnJoin(
+                    "rounded-lg border px-2 py-2 text-xs font-bold",
+                    difficulty === id
+                      ? "border-accent bg-accent/20 text-white"
+                      : "border-border text-muted hover:border-accent/50",
+                  )}
+                  onClick={() => setDifficulty(id)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1 text-center text-[10px] text-muted">
+              Adjusts cash, competition, cert strictness — not topic/genre meaning.
+            </p>
+          </div>
+          {err && <p className="text-center text-sm text-bad">{err}</p>}
+          <Button
+            className="w-full"
+            size="lg"
+            onClick={() => {
+              if (!name.trim()) {
+                setErr("Name your studio.");
+                return;
+              }
+              newGame(name, pirate, difficulty);
+            }}
+          >
+            <Sparkles className="h-4 w-4" aria-hidden="true" />
+            New Campaign
+          </Button>
+          {has && (
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  if (!loadGame()) setErr("Could not load save.");
+                }}
+              >
+                Continue
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  deleteSave();
+                  setHas(false);
+                }}
+              >
+                Delete save
+              </Button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -172,6 +264,9 @@ function GameOverScreen() {
 
 function PlayingShell() {
   const screen = useGame((s) => s.screen);
+  const office = useGame((s) => s.office);
+  const era =
+    office >= 4 ? "empire" : office >= 3 ? "studio" : office >= 2 ? "office" : "garage";
   const project = useGame((s) => s.currentProject);
   const phase = projectPhaseLabel(project);
   const forcePause = phase.needsPlayerInput && !!project;
@@ -180,7 +275,7 @@ function PlayingShell() {
   const showRoom = screen === "studio" || screen === "develop";
 
   return (
-    <div className="room-void flex min-h-[100dvh] flex-col">
+    <div className="room-void flex min-h-[100dvh] flex-col text-fg" data-era={era}>
       <GdtTopChrome forcePause={forcePause} />
       <main className="relative flex-1 overflow-y-auto pb-20">
         {showRoom && <GarageRoomView />}
@@ -218,16 +313,22 @@ function GdtTopChrome({ forcePause }: { forcePause: boolean }) {
   const phase = projectPhaseLabel(project);
   const pct = Math.round((project?.stageProgress || 0) * 100);
   const bugs = project?.bugs ?? 0;
-  const designOrb = project
-    ? Math.round(30 + (project.stageProgress || 0) * 40 + (project.weeksDev || 0) * 2)
+  // GDT-style dual orbs: design pair (left) + tech pair (right), grow while developing
+  const dBase = project?.designPoints ?? 0;
+  const tBase = project?.techPoints ?? 0;
+  const grow = project
+    ? Math.round((project.stageProgress || 0) * 18 + (project.weeksDev || 0) * 1.5)
     : 0;
-  const techOrb = project
-    ? Math.round(28 + (project.stageProgress || 0) * 38 + (project.weeksDev || 0) * 2)
-    : 0;
+  const designOrbA = project ? Math.max(0, Math.round(dBase * 0.45 + grow * 0.4)) : 0;
+  const designOrbB = project ? Math.max(0, Math.round(dBase * 0.55 + grow * 0.6)) : 0;
+  const techOrbA = project ? Math.max(0, Math.round(tBase * 0.5 + grow * 0.45)) : 0;
+  const techOrbB = project ? Math.max(0, Math.round(tBase * 0.5 + grow * 0.55)) : 0;
+  const phaseBarLabel = project
+    ? project.devPhase.includes("RUNNING")
+      ? phase.title
+      : phase.title
+    : "";
 
-  useEffect(() => {
-    if (forcePause && speed !== 0) setSpeed(0);
-  }, [forcePause, speed, setSpeed]);
 
   return (
     <header className="sticky top-0 z-30">
@@ -235,27 +336,38 @@ function GdtTopChrome({ forcePause }: { forcePause: boolean }) {
         {/* Menu */}
         <button
           type="button"
-          className="hud-chip flex h-10 items-center gap-1.5 px-3 text-xs font-bold uppercase tracking-wide text-muted"
+          className="hud-chip flex h-11 items-center gap-2 px-2.5 pr-3 text-xs font-bold uppercase tracking-wide text-fg"
           onClick={() => {
             saveGame();
             setModal("pauseMenu");
           }}
+          aria-label="Menu"
         >
-          <Menu className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">{company}</span>
+          <span
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-accent/25 text-xs font-bold text-accent ring-2 ring-accent/40"
+            aria-hidden
+          >
+            {(company || "S").slice(0, 1).toUpperCase()}
+          </span>
+          <span className="max-w-[7rem] truncate">{company || "Menu"}</span>
         </button>
 
         {/* Project HUD — GDT top-center orbs */}
         <div className="order-last flex w-full flex-col items-center sm:order-none sm:w-auto">
           <div className="flex items-end gap-1 sm:gap-2">
-            <Orb value={bugs} label="Bugs" color="var(--color-bugs)" Icon={Bug} active={!!project} />
-            <Orb value={project ? Math.min(999, designOrb) : 0} label="Design" color="var(--color-design)" Icon={Palette} active={!!project} />
+            {/* Design orbs (warm) — classic GDT left pair */}
+            <Orb value={designOrbA} label="Design" color="var(--color-design)" Icon={Palette} active={!!project} />
+            <Orb value={designOrbB} label="Design" color="#e8941a" Icon={Palette} active={!!project} />
             <div className="hud-chip mx-0.5 min-w-[9.5rem] max-w-[14rem] px-3 py-2 text-center sm:min-w-[12rem]">
               {project ? (
                 <>
                   <div className="truncate text-sm font-bold leading-tight">{project.title}</div>
                   <div className="truncate text-[10px] text-muted">
-                    {getTopic(project.topicId)?.name}/{getGenre(project.genreId).name}
+                    {getTopic(project.topicId)?.name} / {getGenre(project.genreId).name}
+                  </div>
+                  <div className="mt-1 rounded bg-panel px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-accent">
+                    {phaseBarLabel}
+                    {project.devPhase.includes("RUNNING") ? ` · ${pct}%` : ""}
                   </div>
                   {project.devPhase.includes("RUNNING") && (
                     <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-panel">
@@ -265,16 +377,14 @@ function GdtTopChrome({ forcePause }: { forcePause: boolean }) {
                       />
                     </div>
                   )}
-                  {!project.devPhase.includes("RUNNING") && (
-                    <div className="mt-1 text-[10px] font-semibold text-accent">{phase.title}</div>
-                  )}
                 </>
               ) : (
                 <div className="py-0.5 text-sm font-semibold text-muted">No Project</div>
               )}
             </div>
-            <Orb value={project ? Math.min(999, techOrb) : 0} label="Tech" color="var(--color-tech)" Icon={Cpu} active={!!project} />
-            <Orb value={Math.floor(rp)} label="Research" color="var(--color-research)" Icon={Beaker} active always />
+            {/* Tech orbs (cool) — classic GDT right pair */}
+            <Orb value={techOrbA} label="Tech" color="var(--color-tech)" Icon={Cpu} active={!!project} />
+            <Orb value={techOrbB} label="Tech" color="#4ecb8a" Icon={Cpu} active={!!project} />
           </div>
         </div>
 
@@ -283,7 +393,7 @@ function GdtTopChrome({ forcePause }: { forcePause: boolean }) {
           <div className="hud-chip px-2.5 py-1.5 text-right text-[11px] leading-snug sm:text-xs">
             <div className="font-semibold tabular text-fans">{formatFans(fans)} Fans</div>
             <div className="tabular text-muted">
-              Y{year} M{month} W{(week % 4) + 1}
+              {calendarHudLabel({ year, month, week })}
             </div>
             <div className="font-bold tabular text-cash">Cash: {formatCash(cash)}</div>
           </div>
@@ -292,35 +402,36 @@ function GdtTopChrome({ forcePause }: { forcePause: boolean }) {
               [
                 [0, Pause, "Pause"],
                 [1, Play, "Play"],
-                [2, FastForward, "2×"],
-                [4, FastForward, "4×"],
+                [2, FastForward, "Faster"],
+                [4, FastForward, "Fastest"],
               ] as const
             ).map(([s, Icon, label]) => (
               <button
                 key={s}
                 type="button"
-                disabled={forcePause && s !== 0}
                 title={label}
                 aria-label={label}
                 onClick={() => setSpeed(s as 0 | 1 | 2 | 4)}
                 className={cnJoin(
-                  "flex h-9 w-9 items-center justify-center rounded-lg border transition-colors",
+                  "flex h-9 min-w-9 flex-col items-center justify-center gap-0 rounded-lg border px-1.5 transition-colors sm:min-w-[3.25rem] sm:flex-row sm:gap-1 sm:px-2",
                   speed === s
                     ? "border-accent bg-accent text-accent-fg"
-                    : "border-border bg-elevated text-muted hover:text-fg",
-                  forcePause && s !== 0 && "opacity-35",
+                    : "border-border bg-paper text-fg hover:border-border-strong",
                 )}
               >
-                <Icon className="h-3.5 w-3.5" />
+                <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                <span className="text-[9px] font-bold leading-none sm:text-[10px]">{label}</span>
               </button>
             ))}
             <button
               type="button"
-              className="relative flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-elevated text-muted hover:text-fg"
+              className="relative flex h-9 min-w-9 flex-col items-center justify-center gap-0 rounded-lg border border-border bg-paper px-1.5 text-fg hover:border-border-strong sm:min-w-[3.75rem] sm:flex-row sm:gap-1 sm:px-2"
               aria-label={unread ? `Notifications, ${unread} unread` : "Notifications"}
+              title="Notifications"
               onClick={() => setModal("notifications")}
             >
-              <Bell className="h-3.5 w-3.5" />
+              <Bell className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span className="text-[9px] font-bold leading-none sm:text-[10px]">Inbox</span>
               {unread > 0 && (
                 <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-accent-fg">
                   {unread > 9 ? "9+" : unread}
@@ -332,7 +443,7 @@ function GdtTopChrome({ forcePause }: { forcePause: boolean }) {
       </div>
       {forcePause && project && (
         <div className="mx-auto mt-1 max-w-xl px-3 text-center text-[11px] font-semibold text-accent">
-          Time paused — {phase.hint}
+          Desk decision — {phase.hint}
         </div>
       )}
     </header>
@@ -364,10 +475,9 @@ function Orb({
       >
         {show ? value : "—"}
       </div>
-      <span className="mt-0.5 hidden text-[9px] font-bold uppercase tracking-wide text-subtle sm:block">
+      <span className="mt-0.5 max-w-[3.5rem] truncate text-center text-[9px] font-bold uppercase tracking-wide text-fg">
         {label}
       </span>
-      <Icon className="mt-0.5 h-3 w-3 opacity-40 sm:hidden" style={{ color }} />
     </div>
   );
 }
@@ -379,19 +489,15 @@ function BottomDock() {
     { id: "studio", label: "Garage", icon: Home },
     { id: "develop", label: "Desk", icon: Gamepad2 },
     { id: "games", label: "Games", icon: History },
+    { id: "market", label: "Market", icon: CalendarDays },
     { id: "research", label: "Research", icon: FlaskConical },
     { id: "settings", label: "More", icon: Settings },
   ];
   return (
-    <nav className="fixed bottom-0 inset-x-0 z-30 border-t border-border bg-[color-mix(in_oklab,var(--color-paper)_94%,transparent)] backdrop-blur-md">
-      <div className="mx-auto flex max-w-lg justify-around px-1 py-1">
+    <nav className="fixed bottom-0 inset-x-0 z-30 border-t-2 border-border-strong bg-paper/95 shadow-[0_-8px_24px_rgba(60,40,20,0.12)] backdrop-blur-md">
+      <div className="mx-auto flex max-w-lg justify-around px-1 py-1.5 pb-[max(0.4rem,env(safe-area-inset-bottom))]">
         {items.map(({ id, label, icon: Icon }) => {
-          const lit =
-            id === "studio"
-              ? screen === "studio"
-              : id === "develop"
-                ? screen === "develop"
-                : screen === id;
+          const lit = screen === id;
           return (
             <button
               key={id}
@@ -420,27 +526,73 @@ function GarageRoomView() {
   const setModal = useGame((s) => s.setModal);
   const setScreen = useGame((s) => s.setScreen);
   const busy = !!state.currentProject?.devPhase.includes("RUNNING");
+  const art = roomArtDefForOffice(state.office);
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col items-center px-2 pt-2 sm:px-4">
-      {/* Big isometric-style garage */}
+    <div className="mx-auto flex w-full max-w-5xl flex-col items-center px-2 pt-1 sm:px-4">
+      {/* 2D room stage — uses your photo ladder, not the cartoon garage */}
       <button
         type="button"
-        className="relative w-full max-w-3xl outline-none"
+        className="group relative w-full max-w-3xl overflow-hidden rounded-2xl border-2 border-border-strong shadow-[var(--shadow-soft)] outline-none ring-offset-2 focus-visible:ring-2 focus-visible:ring-focus"
         onClick={() => {
           if (state.currentProject) setScreen("develop");
           else setModal("newGame");
         }}
         aria-label={state.currentProject ? "Open desk" : "Develop new game"}
       >
-        <GarageIsometric busy={busy} hasProject={!!state.currentProject} />
+        <img
+          src={art.room}
+          alt=""
+          className="aspect-[3/2] w-full object-cover transition duration-300 group-hover:scale-[1.02] sm:aspect-[16/10]"
+          style={{ objectPosition: art.objectPosition }}
+          draggable={false}
+        />
+        {/* Ambient vignette */}
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/45 via-transparent to-black/10" />
+
+        {/* Desk hotspot label */}
+        <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 flex-col items-center gap-1">
+          <span className="rounded-full border border-white/25 bg-black/55 px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-white shadow-md backdrop-blur-sm">
+            {state.currentProject
+              ? busy
+                ? art.hotspotBusy
+                : art.hotspotOpen
+              : art.hotspotIdle}
+          </span>
+        </div>
+
+        {/* Project plaque */}
+        {state.currentProject && (
+          <div className="absolute left-3 top-3 max-w-[70%] rounded-xl border border-white/20 bg-black/60 px-3 py-2 shadow-md backdrop-blur-sm">
+            <div className="truncate text-sm font-bold text-white">{state.currentProject.title}</div>
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-cyan-200">
+              {ov.phase.title}
+            </div>
+          </div>
+        )}
       </button>
 
-      {/* Quick actions under room */}
+      {/* Quick actions */}
       <div className="mt-3 flex w-full max-w-md flex-wrap justify-center gap-2">
         {!state.currentProject ? (
           <Button size="lg" className="min-w-[12rem]" onClick={() => setModal("newGame")}>
             Develop New Game
+          </Button>
+        ) : state.currentProject.devPhase === "READY_TO_RELEASE" ? (
+          <Button
+            size="lg"
+            className="min-w-[12rem] !bg-emerald-500 !text-white hover:!bg-emerald-400"
+            onClick={() => setScreen("develop")}
+          >
+            Finish · Release
+          </Button>
+        ) : state.currentProject.devPhase.includes("CONFIG") ? (
+          <Button size="lg" className="min-w-[12rem]" onClick={() => setScreen("develop")}>
+            Configure Stage
+          </Button>
+        ) : state.currentProject.devPhase === "POLISHING" ? (
+          <Button size="lg" className="min-w-[12rem]" onClick={() => setScreen("develop")}>
+            Finish · Polish
           </Button>
         ) : (
           <Button size="lg" className="min-w-[12rem]" variant="secondary" onClick={() => setScreen("develop")}>
@@ -452,85 +604,191 @@ function GarageRoomView() {
         </Button>
       </div>
 
-      {/* Compact goal strip */}
-      {ov.officeGoal && (
-        <div className="hud-chip mt-4 w-full max-w-md px-3 py-2 text-[11px]">
-          <div className="mb-1 font-bold uppercase tracking-wide text-subtle">Office goal</div>
-          <div className="flex flex-wrap gap-x-3 gap-y-1 tabular">
-            <span>
-              Fans {ov.fans.toLocaleString()}/{ov.officeGoal.fansNeed.toLocaleString()}
-            </span>
-            <span>
-              Games {ov.gamesPublished}/{ov.officeGoal.gamesNeed}
-            </span>
-            <span>
-              Cash {formatCash(ov.cash)}/{formatCash(ov.officeGoal.cashNeed)}
-            </span>
+      {/* Office goal card — bible proofs, no formulas computed here */}
+      {state.office === 1 && ov.officeGoal && (
+        <div className="game-panel mt-4 w-full max-w-md px-4 py-3 text-center text-xs">
+          <div className="mb-1 font-bold uppercase tracking-wide text-muted">
+            {ov.officeGoal.activeMove
+              ? "Move in progress"
+              : ov.officeGoal.offerState === "offered" || ov.officeGoal.offerState === "deferred"
+                ? "Office offer ready"
+                : "Office goal"}
           </div>
+          {ov.officeGoal.activeMove ? (
+            <p className="font-semibold text-fg">
+              Keys hand over week {ov.officeGoal.activeMove.completesWeek} (now W
+              {state.week}).
+            </p>
+          ) : (
+            <>
+              <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 font-semibold text-fg">
+                <span>
+                  Fans {formatFans(ov.fans)}/{formatFans(ov.officeGoal.fansNeed)}
+                </span>
+                <span>
+                  Games {ov.gamesPublished}/{ov.officeGoal.gamesNeed}
+                </span>
+                <span>
+                  Cash {formatCash(ov.cash)}/{formatCash(ov.officeGoal.cashNeed)}
+                </span>
+              </div>
+              {ov.officeGoal.proofs.length > 0 && (
+                <ul className="mt-2 space-y-0.5 text-left text-[11px] text-muted">
+                  {ov.officeGoal.proofs.map((p) => (
+                    <li key={p.id} className={p.met ? "text-good" : ""}>
+                      {p.met ? "✓" : "○"} {p.label}
+                      <span className="ml-1 opacity-70">({p.detail})</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {(ov.officeGoal.offerState === "offered" ||
+                ov.officeGoal.offerState === "deferred" ||
+                ov.officeGoal.offerState === "eligible" ||
+                ov.officeGoal.canMove) && (
+                <Button
+                  size="sm"
+                  className="mt-3"
+                  onClick={() => setModal("officeOffer")}
+                >
+                  View office offer
+                </Button>
+              )}
+            </>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-function GarageIsometric({ busy, hasProject }: { busy: boolean; hasProject: boolean }) {
+
+function TechReadinessPanel({
+  project,
+  onOptimize,
+  onEvaluate,
+}: {
+  project: NonNullable<ReturnType<typeof useGame.getState>["currentProject"]>;
+  onOptimize: (taskId: string) => void;
+  onEvaluate: () => void;
+}) {
+  const tech = project.techSpec;
+  const readiness = tech?.readiness;
+  const profile = tech?.profile;
+  if (!tech && !readiness) {
+    return (
+      <div className="mt-3 rounded-xl border border-border bg-panel/80 p-3 text-center text-xs text-muted">
+        Tech targets set at project start. Open Pre-Release or Evaluate to refresh gates.
+        <Button className="mt-2 w-full" size="sm" variant="secondary" onClick={onEvaluate}>
+          Evaluate tech readiness
+        </Button>
+      </div>
+    );
+  }
+  const rec = readiness?.recommendation ?? "hold";
+  const recTone =
+    rec === "ship" ? "good" : rec === "ship_with_risk" ? "warn" : rec === "blocked" ? "bad" : "neutral";
+  const relevant = profile?.axes.filter((a) => a.relevant).slice(0, 6) ?? [];
+  const openTasks = (tech?.tasks ?? []).filter((t) => t.state !== "done" && t.state !== "cancelled").slice(0, 4);
+  const topBugs = (tech?.classifiedBugs ?? []).filter((b) => !b.fixed).slice(0, 4);
+
   return (
-    <div className="relative overflow-hidden rounded-xl">
-      <svg viewBox="0 0 720 420" className="w-full drop-shadow-lg" role="img" aria-label="Garage workspace">
-        {/* floor shadow */}
-        <ellipse cx="360" cy="380" rx="280" ry="28" fill="#c4b49a" opacity="0.45" />
-        {/* room walls isometric-ish */}
-        <path d="M120 160 L360 80 L600 160 L600 320 L360 400 L120 320 Z" fill="#d8c8a8" stroke="#b8a888" strokeWidth="2" />
-        {/* left wall tint */}
-        <path d="M120 160 L360 80 L360 400 L120 320 Z" fill="#c8b898" opacity="0.55" />
-        {/* right wall */}
-        <path d="M360 80 L600 160 L600 320 L360 400 Z" fill="#e8dcc4" opacity="0.9" />
-        {/* floor */}
-        <path d="M120 320 L360 400 L600 320 L360 240 Z" fill="#b8b0a0" />
-        {/* rug */}
-        <path d="M240 300 L360 340 L420 300 L300 260 Z" fill="#5a9a8a" opacity="0.85" />
-        {/* door */}
-        <path d="M150 200 L150 300 L210 320 L210 220 Z" fill="#d0c8b8" stroke="#9a9080" />
-        {/* desk */}
-        <path d="M220 250 L320 285 L320 305 L220 270 Z" fill="#8b6914" />
-        <path d="M320 285 L380 255 L380 275 L320 305 Z" fill="#6b4f10" />
-        <path d="M220 250 L280 220 L380 255 L320 285 Z" fill="#a67c1a" />
-        {/* CRT */}
-        <rect x="250" y="200" width="48" height="40" rx="3" fill="#2a2a2a" transform="skewY(-8)" />
-        <rect x="256" y="206" width="36" height="26" fill={busy ? "#1a3a2a" : "#0a1010"} transform="skewY(-8)" />
-        {busy && (
-          <>
-            <rect x="260" y="212" width="18" height="2" fill="#4ecb8a" transform="skewY(-8)" />
-            <rect x="260" y="218" width="26" height="2" fill="#5ec8d8" transform="skewY(-8)" />
-            <rect x="260" y="224" width="14" height="2" fill="#e8a838" transform="skewY(-8)" />
-          </>
-        )}
-        {/* founder chair + body simple */}
-        <ellipse cx="300" cy="278" rx="14" ry="8" fill="#3d3d3d" />
-        <circle cx="295" cy="248" r="12" fill="#c9a882" />
-        <path d="M285 258 L285 290 L305 298 L308 262 Z" fill="#3d5a80" />
-        {/* car under tarp */}
-        <ellipse cx="480" cy="310" rx="70" ry="28" fill="#2a4a8a" opacity="0.9" />
-        <path d="M420 300 Q480 250 540 300 Q480 320 420 300" fill="#3a5a9a" />
-        <path d="M430 295 Q480 265 530 295" fill="#4a6aaa" opacity="0.5" />
-        {/* shelves */}
-        <rect x="480" y="170" width="50" height="70" fill="#8b6914" transform="skewY(12)" />
-        <rect x="485" y="180" width="40" height="8" fill="#c45" opacity="0.7" transform="skewY(12)" />
-        <rect x="485" y="195" width="40" height="8" fill="#4a8" opacity="0.7" transform="skewY(12)" />
-        {/* whiteboard */}
-        <rect x="400" y="140" width="90" height="50" fill="#f5f5f0" stroke="#aaa" transform="skewY(8)" />
-        {/* company plaque */}
-        <text x="130" y="190" fontSize="11" fill="#6b6154" fontWeight="bold" transform="skewY(-12)">
-          GARAGE
-        </text>
-        <text x="250" y="395" fontSize="12" fill="#6b6154" textAnchor="middle">
-          {hasProject
-            ? busy
-              ? "Coding under the lamp…"
-              : "Project on the desk — tap to manage"
-            : "Tap the garage to start a game"}
-        </text>
-      </svg>
+    <div className="mt-3 space-y-2 rounded-xl border border-border bg-panel/90 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-xs font-bold uppercase tracking-wide text-subtle">Release tech gates</h3>
+        {readiness && <Badge tone={recTone === "neutral" ? "accent" : recTone}>{rec.replace(/_/g, " ")}</Badge>}
+      </div>
+      {readiness && (
+        <p className="text-[11px] text-muted">{readiness.recommendationReason}</p>
+      )}
+      {profile && (
+        <div>
+          <div className="mb-1 flex justify-between text-[10px] font-bold uppercase text-subtle">
+            <span>Runtime health · {profile.targetFps} FPS target</span>
+            <span className="tabular">{Math.round(profile.overallHealth * 100)}%</span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-black/20">
+            <div
+              className="h-full rounded-full bg-accent transition-all"
+              style={{ width: `${Math.round(profile.overallHealth * 100)}%` }}
+            />
+          </div>
+          <p className="mt-1 text-[10px] text-muted">
+            Weakest: {profile.weakestCriticalAxis ?? "—"} · confidence {Math.round(profile.confidence * 100)}%
+          </p>
+          <ul className="mt-2 grid grid-cols-2 gap-1">
+            {relevant.map((a) => (
+              <li key={a.axis} className="rounded-md border border-border/60 bg-black/10 px-1.5 py-1 text-[10px]">
+                <span className="font-semibold uppercase">{a.axis}</span>
+                <span className="float-right tabular text-muted">{Math.round(a.utilization * 100)}%</span>
+                <div className="mt-0.5 h-1 overflow-hidden rounded-full bg-black/20">
+                  <div
+                    className="h-full rounded-full"
+                    style={{
+                      width: `${Math.min(100, Math.round(a.utilization * 100))}%`,
+                      background:
+                        a.band === "critical" || a.band === "over"
+                          ? "var(--color-bad, #e55)"
+                          : a.band === "tight"
+                            ? "var(--color-warn, #da4)"
+                            : "var(--color-good, #4a8)",
+                    }}
+                  />
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {topBugs.length > 0 && (
+        <div>
+          <p className="text-[10px] font-bold uppercase text-subtle">Priority defects</p>
+          <ul className="mt-1 space-y-0.5 text-[11px] text-muted">
+            {topBugs.map((b) => (
+              <li key={b.bugId}>
+                <span className="font-semibold text-foreground">{b.severity}</span> · {b.category}
+                {b.certificationBlocker ? " · cert block" : ""}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {openTasks.length > 0 && (
+        <div>
+          <p className="text-[10px] font-bold uppercase text-subtle">Optimization tasks</p>
+          <ul className="mt-1 space-y-1">
+            {openTasks.map((t) => (
+              <li key={t.taskId} className="flex items-center justify-between gap-2 text-[11px]">
+                <span className="min-w-0 truncate">
+                  {t.label}
+                  <span className="text-muted">
+                    {" "}
+                    · {Math.round((t.completedWork / Math.max(1, t.estimatedWork)) * 100)}%
+                  </span>
+                </span>
+                <Button size="sm" variant="secondary" onClick={() => onOptimize(t.taskId)}>
+                  Work
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {readiness && readiness.blockers.length > 0 && (
+        <ul className="text-[11px] text-bad">
+          {readiness.blockers.slice(0, 3).map((b) => (
+            <li key={b}>• {b}</li>
+          ))}
+        </ul>
+      )}
+      {readiness?.certification?.map((c) => (
+        <p key={c.platformId} className="text-[10px] text-muted">
+          Cert {c.platformId}: <span className="font-semibold">{c.result.replace(/_/g, " ")}</span>
+        </p>
+      ))}
+      <Button className="w-full" size="sm" variant="ghost" onClick={onEvaluate}>
+        Refresh tech evaluation
+      </Button>
     </div>
   );
 }
@@ -540,6 +798,8 @@ function GarageIsometric({ busy, hasProject }: { busy: boolean; hasProject: bool
 function DevelopOverlay() {
   const screen = useGame((s) => s.screen);
   const project = useGame((s) => s.currentProject);
+  const office = useGame((s) => s.office);
+  const deskArt = roomArtDefForOffice(office).desk;
   // Show desk panel when on develop screen, or auto when config needed on studio
   const needsDesk =
     project &&
@@ -557,6 +817,21 @@ function DevelopOverlay() {
 
   return (
     <div className="mx-auto mt-2 w-full max-w-lg px-3 pb-6">
+      <div className="relative mb-3 overflow-hidden rounded-2xl border-2 border-border-strong shadow-[var(--shadow-card)]">
+        <img
+          src={deskArt}
+          alt=""
+          className="aspect-[21/9] w-full object-cover object-[center_50%]"
+          draggable={false}
+        />
+        <div className="absolute inset-0 bg-gradient-to-r from-black/55 via-black/20 to-transparent" />
+        <div className="absolute bottom-2 left-3 right-3 flex items-end justify-between gap-2">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-white/80">Work desk</p>
+            <p className="text-sm font-bold text-white drop-shadow">{project.title}</p>
+          </div>
+        </div>
+      </div>
       <DevelopPanel />
     </div>
   );
@@ -569,6 +844,8 @@ function DevelopPanel() {
   const confirmStage = useGame((s) => s.confirmStage);
   const enterPreRelease = useGame((s) => s.enterPreRelease);
   const workPolishWeek = useGame((s) => s.workPolishWeek);
+  const runOptimizationTask = useGame((s) => s.runOptimizationTask);
+  const evaluateTechReadiness = useGame((s) => s.evaluateTechReadiness);
   const setLaunchPrice = useGame((s) => s.setLaunchPrice);
   const setProjectTitle = useGame((s) => s.setProjectTitle);
   const releaseGame = useGame((s) => s.releaseGame);
@@ -602,7 +879,7 @@ function DevelopPanel() {
       <h2 className="text-center text-xl font-bold">
         {isConfig ? `Development Stage ${stageNum}` : isRunning ? `Developing — Stage ${stageNum}` : phase.title}
       </h2>
-      <div className="mx-auto mt-1 h-px w-[80%] bg-[#3a6ea5]/45" />
+      <div className="mx-auto mt-1 h-px w-[80%] bg-border-strong" />
       <p className="mt-2 text-center text-sm font-semibold">{project.title}</p>
       <p className="text-center text-xs text-muted">
         {getTopic(project.topicId)?.name}/{getGenre(project.genreId).name} · {getPlatform(project.platformId)?.name}
@@ -610,6 +887,9 @@ function DevelopPanel() {
 
       {isConfig && (
         <>
+          <p className="mt-2 text-center text-xs text-muted">
+            Set time allocation for Stage {stageNum}. OK locks it in and starts work.
+          </p>
           <div className="mt-5 flex justify-center gap-4 sm:gap-6">
             {fields.map((f, i) => (
               <VerticalAllocBar
@@ -649,8 +929,22 @@ function DevelopPanel() {
         <>
           <div className="mt-4 text-center">
             <div className="text-3xl font-bold tabular text-accent">{pct}%</div>
-            <div className="mx-auto mt-2 h-2 max-w-xs overflow-hidden rounded-full bg-panel">
-              <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${Math.max(pct > 0 ? 3 : 0, pct)}%` }} />
+            <p className="text-[10px] font-bold uppercase tracking-wide text-muted">Stage {stageNum} progress</p>
+            <div className="mx-auto mt-2 h-2.5 max-w-xs overflow-hidden rounded-full bg-panel ring-1 ring-border">
+              <div className="h-full rounded-full bg-accent transition-all duration-500" style={{ width: `${Math.max(pct > 0 ? 3 : 0, pct)}%` }} />
+            </div>
+            <div className="mx-auto mt-3 max-w-xs">
+              <div className="mb-0.5 flex justify-between text-[10px] font-bold uppercase tracking-wide text-subtle">
+                <span>Full project</span>
+                <span className="tabular">{Math.round(overallProjectProgress(project) * 100)}%</span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-panel">
+                <div
+                  className="h-full rounded-full bg-good transition-all duration-500"
+                  style={{ width: `${Math.round(overallProjectProgress(project) * 100)}%` }}
+                />
+              </div>
+              <p className="mt-1 text-[10px] text-muted">{project.weeksDev} weeks in development · Y-based calendar</p>
             </div>
           </div>
           {discProg.length > 0 && (
@@ -688,11 +982,33 @@ function DevelopPanel() {
 
       {isPolish && (
         <>
-          <p className="mt-3 text-center text-sm text-muted">Fix bugs and polish before Pre-Release.</p>
-          <div className="mt-3 h-2 overflow-hidden rounded-full bg-panel">
-            <div className="h-full rounded-full bg-good transition-all" style={{ width: `${Math.round((project.stageProgress || 0) * 100)}%` }} />
+          <p className="mt-3 text-center text-sm text-muted">
+            Polish and clear bugs. Open bugs stay on the build and clear faster after Bug Squashing training.
+          </p>
+          <div className="mt-3">
+            <div className="mb-0.5 flex justify-between text-[10px] font-bold uppercase text-subtle">
+              <span>Polish / bug fix</span>
+              <span className="tabular">{Math.round((project.stageProgress || 0) * 100)}%</span>
+            </div>
+            <div className="h-2.5 overflow-hidden rounded-full bg-panel ring-1 ring-border">
+              <div className="h-full rounded-full bg-good transition-all duration-500" style={{ width: `${Math.round((project.stageProgress || 0) * 100)}%` }} />
+            </div>
           </div>
-          <p className="mt-1 text-center text-sm font-bold tabular text-bugs">{project.bugs} open bugs</p>
+          <div className="mx-auto mt-2 max-w-xs">
+            <div className="mb-0.5 flex justify-between text-[10px] font-bold uppercase text-subtle">
+              <span>Full project</span>
+              <span className="tabular">{Math.round(overallProjectProgress(project) * 100)}%</span>
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-panel">
+              <div className="h-full rounded-full bg-accent/80 transition-all" style={{ width: `${Math.round(overallProjectProgress(project) * 100)}%` }} />
+            </div>
+          </div>
+          <p className="mt-2 text-center text-sm font-bold tabular text-bugs">{project.bugs} open bugs · {project.weeksDev}w dev</p>
+          <TechReadinessPanel
+            project={project}
+            onOptimize={(id) => setMsg(runOptimizationTask(id) ?? "")}
+            onEvaluate={() => setMsg(evaluateTechReadiness() ?? "")}
+          />
           <div className="mt-4 flex flex-col gap-2">
             <Button size="lg" onClick={() => setMsg(workPolishWeek() ?? "")}>
               Work on bugs (1 week)
@@ -707,7 +1023,12 @@ function DevelopPanel() {
 
       {isRelease && (
         <>
-          <p className="mt-3 text-center text-sm text-muted">Reviews appear only after Release. Price does not change scores.</p>
+          <p className="mt-3 text-center text-sm text-muted">Reviews appear only after Release. Price does not change scores. Tech health can still shift reviews.</p>
+          <TechReadinessPanel
+            project={project}
+            onOptimize={(id) => setMsg(runOptimizationTask(id) ?? "")}
+            onEvaluate={() => setMsg(evaluateTechReadiness() ?? "")}
+          />
           <div className="mt-3 space-y-3">
             <div>
               <label className="mb-1 block text-xs font-bold uppercase text-subtle">Final title</label>
@@ -834,10 +1155,10 @@ function GamesScreen() {
   const rows = libraryRows(games);
   const selected = games.find((g) => g.id === sel);
   return (
-    <div className="mx-auto w-full max-w-3xl px-3 pb-8 pt-4">
-      <h2 className="text-center text-2xl font-bold">Game History</h2>
-      <div className="mx-auto mt-1 h-px w-40 bg-[#3a6ea5]/45" />
-      {!rows.length && <p className="mt-8 text-center text-muted">No releases yet.</p>}
+    <ScreenBackdrop screen="games">
+      <h2 className="text-center text-2xl font-bold text-white drop-shadow">Game History</h2>
+      <div className="mx-auto mt-1 h-px w-40 bg-cyan-400/50" />
+      {!rows.length && <p className="mt-8 text-center text-white/70">No releases yet.</p>}
       <ul className="mt-4 space-y-2">
         {rows.map((r) => (
           <li key={r.id}>
@@ -845,15 +1166,15 @@ function GamesScreen() {
               type="button"
               onClick={() => setSel(r.id === sel ? null : r.id)}
               className={cnJoin(
-                "w-full rounded-xl border p-4 text-left",
-                sel === r.id ? "border-accent bg-accent/5" : "border-border bg-paper",
+                "w-full rounded-xl border p-4 text-left backdrop-blur-sm",
+                sel === r.id ? "border-cyan-300/60 bg-cyan-400/15" : "border-white/15 bg-black/55",
               )}
             >
               <div className="flex justify-between gap-2">
-                <span className="font-bold">{r.title}</span>
-                <span className="text-lg font-bold tabular">{r.avgReview.toFixed(1)}</span>
+                <span className="font-bold text-white">{r.title}</span>
+                <span className="text-lg font-bold tabular text-cyan-200">{r.avgReview.toFixed(1)}</span>
               </div>
-              <p className="mt-1 text-xs text-muted">
+              <p className="mt-1 text-xs text-white/65">
                 {r.genre} · {r.sales.toLocaleString()} sold · {r.revenueLabel}
               </p>
             </button>
@@ -868,9 +1189,43 @@ function GamesScreen() {
           <Button size="sm" variant="secondary" onClick={() => setCampMsg(startTitleCampaign(selected.id, "flyer_run") ?? "Flyer started.")}>
             Flyer
           </Button>
-          {campMsg && <p className="w-full text-xs text-muted">{campMsg}</p>}
+          {campMsg && <p className="w-full text-xs text-white/70">{campMsg}</p>}
         </div>
       )}
+    </ScreenBackdrop>
+  );
+}
+
+
+/** Full-bleed department still behind secondary screens — your photos only. */
+function ScreenBackdrop({
+  screen,
+  children,
+}: {
+  screen: "research" | "engines" | "platforms" | "finances" | "market" | "staff" | "games" | "settings";
+  children: ReactNode;
+}) {
+  const office = useGame((s) => s.office);
+  const year = useGame((s) => s.year);
+  const art = screenRoomArt(screen, office, year);
+  return (
+    <div className="relative min-h-[calc(100dvh-8rem)]">
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <img
+          src={art.src}
+          alt=""
+          className="h-full w-full object-cover"
+          style={{ objectPosition: art.objectPosition }}
+          draggable={false}
+        />
+        <div className="absolute inset-0 bg-gradient-to-b from-black/55 via-black/50 to-black/70" />
+      </div>
+      <div className="relative z-10 mx-auto max-w-3xl px-3 pb-10 pt-4">
+        <p className="mb-1 text-center text-[10px] font-bold uppercase tracking-[0.2em] text-cyan-200/80">
+          {art.label}
+        </p>
+        {children}
+      </div>
     </div>
   );
 }
@@ -879,70 +1234,527 @@ function ResearchScreen() {
   const researched = useGame((s) => s.researched);
   const researchPoints = useGame((s) => s.researchPoints);
   const active = useGame((s) => s.activeResearch);
+  const pipeline = useGame((s) => s.researchPipeline);
+  const year = useGame((s) => s.year);
   const startResearch = useGame((s) => s.startResearch);
   const [msg, setMsg] = useState("");
+  const [tab, setTab] = useState<"studio" | "pipeline">("pipeline");
   const available = RESEARCH.filter((r) => !researched.includes(r.id)).slice(0, 24);
+  const pipeRows = TECH_CATALOG.filter((t) => year >= t.earliestYear - 2).map((def) => {
+    const st = pipeline?.knowledge[def.id];
+    return {
+      def,
+      state: st?.state ?? (year >= def.normalYear ? "researchable" : "observed"),
+      maturity: st?.maturity ?? 0,
+      uses: st?.commercialUses ?? 0,
+    };
+  });
+
   return (
-    <div className="mx-auto max-w-3xl px-3 pb-8 pt-4">
-      <h2 className="text-center text-2xl font-bold">Research</h2>
-      <div className="mx-auto mt-1 h-px w-32 bg-[#3a6ea5]/45" />
-      <p className="mt-2 text-center text-sm text-muted">
+    <ScreenBackdrop screen="research">
+      <h2 className="text-center text-2xl font-bold text-white drop-shadow">Research</h2>
+      <div className="mx-auto mt-1 h-px w-32 bg-cyan-400/50" />
+      <p className="mt-2 text-center text-sm text-white/80">
         {Math.floor(researchPoints)} RP{active ? ` · ${active.name}` : ""}
       </p>
-      {msg && <p className="mt-2 text-center text-sm text-warn">{msg}</p>}
-      <ul className="mt-4 space-y-2">
-        {available.map((r) => (
-          <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-paper px-3 py-3">
-            <div>
-              <div className="font-semibold">{r.name}</div>
-              <div className="text-xs text-muted">
-                {r.category} · {r.cost} RP
+      <p className="mx-auto mt-1 max-w-md text-center text-[11px] text-white/60">
+        Research is a pipeline — observe, research, prototype, integrate, ship, mature. Not a shop.
+      </p>
+      <div className="mx-auto mt-3 flex max-w-sm gap-1">
+        <Button size="sm" variant={tab === "pipeline" ? "primary" : "secondary"} className="flex-1" onClick={() => setTab("pipeline")}>
+          Tech pipeline
+        </Button>
+        <Button size="sm" variant={tab === "studio" ? "primary" : "secondary"} className="flex-1" onClick={() => setTab("studio")}>
+          Studio unlocks
+        </Button>
+      </div>
+      {msg && <p className="mt-2 text-center text-sm text-amber-200">{msg}</p>}
+      {tab === "pipeline" ? (
+        <ul className="mt-4 space-y-2">
+          {pipeRows.slice(0, 28).map(({ def, state, maturity, uses }) => {
+            const ready = researched.includes(def.id) || ["production_ready", "first_commercial", "mature", "legacy"].includes(state);
+            const canStart =
+              !ready &&
+              !active &&
+              (state === "researchable" || state === "observed" || state === "unknown");
+            return (
+              <li
+                key={def.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/15 bg-black/55 px-3 py-3 backdrop-blur-sm"
+              >
+                <div className="min-w-0">
+                  <div className="font-semibold text-white">{def.name}</div>
+                  <div className="text-xs text-white/65">
+                    {def.category.replace(/_/g, " ")} · {def.researchRp} RP
+                    {def.isDesignOnly ? " · design" : ""} ·{" "}
+                    <span className="text-cyan-200/90">{String(state).replace(/_/g, " ")}</span>
+                    {uses > 0 ? ` · ${uses} ships` : ""}
+                    {maturity > 0 ? ` · mat ${Math.round(maturity * 100)}%` : ""}
+                  </div>
+                </div>
+                {ready ? (
+                  <Badge tone="good">Ready</Badge>
+                ) : (
+                  <Button
+                    size="sm"
+                    disabled={!canStart}
+                    onClick={() => setMsg(startResearch(def.id) ?? "Started.")}
+                  >
+                    Research
+                  </Button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <ul className="mt-4 space-y-2">
+          {available.map((r) => (
+            <li
+              key={r.id}
+              className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/15 bg-black/55 px-3 py-3 backdrop-blur-sm"
+            >
+              <div>
+                <div className="font-semibold text-white">{r.name}</div>
+                <div className="text-xs text-white/65">
+                  {r.category} · {r.cost} RP
+                </div>
               </div>
-            </div>
-            <Button size="sm" disabled={!!active} onClick={() => setMsg(startResearch(r.id) ?? "Started.")}>
-              Research
-            </Button>
-          </li>
-        ))}
-      </ul>
-    </div>
+              <Button size="sm" disabled={!!active} onClick={() => setMsg(startResearch(r.id) ?? "Started.")}>
+                Research
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </ScreenBackdrop>
   );
 }
 
 function StaffScreen() {
   const staff = useGame((s) => s.staff);
+  const office = useGame((s) => s.office);
+  const unlocks = useGame((s) => s.unlocks);
+  const cash = useGame((s) => s.cash);
+  const rp = useGame((s) => s.researchPoints);
+  const hireStaff = useGame((s) => s.hireStaff);
+  const fireStaff = useGame((s) => s.fireStaff);
+  const refreshCandidates = useGame((s) => s.refreshCandidates);
+  const getCandidates = useGame((s) => s.getCandidates);
+  const trainStaff = useGame((s) => s.trainStaff);
+  const getTrainingCourses = useGame((s) => s.getTrainingCourses);
+  const [cands, setCands] = useState(() => getCandidates());
+  const [msg, setMsg] = useState("");
+  const [trainFor, setTrainFor] = useState<string | null>(null);
+  const hiringOpen = unlocks.hiring === "owned" || office >= 2;
+  const trainingOpen = unlocks.training === "owned" || office >= 2;
+  const courses = getTrainingCourses();
+
   return (
-    <div className="mx-auto max-w-3xl px-3 pb-8 pt-4">
-      <h2 className="text-center text-2xl font-bold">People</h2>
-      <p className="mt-2 text-center text-sm text-muted">Garage phase is founder-led.</p>
+    <ScreenBackdrop screen="staff">
+      <h2 className="text-center text-2xl font-bold text-white drop-shadow">People</h2>
+      <p className="mt-2 text-center text-sm text-white/75">
+        {hiringOpen ? "Hire up to your HQ seats · signing cap $2M" : "Garage is founder-led until First Office."}
+      </p>
+      {msg && <p className="mt-2 text-center text-sm text-amber-200">{msg}</p>}
+
       <ul className="mt-4 space-y-2">
         {staff.map((m) => (
-          <li key={m.id} className="rounded-xl border border-border bg-paper px-4 py-3">
-            <div className="font-bold">{m.name}</div>
-            <div className="text-xs text-muted">
-              Lv {m.level} · Design {m.design} · Tech {m.tech}
+          <li key={m.id} className="rounded-xl border border-white/15 bg-black/55 px-4 py-3 backdrop-blur-sm">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <div className="font-bold text-white">
+                  {m.name}
+                  {m.id === "founder" ? " (You)" : ""}
+                </div>
+                <div className="text-xs text-white/65">
+                  Lv {m.level} · D{m.design} · T{m.tech} · S{m.speed}
+                  {m.specialization ? ` · ${m.specialization}` : ""}
+                  {(m.bugFixBonus ?? 0) > 0 ? ` · QA +${Math.round((m.bugFixBonus ?? 0) * 100)}%` : ""}
+                </div>
+                {m.training && (
+                  <div className="mt-1 text-xs text-cyan-200">
+                    Training… {m.training.weeksLeft}w left / {m.training.totalWeeks}w
+                    <div className="mt-0.5 h-1.5 max-w-[12rem] overflow-hidden rounded-full bg-white/10">
+                      <div
+                        className="h-full rounded-full bg-cyan-400 transition-all"
+                        style={{
+                          width: `${Math.round(((m.training.totalWeeks - m.training.weeksLeft) / m.training.totalWeeks) * 100)}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {trainingOpen && !m.training && m.id !== "founder" && (
+                  <Button size="sm" variant="secondary" onClick={() => setTrainFor(trainFor === m.id ? null : m.id)}>
+                    Train
+                  </Button>
+                )}
+                {trainingOpen && !m.training && m.id === "founder" && (
+                  <Button size="sm" variant="secondary" onClick={() => setTrainFor(trainFor === m.id ? null : m.id)}>
+                    Self-study
+                  </Button>
+                )}
+                {m.id !== "founder" && hiringOpen && (
+                  <Button size="sm" variant="danger" onClick={() => { fireStaff(m.id); setMsg(`Let go ${m.name}.`); }}>
+                    Fire
+                  </Button>
+                )}
+              </div>
             </div>
+            {trainFor === m.id && (
+              <div className="mt-2 space-y-1.5 border-t border-white/10 pt-2">
+                {courses.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    className="flex w-full items-center justify-between gap-2 rounded-lg border border-white/10 bg-black/40 px-2 py-1.5 text-left text-xs text-white/90 hover:border-cyan-400/40"
+                    onClick={() => {
+                      const err = trainStaff(m.id, c.id);
+                      setMsg(err ?? `${m.name} → ${c.name}`);
+                      if (!err) setTrainFor(null);
+                    }}
+                  >
+                    <span>
+                      <span className="font-bold">{c.name}</span>
+                      <span className="block text-white/55">{c.description}</span>
+                    </span>
+                    <span className="shrink-0 tabular text-white/70">
+                      {c.weeks}w · {formatCash(c.cashCost)} · {c.rpCost} RP
+                    </span>
+                  </button>
+                ))}
+                <p className="text-[10px] text-white/50">
+                  Cash {formatCash(cash)} · RP {Math.floor(rp)}
+                </p>
+              </div>
+            )}
           </li>
         ))}
       </ul>
-    </div>
+
+      {hiringOpen && (
+        <div className="mt-6">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h3 className="text-sm font-bold uppercase tracking-wide text-white/80">Candidates</h3>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                setCands(refreshCandidates());
+                setMsg("Refreshed candidate pool.");
+              }}
+            >
+              Refresh
+            </Button>
+          </div>
+          <ul className="space-y-2">
+            {cands.map((c) => (
+              <li
+                key={c.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/15 bg-black/55 px-3 py-3 backdrop-blur-sm"
+              >
+                <div className="min-w-0">
+                  <div className="font-semibold text-white">
+                    {c.name}
+                    {c.level >= 5 ? (
+                      <span className="ml-1 rounded bg-amber-400/20 px-1.5 py-0.5 text-[10px] font-bold text-amber-200">
+                        STAR
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="text-xs text-white/65">
+                    Lv {c.level} · D{c.design} T{c.tech} S{c.speed}
+                    {c.specialization ? ` · ${c.specialization}` : ""}
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    const err = hireStaff(c);
+                    setMsg(err ?? `Hired ${c.name}`);
+                    if (!err) setCands(refreshCandidates());
+                  }}
+                >
+                  Hire {formatCash(Math.min(c.salary, 2_000_000))}
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </ScreenBackdrop>
   );
 }
 
 function EnginesScreen() {
   const engines = useGame((s) => s.engines);
+  const workshop = useGame((s) => s.engineWorkshop);
+  const startEngineVersion = useGame((s) => s.startEngineVersion);
+  const year = useGame((s) => s.year);
+  const cash = useGame((s) => s.cash);
+  const unlockedPlatforms = useGame((s) => s.unlockedPlatforms);
+  const [msg, setMsg] = useState("");
+  const [name, setName] = useState("Forge");
+  const [purpose, setPurpose] = useState<EnginePurpose>("fast_2d");
+  const [architecture, setArchitecture] = useState<ArchitectureStyle>("modular");
+  const [selected, setSelected] = useState<string[]>(["core_loop", "sprite_2d"]);
+  const build = workshop?.activeBuild ?? null;
+  const versions = workshop?.versions ?? [];
+  const families = workshop?.families ?? [];
+
+  const modules = SELECTABLE_MODULES.filter((m) => !m.minYear || m.minYear <= year + 1);
+
+  const toggle = (id: string) => {
+    setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const start = () => {
+    const err = startEngineVersion({
+      name,
+      purpose,
+      architecture,
+      lifespan: "multi_project",
+      moduleIds: selected,
+      targetPlatforms: unlockedPlatforms.slice(0, 3),
+      targetSizes: ["small", "medium"],
+    });
+    setMsg(err ?? "Engine project started — time advances work.");
+  };
+
   return (
-    <div className="mx-auto max-w-3xl px-3 pb-8 pt-4">
-      <h2 className="text-center text-2xl font-bold">Engines</h2>
-      <ul className="mt-4 space-y-2">
-        {engines.map((e) => (
-          <li key={e.id} className="rounded-xl border border-border bg-paper px-4 py-3">
-            <div className="font-bold">{e.name}</div>
-            <div className="text-xs text-muted">{e.features.join(", ") || "Core only"}</div>
-          </li>
-        ))}
-      </ul>
-    </div>
+    <ScreenBackdrop screen="engines">
+      <h2 className="text-center text-2xl font-bold text-white drop-shadow">Engine Workshop</h2>
+      <p className="mx-auto mt-1 max-w-lg text-center text-xs text-white/60">
+        Engines create capability and efficiency — your team turns that into games. Released versions
+        are immutable; each project freezes a snapshot.
+      </p>
+      {msg && <p className="mt-2 text-center text-sm text-amber-200">{msg}</p>}
+
+      {build && (
+        <div className="mt-4 rounded-xl border border-cyan-400/30 bg-cyan-950/40 px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div className="font-bold text-cyan-100">{build.name}</div>
+              <div className="text-xs text-cyan-100/70">
+                Phase: {build.phase.replace(/_/g, " ")} · Week {build.weeksElapsed}/~
+                {build.weeksEstimate}
+              </div>
+            </div>
+            <Badge tone="accent">{Math.round(build.overallProgress * 100)}%</Badge>
+          </div>
+          <div className="mt-2 h-2 overflow-hidden rounded-full bg-black/40">
+            <div
+              className="h-full rounded-full bg-cyan-400 transition-all"
+              style={{ width: `${Math.round(build.overallProgress * 100)}%` }}
+            />
+          </div>
+          {build.conflicts.length > 0 && (
+            <p className="mt-2 text-xs text-amber-200/90">
+              Soft conflicts (extra work): {build.conflicts.join("; ")}
+            </p>
+          )}
+          <p className="mt-1 text-xs text-white/55">
+            Debt {Math.round(build.technicalDebt)} · Capacity {Math.round(build.weeklyCapacity)}/wk ·
+            Work {Math.round(build.completedWork)}/{build.requiredWork}
+          </p>
+        </div>
+      )}
+
+      <section className="mt-4">
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-white/70">Released versions</h3>
+        <ul className="mt-2 space-y-2">
+          {(versions.length ? versions : engines.map((e) => ({
+              versionId: e.id,
+              label: e.name,
+              status: "stable" as const,
+              features: e.features,
+              technicalDebt: 0,
+              immutable: true,
+              modules: [] as { moduleId: string }[],
+            }))).map((v) => (
+            <li
+              key={v.versionId}
+              className="rounded-xl border border-white/15 bg-black/55 px-4 py-3 backdrop-blur-sm"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="font-bold text-white">{v.label}</div>
+                <Badge tone="good">
+                  {SUPPORT_STATE_LABEL[v.status as keyof typeof SUPPORT_STATE_LABEL] ?? v.status}
+                  {v.immutable ? " · locked" : ""}
+                </Badge>
+              </div>
+              <div className="mt-1 text-xs text-white/65">
+                {(v.features ?? v.modules?.map((m) => m.moduleId) ?? []).slice(0, 8).join(" · ") ||
+                  "Core runtime"}
+              </div>
+              {"technicalDebt" in v && (
+                <div className="mt-1 text-[11px] text-white/45">
+                  Tech debt {Math.round(Number(v.technicalDebt) || 0)}
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      {families.length > 0 && (
+        <section className="mt-4">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-white/70">Families</h3>
+          <ul className="mt-2 flex flex-wrap gap-2">
+            {families.map((f) => (
+              <li
+                key={f.familyId}
+                className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-white/80"
+              >
+                <span className="font-semibold text-white">{f.name}</span>
+                <span className="text-white/50">
+                  {" "}
+                  · {PURPOSE_LABEL[f.purpose]} · {ARCH_LABEL[f.architecture]}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {!build && (
+        <section className="mt-5 overflow-hidden rounded-[1.5rem] border border-[var(--glass-border)] bg-[rgba(10,40,52,0.72)] p-4 shadow-[var(--glass-glow)] backdrop-blur-md sm:p-5">
+          <div className="flex items-start justify-between gap-2">
+            <h3 className="text-xl font-black tracking-tight text-white sm:text-2xl">
+              Create a new Engine
+            </h3>
+          </div>
+          {(() => {
+            const moduleCost = (m: (typeof modules)[0]) =>
+              Math.max(5_000, Math.round((m.baseWork || 60) * 400 * (m.minYear && m.minYear > 2000 ? 1.6 : 1)));
+            const totalCost = selected.reduce((s, id) => {
+              const m = modules.find((x) => x.id === id);
+              return s + (m ? moduleCost(m) : 0);
+            }, 80_000);
+            const catOrder: { key: string; label: string }[] = [
+              { key: "world", label: "World Design" },
+              { key: "rendering", label: "Graphic" },
+              { key: "audio", label: "Audio" },
+              { key: "ai", label: "AI" },
+              { key: "networking", label: "Networking" },
+              { key: "tools", label: "Tools" },
+              { key: "core_runtime", label: "Core" },
+              { key: "save_data", label: "Save" },
+              { key: "physics", label: "Physics" },
+              { key: "ui", label: "UI" },
+              { key: "scripting", label: "Scripting" },
+              { key: "build_deploy", label: "Build" },
+              { key: "quality_telemetry", label: "Telemetry" },
+            ];
+            const byCat = new Map<string, typeof modules>();
+            for (const m of modules) {
+              const list = byCat.get(m.category) ?? [];
+              list.push(m);
+              byCat.set(m.category, list);
+            }
+            return (
+              <>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <Input
+                    className="min-w-[10rem] flex-1 !border-white/25 !bg-[rgba(8,28,38,0.9)] !text-white"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Game Engine #1"
+                  />
+                  <div className="flex items-center gap-1.5 rounded-xl border border-white/20 bg-black/35 px-3 py-2 text-sm font-bold text-cyan-100">
+                    Cost: {formatCash(totalCost)}
+                    <Diamond className="h-4 w-4 text-cyan-300" aria-hidden />
+                  </div>
+                </div>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  <label className="block text-[11px] font-bold uppercase tracking-wide text-white/55">
+                    Purpose
+                    <select
+                      className="mt-1 w-full rounded-xl border border-white/20 bg-black/50 px-3 py-2.5 text-sm font-semibold text-white"
+                      value={purpose}
+                      onChange={(e) => setPurpose(e.target.value as EnginePurpose)}
+                    >
+                      {(Object.keys(PURPOSE_LABEL) as EnginePurpose[]).map((p) => (
+                        <option key={p} value={p}>
+                          {PURPOSE_LABEL[p]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block text-[11px] font-bold uppercase tracking-wide text-white/55">
+                    Architecture
+                    <select
+                      className="mt-1 w-full rounded-xl border border-white/20 bg-black/50 px-3 py-2.5 text-sm font-semibold text-white"
+                      value={architecture}
+                      onChange={(e) => setArchitecture(e.target.value as ArchitectureStyle)}
+                    >
+                      {(Object.keys(ARCH_LABEL) as ArchitectureStyle[]).map((a) => (
+                        <option key={a} value={a}>
+                          {ARCH_LABEL[a]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <div className="mt-4 max-h-[50vh] space-y-3 overflow-y-auto pr-0.5">
+                  {catOrder.map(({ key, label }) => {
+                    const list = byCat.get(key);
+                    if (!list?.length) return null;
+                    const isRender = key === "rendering";
+                    return (
+                      <div
+                        key={key}
+                        className="rounded-2xl border border-white/15 bg-[rgba(8,30,40,0.55)] p-3"
+                      >
+                        <h4 className="mb-2 text-base font-bold text-cyan-200">{label}</h4>
+                        <div className={cnJoin("grid gap-2", isRender ? "grid-cols-2" : "grid-cols-1")}>
+                          {list.map((m) => {
+                            const on = selected.includes(m.id);
+                            const cost = moduleCost(m);
+                            return (
+                              <button
+                                key={m.id}
+                                type="button"
+                                onClick={() => toggle(m.id)}
+                                className={cnJoin(
+                                  "flex items-center justify-between gap-2 rounded-xl border px-3 py-2.5 text-left text-sm transition",
+                                  on
+                                    ? "border-cyan-300/70 bg-gradient-to-r from-cyan-500/25 to-teal-500/15 text-white shadow-[0_0_14px_rgba(77,240,255,0.2)]"
+                                    : "border-white/15 bg-[rgba(6,24,34,0.75)] text-white/80 hover:border-cyan-300/40",
+                                )}
+                              >
+                                <span className="min-w-0 font-semibold leading-snug">{m.name}</span>
+                                <span className="flex shrink-0 items-center gap-1 text-xs font-bold tabular text-cyan-200">
+                                  {cost >= 1000 ? `${Math.round(cost / 1000)}K` : formatCash(cost)}
+                                  <Diamond className="h-3.5 w-3.5" aria-hidden />
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="mt-2 text-center text-[11px] text-white/50">
+                  Cash on hand {formatCash(cash)}. Modules set capability — not free review points.
+                </p>
+                <Button
+                  size="lg"
+                  className="mt-3 w-full !rounded-full !bg-gradient-to-b from-[#4df0ff] to-[#1ab8c8] !text-[#042028] !shadow-[0_0_20px_rgba(77,240,255,0.35)]"
+                  onClick={start}
+                >
+                  Create Engine
+                </Button>
+              </>
+            );
+          })()}
+        </section>
+      )}
+    </ScreenBackdrop>
   );
 }
 
@@ -951,19 +1763,29 @@ function PlatformsScreen() {
   const year = useGame((s) => s.year);
   const licensePlatform = useGame((s) => s.licensePlatform);
   const [msg, setMsg] = useState("");
-  const list = PLATFORMS.filter((p) => p.year <= year + 1).slice(0, 20);
+  const list = PLATFORMS.filter((p) => p.year <= year + 1);
   return (
-    <div className="mx-auto max-w-3xl px-3 pb-8 pt-4">
-      <h2 className="text-center text-2xl font-bold">Systems</h2>
-      {msg && <p className="mt-2 text-center text-sm text-warn">{msg}</p>}
+    <ScreenBackdrop screen="platforms">
+      <h2 className="text-center text-2xl font-bold text-white drop-shadow">Systems</h2>
+      {msg && <p className="mt-2 text-center text-sm text-amber-200">{msg}</p>}
       <ul className="mt-4 space-y-2">
         {list.map((p) => {
           const owned = unlocked.includes(p.id);
+          const thumb = platformThumb(p.id, year);
           return (
-            <li key={p.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-paper px-3 py-3">
-              <div>
-                <div className="font-semibold">{p.name}</div>
-                <div className="text-xs text-muted">{p.year}</div>
+            <li key={p.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/15 bg-black/55 px-3 py-3 backdrop-blur-sm">
+              <div className="flex min-w-0 items-center gap-3">
+                {thumb ? (
+                  <img src={thumb} alt="" className="h-12 w-12 shrink-0 rounded-lg object-cover ring-1 ring-white/20" draggable={false} />
+                ) : (
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-white/10 text-[10px] font-bold text-white/70">
+                    {p.short}
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <div className="truncate font-semibold text-white">{p.name}</div>
+                  <div className="text-xs text-white/65">{p.year}</div>
+                </div>
               </div>
               {owned ? (
                 <Badge tone="good">Owned</Badge>
@@ -976,7 +1798,7 @@ function PlatformsScreen() {
           );
         })}
       </ul>
-    </div>
+    </ScreenBackdrop>
   );
 }
 
@@ -985,53 +1807,23 @@ function FinancesScreen() {
   const ledger = useGame((s) => s.ledger);
   const entries = ledger?.entries?.slice(-30).reverse() ?? [];
   return (
-    <div className="mx-auto max-w-3xl px-3 pb-8 pt-4">
-      <h2 className="text-center text-2xl font-bold">Finances</h2>
-      <p className="mt-2 text-center text-3xl font-bold tabular text-cash">{formatCash(cash)}</p>
+    <ScreenBackdrop screen="finances">
+      <h2 className="text-center text-2xl font-bold text-white drop-shadow">Finances</h2>
+      <p className="mt-2 text-center text-3xl font-bold tabular text-emerald-300">{formatCash(cash)}</p>
       <ul className="mt-4 space-y-1.5">
         {entries.map((e) => (
-          <li key={e.id} className="flex justify-between gap-3 rounded-lg border border-border bg-paper px-3 py-2 text-sm">
-            <span className="truncate text-muted">
+          <li key={e.id} className="flex justify-between gap-3 rounded-lg border border-white/15 bg-black/55 px-3 py-2 text-sm backdrop-blur-sm">
+            <span className="truncate text-white/70">
               W{e.week} · {e.label}
             </span>
-            <span className={cnJoin("tabular font-bold", e.amount >= 0 ? "text-good" : "text-bad")}>
+            <span className={cnJoin("tabular font-bold", e.amount >= 0 ? "text-emerald-300" : "text-red-300")}>
               {formatCash(e.amount)}
             </span>
           </li>
         ))}
-        {!entries.length && <li className="text-center text-sm text-muted">No ledger entries yet.</li>}
+        {!entries.length && <li className="text-center text-sm text-white/60">No ledger entries yet.</li>}
       </ul>
-    </div>
-  );
-}
-
-function MarketScreen() {
-  const sales = useGame((s) => s.activeSales);
-  const fans = useGame((s) => s.fans);
-  return (
-    <div className="mx-auto max-w-3xl px-3 pb-8 pt-4">
-      <h2 className="text-center text-2xl font-bold">Market</h2>
-      <p className="mt-2 text-center text-sm text-muted">{formatFans(fans)} fans</p>
-      <ul className="mt-4 space-y-2">
-        {sales
-          .filter((g) => g.onSale)
-          .map((g) => (
-            <li key={g.id} className="rounded-xl border border-border bg-paper p-4">
-              <div className="flex justify-between">
-                <span className="font-bold">{g.title}</span>
-                <span className="tabular font-bold">{g.avgReview.toFixed(1)}</span>
-              </div>
-              <p className="mt-1 text-sm text-muted">
-                {g.sales.toLocaleString()} units · {formatCash(g.revenue)}
-              </p>
-              <p className="mt-2 text-xs text-subtle">{explainSales(g)}</p>
-            </li>
-          ))}
-        {!sales.filter((g) => g.onSale).length && (
-          <li className="text-center text-sm text-muted">No titles selling.</li>
-        )}
-      </ul>
-    </div>
+    </ScreenBackdrop>
   );
 }
 
@@ -1043,7 +1835,7 @@ function SettingsScreen() {
   return (
     <div className="mx-auto max-w-lg px-3 pb-8 pt-4">
       <h2 className="text-center text-2xl font-bold">More</h2>
-      <div className="mx-auto mt-1 h-px w-24 bg-[#3a6ea5]/45" />
+      <div className="mx-auto mt-1 h-px w-24 bg-border-strong" />
       <div className="mt-4 space-y-2">
         <Button className="w-full" variant="secondary" onClick={() => saveGame()}>
           Save campaign
@@ -1052,7 +1844,7 @@ function SettingsScreen() {
           Pause menu
         </Button>
         <Button className="w-full" variant="secondary" onClick={() => setModal("cheats")}>
-          Cheats (QA)
+          CheatMod
         </Button>
         <Button className="w-full" variant="secondary" onClick={() => setScreen("market")}>
           Market
@@ -1094,9 +1886,10 @@ function NewGameModal() {
   const cash = useGame((s) => s.cash);
   const office = useGame((s) => s.office);
   const staffCount = useGame((s) => s.staff.length);
+  const year = useGame((s) => s.year);
   const topics = TOPICS.filter((t) => unlockedTopics.includes(t.id) && (!garageSlice || isGarageTopic(t.id)));
   const genres = GENRES.filter((g) => unlockedGenres.includes(g.id));
-  const platforms = PLATFORMS.filter((p) => unlockedPlatforms.includes(p.id));
+  const platforms = PLATFORMS.filter((p) => unlockedPlatforms.includes(p.id) && (p.year <= year || p.startUnlocked));
   const sizes = availableSizes(researched, unlocks, { office, staffCount });
   const [topicId, setTopicId] = useState(topics[0]?.id ?? "space");
   const [genreId, setGenreId] = useState<GenreId>((genres[0]?.id as GenreId) ?? "action");
@@ -1104,13 +1897,27 @@ function NewGameModal() {
   const [audience, setAudience] = useState<AudienceId>("everyone");
   const [size, setSize] = useState<GameSize>("small");
   const [engineId, setEngineId] = useState(engines[0]?.id ?? "basic");
+  const [featureIds, setFeatureIds] = useState<string[]>(["basic_2d_v1"]);
   const [title, setTitle] = useState("");
   const [marketing, setMarketing] = useState(0);
+  const [pillar, setPillar] = useState<ProjectPillar>("default");
   const [err, setErr] = useState("");
-  const [step, setStep] = useState<"topic" | "genre" | "details">("topic");
+  // Classic GDT path: concept → topic → genre → platform → tech → start
+  const [step, setStep] = useState<"concept" | "topic" | "genre" | "platform" | "tech">("concept");
   const [topicQuery, setTopicQuery] = useState("");
   const visibleTopics = topics.filter((topic) =>
     topic.name.toLocaleLowerCase().includes(topicQuery.trim().toLocaleLowerCase()),
+  );
+
+  const graphicOptions = ENGINE_COMPONENTS.filter(
+    (c) =>
+      c.category === "Graphics" &&
+      (c.starting || researched.includes(c.id) || researched.includes(c.engineFeature ?? "")),
+  );
+  const soundOptions = ENGINE_COMPONENTS.filter(
+    (c) =>
+      c.category === "Sound" &&
+      (c.starting || researched.includes(c.id) || researched.includes(c.engineFeature ?? "")),
   );
 
   useEffect(() => {
@@ -1119,126 +1926,130 @@ function NewGameModal() {
       setGenreId((genres[0]?.id as GenreId) ?? "action");
       setPlatformId(platforms[0]?.id ?? "pc");
       setEngineId(engines[0]?.id ?? "basic");
+      setFeatureIds(["basic_2d_v1"]);
       setSize("small");
       setTitle("");
       setMarketing(0);
       setErr("");
-      setStep("topic");
+      setStep("concept");
       setTopicQuery("");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modal]);
 
-  const cost = SIZE_STATS[size].cost + marketing;
+  const featureCost = featureIds.reduce((sum, id) => {
+    const c = ENGINE_COMPONENTS.find((x) => x.id === id);
+    if (!c || c.starting) return sum;
+    return sum + 5000;
+  }, 0);
+  const cost = SIZE_STATS[size].cost + marketing + featureCost;
   const combo = evaluateCombo({ topicId, genreId, platformId, audience });
+  const marketTotal = platforms.reduce((s, p) => s + p.marketSize, 0) || 1;
+
+  const titleByStep: Record<typeof step, string> = {
+    concept: "Game Concept",
+    topic: "Pick Topic",
+    genre: "Pick Genre",
+    platform: "Pick Platform",
+    tech: "Game Concept",
+  };
+
+  const chipBtn = (active: boolean) =>
+    cnJoin(
+      "min-h-12 rounded-xl border-2 px-3 py-3 text-left text-sm font-bold transition active:scale-[0.98]",
+      active
+        ? "border-[var(--glass-cyan)] bg-[rgba(77,240,255,0.18)] text-white shadow-[0_0_12px_rgba(77,240,255,0.25)]"
+        : "border-white/20 bg-[rgba(8,28,38,0.85)] text-white hover:border-[var(--glass-cyan)]/60",
+    );
+
+  const canStart =
+    !!topicId &&
+    !!genreId &&
+    !!platformId &&
+    featureIds.length > 0 &&
+    cash >= cost;
 
   return (
-    <Modal open={modal === "newGame"} onClose={() => setModal(null)} title={step === "topic" ? "Pick Topic" : step === "genre" ? "Pick Genre" : "New Game"} wide>
-      {step === "topic" && (
-        <div>
-          <SearchField
-            value={topicQuery}
-            onChange={(event) => setTopicQuery(event.target.value)}
-            placeholder="Search topics…"
-            aria-label="Search topics"
-            className="mb-3"
-          />
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {visibleTopics.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => {
-                  setTopicId(t.id);
-                  setStep("genre");
-                }}
-                className={cnJoin(
-                  "rounded-xl border-2 px-3 py-4 text-left transition",
-                  topicId === t.id ? "border-accent bg-accent/10" : "border-border bg-elevated hover:border-accent/50",
-                )}
-              >
-                <div className="text-sm font-bold">{t.name}</div>
-              </button>
-            ))}
-          </div>
-          {visibleTopics.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center">
-              <p className="font-semibold text-text-primary">No topics found</p>
-              <p className="mt-1 text-sm text-text-secondary">
-                Try another name or clear your search.
-              </p>
-            </div>
-          ) : null}
-        </div>
-      )}
-      {step === "genre" && (
-        <div>
-          <button type="button" className="mb-3 text-xs font-bold text-muted underline" onClick={() => setStep("topic")}>
-            ← Topics
-          </button>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {genres.map((g) => (
-              <button
-                key={g.id}
-                type="button"
-                onClick={() => {
-                  setGenreId(g.id as GenreId);
-                  setStep("details");
-                }}
-                className={cnJoin(
-                  "rounded-xl border-2 px-3 py-4 text-left transition",
-                  genreId === g.id ? "border-accent bg-accent/10" : "border-border bg-elevated hover:border-accent/50",
-                )}
-              >
-                <div className="text-sm font-bold">{g.name}</div>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-      {step === "details" && (
+    <Modal
+      open={modal === "newGame"}
+      onClose={() => setModal(null)}
+      title={titleByStep[step]}
+      wide
+    >
+      {/* ── Concept hub (GDT Game Concept) ── */}
+      {step === "concept" && (
         <div className="space-y-3">
-          <button type="button" className="text-xs font-bold text-muted underline" onClick={() => setStep("genre")}>
-            ← Genres
-          </button>
-          <p className="text-center text-sm font-semibold">
-            {getTopic(topicId)?.name} · {getGenre(genreId).name}
-          </p>
           <div>
-            <label className="mb-1 block text-xs font-bold uppercase text-subtle">Working title</label>
-            <Input value={title} placeholder={generateGameTitle(topicId, genreId)} onChange={(e) => setTitle(e.target.value)} maxLength={40} className="!bg-elevated" />
+            <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-[var(--glass-muted)]">
+              Working title
+            </label>
+            <Input
+              value={title}
+              placeholder={generateGameTitle(topicId, genreId)}
+              onChange={(e) => setTitle(e.target.value)}
+              maxLength={40}
+              className="!border-white/20 !bg-[rgba(8,28,38,0.9)] !text-white"
+            />
           </div>
-          <div>
-            <label className="mb-1 block text-xs font-bold uppercase text-subtle">Platform</label>
-            <div className="flex flex-wrap gap-2">
-              {platforms.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => setPlatformId(p.id)}
-                  className={cnJoin(
-                    "rounded-lg border px-3 py-2 text-sm font-semibold",
-                    platformId === p.id ? "border-accent bg-accent/15" : "border-border bg-elevated",
-                  )}
-                >
-                  {p.name}
-                </button>
-              ))}
-            </div>
+          <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+            <span className="font-semibold text-[var(--glass-muted)]">Dev cost</span>
+            <span className={cnJoin("font-bold tabular", cash >= cost ? "text-cyan-200" : "text-red-300")}>
+              {formatCash(cost)}
+            </span>
           </div>
+
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <button type="button" className={chipBtn(!!topicId)} onClick={() => setStep("topic")}>
+              <div className="text-[10px] font-bold uppercase tracking-wide text-cyan-200/80">Topic</div>
+              <div>{getTopic(topicId)?.name ?? "Pick Topic"}</div>
+            </button>
+            <button type="button" className={chipBtn(!!genreId)} onClick={() => setStep("genre")}>
+              <div className="text-[10px] font-bold uppercase tracking-wide text-cyan-200/80">Genre</div>
+              <div className="flex items-center gap-2">
+                <img
+                  src={genreIconSrc(genreId)}
+                  alt=""
+                  className="h-7 w-7 shrink-0 rounded-md object-contain"
+                  draggable={false}
+                />
+                <span>{getGenre(genreId).name}</span>
+              </div>
+            </button>
+            <button type="button" className={chipBtn(!!platformId)} onClick={() => setStep("platform")}>
+              <div className="text-[10px] font-bold uppercase tracking-wide text-cyan-200/80">Platform</div>
+              <div className="flex items-center gap-2">
+                {(platformArt(platformId, year) || platformThumb(platformId, year)) && (
+                  <img
+                    src={platformArt(platformId, year) || platformThumb(platformId, year)}
+                    alt=""
+                    className="h-8 w-10 shrink-0 rounded-md object-contain bg-black/30"
+                    draggable={false}
+                  />
+                )}
+                <span>{getPlatform(platformId)?.name ?? "Pick Platform"}</span>
+              </div>
+            </button>
+            <button type="button" className={chipBtn(featureIds.length > 0)} onClick={() => setStep("tech")}>
+              <div className="text-[10px] font-bold uppercase tracking-wide text-cyan-200/80">Tech pack</div>
+              <div className="truncate">
+                {featureIds
+                  .map((id) => ENGINE_COMPONENTS.find((c) => c.id === id)?.name ?? id)
+                  .join(" · ")
+                  .replace("Basic 2D Graphics V1", "2D Graphics V1") || "Choose graphics"}
+              </div>
+            </button>
+          </div>
+
           {(unlocks.audience === "owned" || flags.audience) && (
             <div>
-              <label className="mb-1 block text-xs font-bold uppercase text-subtle">Audience</label>
+              <label className="mb-1 block text-xs font-bold uppercase text-[var(--glass-muted)]">Audience</label>
               <div className="flex flex-wrap gap-2">
                 {AUDIENCES.map((a) => (
                   <button
                     key={a.id}
                     type="button"
                     onClick={() => setAudience(a.id as AudienceId)}
-                    className={cnJoin(
-                      "rounded-lg border px-3 py-2 text-sm font-semibold",
-                      audience === a.id ? "border-accent bg-accent/15" : "border-border bg-elevated",
-                    )}
+                    className={chipBtn(audience === a.id)}
                   >
                     {a.name}
                   </button>
@@ -1246,57 +2057,45 @@ function NewGameModal() {
               </div>
             </div>
           )}
-          <div>
-            <label className="mb-1 block text-xs font-bold uppercase text-subtle">Size</label>
-            <div className="flex flex-wrap gap-2">
-              {sizes.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => setSize(s)}
-                  className={cnJoin(
-                    "rounded-lg border px-3 py-2 text-sm font-semibold capitalize",
-                    size === s ? "border-accent bg-accent/15" : "border-border bg-elevated",
-                  )}
-                >
-                  {s} ({formatCash(SIZE_STATS[s].cost)})
-                </button>
-              ))}
-            </div>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-bold uppercase text-subtle">Engine</label>
-            <div className="flex flex-wrap gap-2">
-              {engines.map((e) => (
-                <button
-                  key={e.id}
-                  type="button"
-                  onClick={() => setEngineId(e.id)}
-                  className={cnJoin(
-                    "rounded-lg border px-3 py-2 text-sm font-semibold",
-                    engineId === e.id ? "border-accent bg-accent/15" : "border-border bg-elevated",
-                  )}
-                >
-                  {e.name}
-                </button>
-              ))}
-            </div>
-          </div>
-          {(unlocks.marketing === "owned" || flags.marketing) && (
+
+          {sizes.length > 1 && (
             <div>
-              <label className="mb-1 block text-xs font-bold uppercase text-subtle">
-                Marketing (${marketing}) — awareness only
-              </label>
-              <input type="range" min={0} max={50000} step={1000} value={marketing} onChange={(e) => setMarketing(Number(e.target.value))} />
+              <label className="mb-1 block text-xs font-bold uppercase text-[var(--glass-muted)]">Size</label>
+              <div className="flex flex-wrap gap-2">
+                {sizes.map((s) => (
+                  <button key={s} type="button" onClick={() => setSize(s)} className={chipBtn(size === s)}>
+                    {s} ({formatCash(SIZE_STATS[s].cost)})
+                  </button>
+                ))}
+              </div>
             </div>
           )}
-          <div className="rounded-xl border border-border bg-elevated px-3 py-2 text-center text-xs text-muted">
-            Fit {combo.topicGenre}/{combo.platformGenre} · Cost {formatCash(cost)} · Cash {formatCash(cash)}
+
+          <p className="text-center text-xs text-[var(--glass-muted)]">
+            Fit {combo.topicGenre}/{combo.platformGenre} · Cash {formatCash(cash)}
+          </p>
+          <div className="mt-2">
+            <p className="mb-1 text-center text-[10px] font-bold uppercase text-[var(--glass-muted)]">
+              Project pillar
+            </p>
+            <div className="flex flex-wrap justify-center gap-1">
+              {(Object.keys(PILLAR_LABELS) as ProjectPillar[]).map((id) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={chipBtn(pillar === id)}
+                  onClick={() => setPillar(id)}
+                >
+                  {PILLAR_LABELS[id]}
+                </button>
+              ))}
+            </div>
           </div>
-          {err && <p className="text-center text-sm text-bad">{err}</p>}
+          {err && <p className="text-center text-sm text-red-300">{err}</p>}
           <Button
-            className="w-full"
             size="lg"
+            className="w-full"
+            disabled={!canStart}
             onClick={() => {
               const msg = startProject({
                 title: title || generateGameTitle(topicId, genreId),
@@ -1307,12 +2106,275 @@ function NewGameModal() {
                 size,
                 engineId,
                 marketingSpend: marketing,
+                pillar,
+                features: featureIds
+                  .map((id) => ENGINE_COMPONENTS.find((c) => c.id === id)?.engineFeature ?? id)
+                  .filter(Boolean),
               });
               if (msg) setErr(msg);
-              else setScreen("develop");
             }}
           >
-            Begin Stage 1
+            Start Development
+          </Button>
+        </div>
+      )}
+
+      {/* ── Pick Topic ── */}
+      {step === "topic" && (
+        <div>
+          <button type="button" className="mb-3 text-xs font-bold text-cyan-200 underline" onClick={() => setStep("concept")}>
+            ← Game Concept
+          </button>
+          <SearchField
+            value={topicQuery}
+            onChange={(event) => setTopicQuery(event.target.value)}
+            placeholder="Search topics…"
+            aria-label="Search topics"
+            className="mb-3"
+          />
+          <div className="grid grid-cols-2 gap-2">
+            {visibleTopics.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => {
+                  setTopicId(t.id);
+                  setStep("concept");
+                }}
+                className={chipBtn(topicId === t.id)}
+              >
+                {t.name}
+              </button>
+            ))}
+          </div>
+          {visibleTopics.length === 0 && (
+            <p className="mt-4 text-center text-sm text-[var(--glass-muted)]">No topics found</p>
+          )}
+        </div>
+      )}
+
+      {/* ── Pick Genre ── */}
+      {step === "genre" && (
+        <div>
+          <button type="button" className="mb-3 text-xs font-bold text-cyan-200 underline" onClick={() => setStep("concept")}>
+            ← Game Concept
+          </button>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {genres.map((g) => {
+              const selected = genreId === g.id;
+              return (
+                <button
+                  key={g.id}
+                  type="button"
+                  onClick={() => {
+                    setGenreId(g.id as GenreId);
+                    setStep("concept");
+                  }}
+                  className={cnJoin(
+                    "flex flex-col items-center gap-2 rounded-xl border-2 px-2 py-3 text-center transition",
+                    selected
+                      ? "border-cyan-300/80 bg-[rgba(20,40,55,0.92)] text-white shadow-[0_0_16px_rgba(60,220,240,0.25)]"
+                      : "border-white/15 bg-[rgba(12,22,32,0.88)] text-white/90 hover:border-cyan-200/40 hover:bg-[rgba(18,34,48,0.95)]",
+                  )}
+                >
+                  <img
+                    src={genreIconSrc(g.id as GenreId)}
+                    alt=""
+                    className="h-14 w-14 object-contain drop-shadow-md sm:h-16 sm:w-16"
+                    draggable={false}
+                  />
+                  <span className="text-sm font-bold tracking-tight">{g.name}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Pick Platform — product cards (reference glass layout) ── */}
+      {step === "platform" && (
+        <div className="space-y-3">
+          <button
+            type="button"
+            className="flex items-center gap-1 text-xs font-bold text-cyan-200"
+            onClick={() => setStep("concept")}
+          >
+            ← Back
+          </button>
+          <div className="mx-auto flex max-w-md flex-col gap-4">
+            {platforms.map((p) => {
+              const share = Math.round((p.marketSize / marketTotal) * 1000) / 10;
+              const devCost =
+                p.id === "pc"
+                  ? Math.round(SIZE_STATS[size].cost * 0.35)
+                  : Math.max(
+                      SIZE_STATS[size].cost,
+                      Math.round(SIZE_STATS[size].cost * (0.85 + p.marketSize * 0.35)),
+                    );
+              const art = platformArt(p.id, year) ?? platformThumb(p.id, year);
+              const selected = platformId === p.id;
+              const genres: GenreId[] = ["action", "adventure", "rpg", "simulation", "strategy", "casual"];
+              const tierMark = (t: string) =>
+                t === "great" ? "+++" : t === "good" ? "++" : t === "ok" ? "+" : "·";
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => {
+                    setPlatformId(p.id);
+                    setStep("concept");
+                  }}
+                  className={cnJoin(
+                    "w-full overflow-hidden rounded-[1.35rem] border text-left transition active:scale-[0.99]",
+                    selected
+                      ? "border-[var(--glass-cyan)] bg-[rgba(12,48,62,0.88)] shadow-[0_0_28px_rgba(77,240,255,0.28)]"
+                      : "border-white/20 bg-[rgba(10,36,48,0.82)] hover:border-cyan-300/50",
+                  )}
+                >
+                  <div className="relative flex h-40 items-center justify-center bg-gradient-to-b from-white/10 to-transparent px-4 pt-4 sm:h-48">
+                    {art ? (
+                      <img
+                        src={art}
+                        alt=""
+                        className="max-h-full max-w-[88%] object-contain drop-shadow-[0_12px_24px_rgba(0,0,0,0.45)]"
+                        draggable={false}
+                      />
+                    ) : (
+                      <div className="text-4xl font-black text-white/30">{p.short}</div>
+                    )}
+                  </div>
+                  <div className="px-5 pb-5 pt-1">
+                    <div className="text-center text-2xl font-black tracking-tight text-white">
+                      {p.short || p.name}
+                    </div>
+                    <div className="mt-3 space-y-1.5 text-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[var(--glass-muted)]">Dev. cost:</span>
+                        <span className="font-bold tabular text-[var(--glass-green)]">{formatCash(devCost)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[var(--glass-muted)]">Marketshare:</span>
+                        <span className="font-bold tabular text-white">{share.toFixed(1)} %</span>
+                      </div>
+                    </div>
+                    <div className="mt-3">
+                      <div className="mb-1.5 text-xs text-[var(--glass-muted)]">Genre match:</div>
+                      <div className="flex flex-wrap justify-center gap-1.5">
+                        {genres.map((g) => {
+                          const fit = p.genreAffinity[g] ?? "ok";
+                          const hot = g === genreId;
+                          return (
+                            <div
+                              key={g}
+                              className={cnJoin(
+                                "flex w-[3.1rem] flex-col items-center gap-0.5 rounded-xl border px-1 py-1.5",
+                                hot
+                                  ? "border-cyan-300/70 bg-cyan-400/15"
+                                  : "border-white/15 bg-black/25",
+                              )}
+                              title={`${getGenre(g).name}: ${fit}`}
+                            >
+                              <img
+                                src={genreIconSrc(g)}
+                                alt=""
+                                className="h-7 w-7 object-contain"
+                                draggable={false}
+                              />
+                              <span
+                                className={cnJoin(
+                                  "rounded-md px-1 text-[10px] font-black leading-none",
+                                  fit === "great"
+                                    ? "bg-emerald-500 text-white"
+                                    : fit === "good"
+                                      ? "bg-teal-600 text-white"
+                                      : fit === "ok"
+                                        ? "bg-slate-600 text-white"
+                                        : "bg-slate-800 text-white/70",
+                                )}
+                              >
+                                {tierMark(fit)}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          {platforms.length === 0 && (
+            <p className="text-center text-sm text-[var(--glass-muted)]">
+              No platforms unlocked yet — PC should be day one.
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* ── Tech pack (graphics / sound) ── */}
+      {step === "tech" && (
+        <div className="space-y-4">
+          <button type="button" className="text-xs font-bold text-cyan-200 underline" onClick={() => setStep("concept")}>
+            ← Game Concept
+          </button>
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="text-xs font-bold uppercase tracking-wide text-[var(--glass-muted)]">Graphics</h3>
+              <span className="text-xs font-bold text-amber-200">+{formatCash(featureCost)}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {graphicOptions.map((c) => {
+                const on = featureIds.includes(c.id);
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => {
+                      // one graphics pick
+                      setFeatureIds((prev) => {
+                        const withoutGfx = prev.filter(
+                          (id) => ENGINE_COMPONENTS.find((x) => x.id === id)?.category !== "Graphics",
+                        );
+                        return [...withoutGfx, c.id];
+                      });
+                    }}
+                    className={chipBtn(on)}
+                  >
+                    <div>{c.name}</div>
+                    <div className="mt-1 text-[10px] text-cyan-200/80">{c.starting ? "Free" : "+$5.0K"}</div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          {soundOptions.length > 0 && (
+            <div>
+              <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-[var(--glass-muted)]">Sound</h3>
+              <div className="grid grid-cols-2 gap-2">
+                {soundOptions.map((c) => {
+                  const on = featureIds.includes(c.id);
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => {
+                        setFeatureIds((prev) =>
+                          on ? prev.filter((id) => id !== c.id) : [...prev, c.id],
+                        );
+                      }}
+                      className={chipBtn(on)}
+                    >
+                      <div>{c.name}</div>
+                      <div className="mt-1 text-[10px] text-cyan-200/80">{c.starting ? "Free" : "+$5.0K"}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          <Button size="lg" className="w-full" onClick={() => setStep("concept")}>
+            Done
           </Button>
         </div>
       )}
@@ -1320,7 +2382,6 @@ function NewGameModal() {
   );
 }
 
-// helper used in NewGameModal after start
 function setScreen(id: ScreenId) {
   useGame.getState().setScreen(id);
 }
@@ -1425,41 +2486,319 @@ function CheatsModal() {
   const setModal = useGame((s) => s.setModal);
   const applyCheat = useGame((s) => s.applyCheat);
   const settings = useGame((s) => s.settings);
+  const cash = useGame((s) => s.cash);
+  const fans = useGame((s) => s.fans);
+  const office = useGame((s) => s.office);
+  const project = useGame((s) => s.currentProject);
+  const seed = useGame((s) => s.campaignSeed);
+  const year = useGame((s) => s.year);
+  const cheatLog = useGame((s) => s.cheatLog);
+  const cheatsEnabled = useGame((s) => s.cheatsEnabled);
+  const [tab, setTab] = useState<"main" | "dev" | "modes" | "modding">("main");
+  const [cashField, setCashField] = useState("");
+  const [fansField, setFansField] = useState("");
+  const [yearField, setYearField] = useState(String(year));
+
+  const rowBtn = (label: string, cheat: string, arg?: string | number) => (
+    <Button
+      key={cheat + label}
+      size="sm"
+      variant="secondary"
+      className="min-w-[5.5rem] flex-1"
+      onClick={() => applyCheat(cheat, arg)}
+    >
+      {label}
+    </Button>
+  );
+
+  const wideBtn = (label: string, cheat: string, arg?: string | number, active?: boolean) => (
+    <Button
+      key={cheat + label}
+      size="sm"
+      variant={active ? "primary" : "secondary"}
+      className="w-full justify-start text-left"
+      onClick={() => applyCheat(cheat, arg)}
+    >
+      {label}
+      {active ? " · ON" : ""}
+    </Button>
+  );
+
+  const tabs: { id: typeof tab; label: string }[] = [
+    { id: "main", label: "Resources" },
+    { id: "dev", label: "Dev" },
+    { id: "modes", label: "Modes" },
+    { id: "modding", label: "Modding" },
+  ];
+
   return (
-    <Modal open={modal === "cheats"} onClose={() => setModal(null)} title="QA Cheats">
-      <div className="grid grid-cols-2 gap-2">
-        <Button size="sm" variant="secondary" onClick={() => applyCheat("cash_10k")}>
-          +$10k
-        </Button>
-        <Button size="sm" variant="secondary" onClick={() => applyCheat("cash_100k")}>
-          +$100k
-        </Button>
-        <Button size="sm" variant="secondary" onClick={() => applyCheat("cash_1m")}>
-          +$1M
-        </Button>
-        <Button size="sm" variant="secondary" onClick={() => applyCheat("rp")}>
-          +RP
-        </Button>
-        <Button size="sm" variant={settings.forcePerfectScore ? "primary" : "secondary"} onClick={() => applyCheat("toggle_perfect_score")}>
-          Perfect scores
-        </Button>
-        <Button size="sm" variant={settings.forceBadScore ? "primary" : "secondary"} onClick={() => applyCheat("toggle_bad_score")}>
-          Bad scores
-        </Button>
+    <Modal open={modal === "cheats"} onClose={() => setModal(null)} title="CheatMod" wide>
+      <p className="text-xs text-muted">
+        Inspired by kristof1104's GDT CheatMod — safer than editing saves.
+        {cheatsEnabled ? " Campaign marked modified." : ""}
+      </p>
+      <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted">
+        <span className="tabular rounded-md bg-elevated px-2 py-1 font-semibold text-fg">
+          {formatCash(cash)}
+        </span>
+        <span className="tabular rounded-md bg-elevated px-2 py-1">{formatFans(fans)} fans</span>
+        <span className="rounded-md bg-elevated px-2 py-1">
+          {OFFICE_INFO[office]?.name ?? `Office ${office}`}
+        </span>
       </div>
+
+      <div className="mt-3 flex flex-wrap gap-1">
+        {tabs.map((tb) => (
+          <button
+            key={tb.id}
+            type="button"
+            onClick={() => setTab(tb.id)}
+            className={cnJoin(
+              "min-h-9 rounded-lg px-3 text-xs font-semibold",
+              tab === tb.id ? "bg-accent text-accent-fg" : "bg-elevated text-muted hover:text-fg",
+            )}
+          >
+            {tb.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-4 max-h-[52dvh] space-y-4 overflow-y-auto pr-1">
+        {tab === "main" && (
+          <>
+            <section>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Add Money</h3>
+              <div className="flex flex-wrap gap-1.5">
+                {rowBtn("1M", "cash_1m")}
+                {rowBtn("10M", "cash_10m")}
+                {rowBtn("100M", "cash_100m")}
+                {rowBtn("1B", "cash_1b")}
+              </div>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {rowBtn("+10k", "cash_10k")}
+                {rowBtn("+100k", "cash_100k")}
+              </div>
+            </section>
+            <section>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Add Fans</h3>
+              <div className="flex flex-wrap gap-1.5">
+                {rowBtn("1M", "fans_1m")}
+                {rowBtn("10M", "fans_10m")}
+                {rowBtn("100M", "fans_100m")}
+                {rowBtn("+10k", "fans", 10000)}
+              </div>
+            </section>
+            <section>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Add Hype</h3>
+              <div className="flex flex-wrap gap-1.5">
+                {rowBtn("+10", "hype_10")}
+                {rowBtn("+50", "hype_50")}
+                {rowBtn("+100", "hype_100")}
+              </div>
+            </section>
+            <section className="space-y-1.5">
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Research & team</h3>
+              {wideBtn("Add Research Points (100)", "rp_100")}
+              {wideBtn("Fill open slots · 1337 Dream Team", "dream_team")}
+              {wideBtn("Fill open slots · B-Team", "b_team")}
+              {wideBtn("Turn founder into 1337 developer", "pro_developer")}
+              {wideBtn("Generate random market trend", "random_trend")}
+            </section>
+            <section className="space-y-1.5">
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Progression</h3>
+              {wideBtn("Move to final level (HQ + unlocks)", "move_to_final_level")}
+              {wideBtn("Office-ready pack (garage gate)", "office_ready")}
+              {wideBtn("Add all topics", "add_all_topics")}
+              {wideBtn("Unlock large / AAA path", "add_aaa")}
+              {wideBtn("Unlock everything", "unlock_all")}
+              {wideBtn("Unlock sequels", "sequels")}
+            </section>
+          </>
+        )}
+
+        {tab === "dev" && (
+          <>
+            <p className="text-xs text-muted">
+              {project
+                ? `${project.title} · D${Math.round(project.designPoints)} / T${Math.round(project.techPoints)} · bugs ${project.bugs}`
+                : "No active project."}
+            </p>
+            <section>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Design points</h3>
+              <div className="flex flex-wrap gap-1.5">
+                {rowBtn("+10", "design_10")}
+                {rowBtn("+100", "design_100")}
+              </div>
+            </section>
+            <section>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Tech points</h3>
+              <div className="flex flex-wrap gap-1.5">
+                {rowBtn("+10", "tech_10")}
+                {rowBtn("+100", "tech_100")}
+              </div>
+            </section>
+            <section className="space-y-1.5">
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Stage & polish</h3>
+              {wideBtn("Finish / boost stage", "finish_stage")}
+              {wideBtn("Force release-ready stats", "force_release_ready")}
+              {wideBtn("Clear bugs", "bugs")}
+              {wideBtn("Add 5 bugs", "add_bugs", 5)}
+              {wideBtn("Max points + clean", "max_points")}
+              {wideBtn("Finish research job", "finish_research")}
+              {wideBtn("Restore staff energy", "energy")}
+            </section>
+          </>
+        )}
+
+        {tab === "modes" && (
+          <>
+            <p className="text-xs text-muted">Toggle modes stay on until turned off (CheatMod parity).</p>
+            <div className="space-y-1.5">
+              {wideBtn("Always perfect scores", "perfect_scores", undefined, !!settings.forcePerfectScore)}
+              {wideBtn("Force bad scores", "toggle_bad_score", undefined, !!settings.forceBadScore)}
+              {wideBtn("No Bugs Mode", "no_bugs_mode", undefined, !!settings.noBugsMode)}
+              {wideBtn("Fast Research Mode", "fast_research_mode", undefined, !!settings.fastResearchMode)}
+              {wideBtn("Remove staff vacation need", "no_vacation", undefined, !!settings.noVacationMode)}
+              {wideBtn("Show all hints (Analyst)", "show_all_hints", undefined, !!settings.showAllHints)}
+              {wideBtn("Disable bankruptcy", "no_bankruptcy", undefined, !!settings.disableBankruptcy)}
+            </div>
+            <section>
+              <h3 className="mb-2 mt-3 text-xs font-semibold uppercase tracking-wide text-muted">Information mode</h3>
+              <div className="flex flex-wrap gap-1.5">
+                {rowBtn(settings.infoMode === "classic" ? "Classic ●" : "Classic", "info_classic")}
+                {rowBtn(settings.infoMode === "assisted" ? "Assisted ●" : "Assisted", "info_assisted")}
+                {rowBtn(settings.infoMode === "analyst" ? "Analyst ●" : "Analyst", "info_analyst")}
+              </div>
+            </section>
+          </>
+        )}
+
+        {tab === "modding" && (
+          <>
+            <section>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Set absolute values</h3>
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="min-w-[10rem] flex-1">
+                  <label className="text-[11px] font-semibold uppercase text-muted">Cash</label>
+                  <Input
+                    className="mt-1"
+                    inputMode="numeric"
+                    placeholder={String(Math.floor(cash))}
+                    value={cashField}
+                    onChange={(e) => setCashField(e.target.value.replace(/[^\d]/g, ""))}
+                  />
+                </div>
+                <Button size="sm" onClick={() => cashField && applyCheat("set_cash", Number(cashField))}>
+                  SET
+                </Button>
+              </div>
+              <div className="mt-2 flex flex-wrap items-end gap-2">
+                <div className="min-w-[10rem] flex-1">
+                  <label className="text-[11px] font-semibold uppercase text-muted">Fans</label>
+                  <Input
+                    className="mt-1"
+                    inputMode="numeric"
+                    placeholder={String(Math.floor(fans))}
+                    value={fansField}
+                    onChange={(e) => setFansField(e.target.value.replace(/[^\d]/g, ""))}
+                  />
+                </div>
+                <Button size="sm" onClick={() => fansField && applyCheat("set_fans", Number(fansField))}>
+                  SET
+                </Button>
+              </div>
+            </section>
+            <section>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Move through time</h3>
+              <p className="mb-2 text-xs text-subtle">
+                Experimental — prefer forward jumps for testing.
+              </p>
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="min-w-[8rem]">
+                  <label className="text-[11px] font-semibold uppercase text-muted">Year</label>
+                  <Input
+                    className="mt-1"
+                    inputMode="numeric"
+                    value={yearField}
+                    onChange={(e) => setYearField(e.target.value.replace(/[^\d]/g, ""))}
+                  />
+                </div>
+                <Button size="sm" onClick={() => yearField && applyCheat("set_year", Number(yearField))}>
+                  Move to year
+                </Button>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {rowBtn("+1 week", "advance_time", 1)}
+                {rowBtn("+1 month", "advance_time", 4)}
+                {rowBtn("+12 weeks", "advance_time", 12)}
+                {rowBtn("+1 year", "advance_time", 48)}
+              </div>
+            </section>
+            <section className="rounded-xl bg-elevated p-3 text-xs text-muted">
+              <p className="font-semibold text-fg">Diagnostics</p>
+              <p className="mt-1 tabular">Campaign seed: {seed}</p>
+              <p className="tabular">
+                perfect={String(!!settings.forcePerfectScore)} · noBugs=
+                {String(!!settings.noBugsMode)} · fastRP={String(!!settings.fastResearchMode)}
+              </p>
+              <Button size="sm" variant="secondary" className="mt-2" onClick={() => applyCheat("reveal_seed")}>
+                Reveal seed toast
+              </Button>
+              <p className="mt-3 font-semibold text-fg">Cheat log</p>
+              <ul className="mt-1 max-h-24 space-y-0.5 overflow-y-auto">
+                {(cheatLog ?? []).slice(0, 14).map((c, i) => (
+                  <li key={`${c.week}-${c.action}-${i}`} className="tabular">
+                    W{c.week}: {c.action}
+                    {c.detail ? ` (${c.detail})` : ""}
+                  </li>
+                ))}
+                {!(cheatLog ?? []).length && <li>None yet</li>}
+              </ul>
+            </section>
+          </>
+        )}
+      </div>
+
+      <Button className="mt-5 w-full" variant="secondary" onClick={() => setModal(null)}>
+        Close
+      </Button>
     </Modal>
   );
 }
 
 function EventModal() {
   const modal = useGame((s) => s.modal);
-  const setModal = useGame((s) => s.setModal);
+  const pending = useGame((s) => s.pendingEvent);
+  const resolveEvent = useGame((s) => s.resolveEvent);
+  const open = modal === "event" && !!pending;
+  if (!pending) return null;
   return (
-    <Modal open={modal === "event"} onClose={() => setModal(null)} title="Event">
-      <p className="text-sm text-muted">Open the bell for studio messages.</p>
-      <Button className="mt-3 w-full" onClick={() => setModal(null)}>
-        OK
-      </Button>
+    <Modal
+      open={open}
+      onClose={() => {
+        /* Must choose — closing without choice defaults to first option */
+        resolveEvent(0);
+      }}
+      title={pending.title}
+    >
+      <p className="text-sm leading-relaxed text-fg">{pending.body}</p>
+      <div className="mt-4 flex flex-col gap-2">
+        {(pending.choices ?? [{ label: "Continue", effect: "Dismiss" }]).map((c, i) => (
+          <Button
+            key={`${c.label}-${i}`}
+            className="w-full justify-start text-left"
+            variant={i === 0 ? "primary" : "secondary"}
+            onClick={() => resolveEvent(i)}
+          >
+            <span className="flex w-full flex-col items-start gap-0.5">
+              <span>{c.label}</span>
+              {c.effect ? (
+                <span className="text-[11px] font-medium opacity-80">{c.effect}</span>
+              ) : null}
+            </span>
+          </Button>
+        ))}
+      </div>
     </Modal>
   );
 }
@@ -1527,6 +2866,126 @@ function NotificationsInbox() {
             Clear all
           </Button>
         )}
+      </div>
+    </Modal>
+  );
+}
+
+/* ═══════════════════════════ First office offer (bible §5.4 / §31.1) ═══════════════════════════ */
+
+function OfficeOfferModal() {
+  const modal = useGame((s) => s.modal);
+  const setModal = useGame((s) => s.setModal);
+  const state = useGame();
+  const acceptOfficeOffer = useGame((s) => s.acceptOfficeOffer);
+  const deferOfficeOffer = useGame((s) => s.deferOfficeOffer);
+  const [err, setErr] = useState<string | null>(null);
+
+  const open = modal === "officeOffer";
+  const ov = studioOverview(state);
+  const goal = ov.officeGoal;
+
+  if (!open) return null;
+
+  const moveCost = goal?.moveCost ?? 150_000;
+  const seatsAfter = goal?.seatsAfter ?? 4;
+  const construction = goal?.constructionWeeks ?? 2;
+  const overhead = goal?.weeklyOverheadAfter ?? 2_000;
+  const cashAfter = state.cash - moveCost;
+  const runway = goal?.runway ?? 0;
+  const canAccept = goal?.canMove ?? false;
+
+  return (
+    <Modal
+      open={open}
+      onClose={() => setModal(null)}
+      title="A real office is possible"
+      description="Optional move — stay in the garage as long as you want."
+      wide
+    >
+      <div className="space-y-3 text-sm">
+        <p className="text-muted">
+          You have proven the garage. Moving unlocks hiring capacity (Checkpoint 2) and a higher burn rate.
+          No free staff. Campaign progress is preserved.
+        </p>
+
+        <div className="grid grid-cols-2 gap-2 rounded-xl border border-border bg-elevated p-3 text-xs">
+          <div>
+            <div className="font-bold uppercase tracking-wide text-muted">Now</div>
+            <div className="mt-1 font-semibold text-fg">1 HQ seat · Founder Garage</div>
+            <div className="text-muted">$0 weekly overhead</div>
+          </div>
+          <div>
+            <div className="font-bold uppercase tracking-wide text-muted">After move</div>
+            <div className="mt-1 font-semibold text-fg">
+              {seatsAfter} HQ seats · First Office
+            </div>
+            <div className="text-muted">{formatCash(overhead)}/week overhead</div>
+          </div>
+        </div>
+
+        <ul className="space-y-1 text-xs">
+          <li>
+            Move cost: <strong>{formatCash(moveCost)}</strong>
+          </li>
+          <li>
+            Construction: <strong>{construction} week(s)</strong>
+          </li>
+          <li>
+            Cash after move:{" "}
+            <strong className={cashAfter < 0 ? "text-bad" : ""}>{formatCash(cashAfter)}</strong>
+          </li>
+          <li>
+            Est. runway:{" "}
+            <strong>
+              {runway >= 500
+                ? "stable (ops cash covers burn)"
+                : `~${Math.max(0, Math.floor(runway))} weeks`}
+            </strong>{" "}
+            (need 26)
+          </li>
+        </ul>
+
+        {goal?.proofs && goal.proofs.length > 0 && (
+          <div>
+            <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-muted">
+              Proofs
+            </div>
+            <ul className="space-y-0.5 text-xs">
+              {goal.proofs.map((p) => (
+                <li key={p.id} className={p.met ? "text-good" : "text-muted"}>
+                  {p.met ? "✓" : "○"} {p.label} — {p.detail}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {err && <p className="text-xs font-semibold text-bad">{err}</p>}
+
+        <div className="flex flex-col gap-2 pt-1 sm:flex-row">
+          <Button
+            className="flex-1"
+            disabled={!canAccept}
+            onClick={() => {
+              const msg = acceptOfficeOffer();
+              if (msg) setErr(msg);
+              else setErr(null);
+            }}
+          >
+            Accept move
+          </Button>
+          <Button
+            className="flex-1"
+            variant="secondary"
+            onClick={() => {
+              deferOfficeOffer();
+              setErr(null);
+            }}
+          >
+            Decide later
+          </Button>
+        </div>
       </div>
     </Modal>
   );

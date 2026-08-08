@@ -39,17 +39,21 @@ export function diminishingFanAwareness(
 /** Title lifecycle (not platform lifecycle). No forced 14-week delist. */
 export function titleLifecycleFactor(weeksOnMarket: number): number {
   const week = Math.max(0, weeksOnMarket);
-  if (week <= 1) return 1.3;
-  if (week <= 4) return 1.1;
-  if (week <= 11) return 1.0;
-  return Math.max(0.1, 0.85 * Math.exp(-0.08 * (week - 11)));
+  // Longer shelf: hits stay meaningful for months, not ~14 weeks
+  if (week <= 2) return 1.25;
+  if (week <= 6) return 1.08;
+  if (week <= 14) return 1.0;
+  if (week <= 28) return 0.82;
+  if (week <= 48) return 0.55;
+  return Math.max(0.12, 0.45 * Math.exp(-0.04 * (week - 48)));
 }
 
 export function titleLifecyclePhase(weeksOnMarket: number): string {
   const week = Math.max(0, weeksOnMarket);
-  if (week <= 1) return "launch_window";
-  if (week <= 4) return "growth";
-  if (week <= 11) return "mature_sales";
+  if (week <= 2) return "launch_window";
+  if (week <= 6) return "growth";
+  if (week <= 14) return "mature_sales";
+  if (week <= 40) return "long_tail";
   return "long_tail";
 }
 
@@ -143,7 +147,7 @@ export function calculateWeeklySales(sales: SalesInput): WeeklySalesResult {
 
   const marketPotential =
     Math.max(0, sales.platformInstalledBase) *
-    Math.max(0, sales.marketCapacityRate ?? 0.0025) *
+    Math.max(0, sales.marketCapacityRate ?? 0.0016) *
     clamp(sales.platformLifecycle, 0, 1) *
     clamp(sales.platformAvailability, 0, 1) *
     clamp(sales.audienceDemand, 0, 1) *

@@ -9,10 +9,11 @@ export type ProductionStage = 1 | 2 | 3;
 /** How many genres a project may carry (capacity unlock tier). */
 export type GenreCapacityTier = 1 | 2 | 3 | 4;
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 export const SAVE_KEY_V3 = "studio-empire-save-v3";
 export const SAVE_KEY_V4 = "studio-empire-save-v4";
 export const SAVE_KEY_V5 = "studio-empire-save-v5";
+export const SAVE_KEY_V6 = "studio-empire-save-v6";
 
 export const GENRE_CAPACITY_WEIGHTS: Record<GenreCapacityTier, readonly number[]> = {
   1: [1.0],

@@ -7,6 +7,7 @@ import { initMarket } from "./init";
 import { marketRng } from "./rng";
 import { competitionModifierFor, rivalToCompetitor, type CompetitorRef } from "./competition";
 import { maybeStartRivalProject, progressRivalProject } from "./rivals";
+import { genreWaveMultiplier } from "../content/externalFactors";
 
 export type PlayerSaleContext = {
   games: ReleasedGame[];
@@ -245,7 +246,8 @@ export function tickMarket(opts: {
   });
   market = { ...market, rivals, rivalGamesOnSale: rivalOnSale.filter((g) => g.onSale) };
 
-  // 8 trends + fatigue
+  // 8 trends + fatigue (+ era genre waves as soft external pressure)
+  const wave = genreWaveMultiplier(opts.year);
   const trends = market.trends.map((t) => {
     const rng = marketRng(seed, "trend_tick", cTrend++, t.key, opts.week);
     let momentum = t.momentum;
@@ -280,6 +282,12 @@ export function tickMarket(opts: {
     if (similarOnSale >= 3) saturation += 0.02;
     // mean reversion + small noise
     momentum += (1 - momentum) * 0.02 + rng.jitter(0.01);
+    // Era wave: gently pull genre momentum toward wave target
+    if (t.kind === "genre") {
+      const wm = wave[t.subjectId as GenreId] ?? 1;
+      const target = 1 * wm;
+      momentum += (target - momentum) * 0.04;
+    }
     saturation = Math.max(0, saturation * 0.985 - 0.005);
     momentum = Math.max(0.72, Math.min(1.35, momentum));
     return {
