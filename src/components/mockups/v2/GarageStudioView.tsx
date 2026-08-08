@@ -457,7 +457,7 @@ function captionTitle(h: Hotspot) {
     case "shelf":
       return "Archive · Past releases";
     case "exit":
-      return "Street door · Expansion";
+      return "Street door · Studio growth";
     case "console":
       return "Covered hardware · Flavor";
     default:

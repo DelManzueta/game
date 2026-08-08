@@ -34,8 +34,21 @@ export function ensureProduction(
   campaignSeed: string | number,
   day: number,
 ): ProductionState {
-  if (project.production) return project.production;
-  return createProductionState(project.id, campaignSeed, day);
+  if (project.production) {
+    const p = project.production as ProductionState & { polishRequired?: number; size?: string };
+    if (p.size == null || p.polishRequired == null) {
+      const bal = DEFAULT_PRODUCTION_BALANCE;
+      const size = p.size ?? project.size ?? "small";
+      const sf = bal.sizeSwuFactor[size] ?? 1;
+      return {
+        ...p,
+        size,
+        polishRequired: p.polishRequired ?? Math.round(bal.polishRequiredWork * (0.55 + 0.45 * sf)),
+      };
+    }
+    return project.production;
+  }
+  return createProductionState(project.id, campaignSeed, day, project.size);
 }
 
 export function phaseToDevPhase(prod: ProductionState): GameProject["devPhase"] {
@@ -169,7 +182,8 @@ export function advanceProductionWeek(
   if (prod.activeProgress && prod.phase === PHASE_DEVELOPING) {
     stageProgress = averageProgress(prod);
   } else if (prod.phase === PHASE_POLISH) {
-    stageProgress = prod.polishProgress / DEFAULT_PRODUCTION_BALANCE.polishRequiredWork;
+    const need = prod.polishRequired || DEFAULT_PRODUCTION_BALANCE.polishRequiredWork;
+    stageProgress = prod.polishProgress / need;
   } else if (prod.phase === PHASE_BUG_FIXING) {
     const total = prod.bugs.reduce((s, b) => s + Math.max(b.remainingWork, 0) + (b.remainingWork <= 0 ? 0 : 0), 0);
     const open = prod.bugs.filter((b) => b.remainingWork > 0);
@@ -272,4 +286,54 @@ export function productionOpenSeverity(project: GameProject): number {
 export function isReleaseReady(project: GameProject): boolean {
   if (project.production) return project.production.phase === PHASE_RELEASE_READY;
   return project.devPhase === "READY_TO_RELEASE";
+}
+
+/** Full project pipeline progress 0–1 for smooth UI bars (stages + polish + bugs). */
+export function overallProjectProgress(project: GameProject): number {
+  const prod = project.production;
+  if (!prod) return Math.max(0, Math.min(1, project.stageProgress || 0)) * 0.33;
+  if (prod.phase === PHASE_CANCELLED) return 0;
+  if (prod.phase === PHASE_RELEASE_READY) return 1;
+
+  const stageW = 0.72;
+  const polishW = 0.18;
+  const bugW = 0.1;
+  const completed = prod.completedStages.length;
+  let stagePart = completed / 3;
+  if (prod.phase === PHASE_DEVELOPING && prod.activeProgress) {
+    const keys = Object.keys(prod.activeProgress.plan.requiredSwu);
+    let s = 0;
+    for (const k of keys) {
+      const req = prod.activeProgress.plan.requiredSwu[k] ?? 1;
+      s += Math.min(1, (prod.activeProgress.workDone[k] ?? 0) / req);
+    }
+    const local = keys.length ? s / keys.length : 0;
+    stagePart = (completed + local) / 3;
+  }
+
+  let polishPart = 0;
+  if (
+    prod.phase === PHASE_POLISH ||
+    prod.phase === PHASE_FINALIZE_BUILD ||
+    prod.phase === PHASE_BUG_FIXING
+  ) {
+    const need = prod.polishRequired || DEFAULT_PRODUCTION_BALANCE.polishRequiredWork;
+    polishPart = Math.min(1, need > 0 ? prod.polishProgress / need : 1);
+  }
+
+  let bugPart = 0;
+  if (prod.phase === PHASE_BUG_FIXING) {
+    const open = prod.bugs.filter((b) => b.remainingWork > 0);
+    if (!open.length) bugPart = 1;
+    else {
+      const rem = open.reduce((s, b) => s + b.remainingWork, 0);
+      const total = open.reduce(
+        (s, b) => s + b.severity * DEFAULT_PRODUCTION_BALANCE.bugFixWorkPerSeverity,
+        0,
+      );
+      bugPart = total > 0 ? Math.max(0, 1 - rem / total) : 0;
+    }
+  }
+
+  return Math.max(0, Math.min(1, stagePart * stageW + polishPart * polishW + bugPart * bugW));
 }

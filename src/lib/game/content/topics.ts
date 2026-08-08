@@ -22,6 +22,7 @@ function t(
   name: string,
   homeGenre: GenreId,
   ranks: [GenreId, GenreId, GenreId, GenreId, GenreId, GenreId],
+  /** Research provenance only — never player-facing pack framing. All topics are core. */
   source: "vanilla" | "expansion",
   startUnlocked = false,
   researchCost = 40,

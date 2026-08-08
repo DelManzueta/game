@@ -21,9 +21,9 @@ Last updated: 2026-08-07 · Workspace TanStack build
 | 3 Player understanding | Partial | Fit % shown; no Classic/Assisted/Analyst modes; limited explainers |
 | 4 Progression consolidation | Partial | Office ladder + research gates; no hiring/engines/publishing board |
 | 5 Living industry | Missing | No rivals/events engine |
-| 6 Post-release | Partial | Weekly sales + dormancy; no DLC/patches/ports |
+| 6 Post-release | Partial | Weekly sales + dormancy; no post-launch content/patches/ports |
 | 7 Major studio | Missing | No AAA/multi-team |
-| 8 Hardware empire | Missing | Analyzed from Expansion Pack; not implemented |
+| 8 Hardware empire | Missing | Analyzed from GDT research; not implemented (core roadmap) |
 | 9 Expansion platform | Missing | Content still hard-coded modules |
 
 ## System matrix

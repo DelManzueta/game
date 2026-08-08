@@ -19,7 +19,7 @@ export type GenreWave = {
 export const GENRE_WAVES: GenreWave[] = [
   {
     id: "arcade_boom",
-    yearStart: 1982,
+    yearStart: 1979,
     yearEnd: 1987,
     label: "Arcade & living-room action boom",
     hot: { action: 1.18, casual: 1.1 },

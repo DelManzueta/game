@@ -20,11 +20,19 @@ import {
 import { isGarageTopic } from "@/lib/game/content/garageSlice";
 import { ENGINE_COMPONENTS } from "@/lib/game/content/engines";
 import {
+  SELECTABLE_MODULES,
+  PURPOSE_LABEL,
+  ARCH_LABEL,
+  SUPPORT_STATE_LABEL,
+  type EnginePurpose,
+  type ArchitectureStyle,
+} from "@/lib/game/engine";
+import {
   MENU_ROOM_ART,
   roomArtForOffice as roomArtDefForOffice,
   screenRoomArt,
 } from "@/lib/game/content/roomArt";
-import { platformThumb } from "@/lib/game/content/platformArt";
+import { platformArt, platformThumb } from "@/lib/game/content/platformArt";
 import { genreIconSrc } from "@/lib/game/content/genreArt";
 import { evaluateCombo, formatCash, formatFans, generateGameTitle } from "@/lib/game/simulation";
 import { availableSizes, hasSave, useGame } from "@/lib/game/store";
@@ -34,11 +42,19 @@ import {
   studioOverview,
   stageFieldsForProject,
   explainSales,
+  calendarHudLabel,
 } from "@/lib/game/viewModels";
-import { disciplineProgress } from "@/lib/game/production/bridge";
+import { disciplineProgress, overallProjectProgress } from "@/lib/game/production/bridge";
+import {
+  PILLAR_LABELS,
+  TECH_CATALOG,
+  type DifficultyPreset,
+  type ProjectPillar,
+} from "@/lib/game/research";
 import type { AudienceId, DevField, GameSize, GenreId, ScreenId } from "@/lib/game/types";
 import { Badge, Button, Input, Modal, SearchField, cnJoin } from "@/components/ui/primitives";
 import { GarageLoopFlowchart, ScoringPipelineFlow } from "@/components/game/LoopFlowchart";
+import { MarketScreen } from "@/components/game/MarketScreen";
 import {
   FlaskConical,
   Gamepad2,
@@ -54,7 +70,8 @@ import {
   Bug,
   Cpu,
   Palette,
-  Beaker,
+  CalendarDays,
+  Diamond,
 } from "lucide-react";
 
 const BAR_COLORS = ["#e86a4a", "#3aaa6a", "#3aa0d8", "#e8941a", "#9b6ad8", "#4ecb8a"];
@@ -68,7 +85,8 @@ export function GameApp() {
 
   useEffect(() => {
     if (phase !== "playing" || speed === 0) return;
-    const ms = speed === 1 ? 900 : speed === 2 ? 450 : 220;
+    // Tuned so a small (~8 in-game weeks) lands near ~1–1.5 min at 1× with stage pauses
+    const ms = speed === 1 ? 1100 : speed === 2 ? 520 : 260;
     const id = window.setInterval(() => useGame.getState().tick(), ms);
     return () => window.clearInterval(id);
   }, [phase, speed, tick]);
@@ -100,6 +118,7 @@ function MainMenu() {
   const deleteSave = useGame((s) => s.deleteSave);
   const [name, setName] = useState("Foundry Games");
   const [pirate, setPirate] = useState(false);
+  const [difficulty, setDifficulty] = useState<DifficultyPreset>("standard");
   const [has, setHas] = useState(false);
   const [err, setErr] = useState("");
 
@@ -147,6 +166,37 @@ function MainMenu() {
             />
             Pirate mode (harder sales)
           </label>
+          <div>
+            <label className="mb-1.5 block text-center text-xs font-bold uppercase tracking-wide text-muted">
+              Difficulty
+            </label>
+            <div className="grid grid-cols-3 gap-1.5">
+              {(
+                [
+                  ["creative", "Creative"],
+                  ["standard", "Standard"],
+                  ["executive", "Executive"],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={cnJoin(
+                    "rounded-lg border px-2 py-2 text-xs font-bold",
+                    difficulty === id
+                      ? "border-accent bg-accent/20 text-white"
+                      : "border-border text-muted hover:border-accent/50",
+                  )}
+                  onClick={() => setDifficulty(id)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1 text-center text-[10px] text-muted">
+              Adjusts cash, competition, cert strictness — not topic/genre meaning.
+            </p>
+          </div>
           {err && <p className="text-center text-sm text-bad">{err}</p>}
           <Button
             className="w-full"
@@ -156,7 +206,7 @@ function MainMenu() {
                 setErr("Name your studio.");
                 return;
               }
-              newGame(name, pirate);
+              newGame(name, pirate, difficulty);
             }}
           >
             <Sparkles className="h-4 w-4" aria-hidden="true" />
@@ -279,9 +329,6 @@ function GdtTopChrome({ forcePause }: { forcePause: boolean }) {
       : phase.title
     : "";
 
-  useEffect(() => {
-    if (forcePause && speed !== 0) setSpeed(0);
-  }, [forcePause, speed, setSpeed]);
 
   return (
     <header className="sticky top-0 z-30">
@@ -346,7 +393,7 @@ function GdtTopChrome({ forcePause }: { forcePause: boolean }) {
           <div className="hud-chip px-2.5 py-1.5 text-right text-[11px] leading-snug sm:text-xs">
             <div className="font-semibold tabular text-fans">{formatFans(fans)} Fans</div>
             <div className="tabular text-muted">
-              Y{year} M{month} W{(week % 4) + 1}
+              {calendarHudLabel({ year, month, week })}
             </div>
             <div className="font-bold tabular text-cash">Cash: {formatCash(cash)}</div>
           </div>
@@ -362,7 +409,6 @@ function GdtTopChrome({ forcePause }: { forcePause: boolean }) {
               <button
                 key={s}
                 type="button"
-                disabled={forcePause && s !== 0}
                 title={label}
                 aria-label={label}
                 onClick={() => setSpeed(s as 0 | 1 | 2 | 4)}
@@ -371,7 +417,6 @@ function GdtTopChrome({ forcePause }: { forcePause: boolean }) {
                   speed === s
                     ? "border-accent bg-accent text-accent-fg"
                     : "border-border bg-paper text-fg hover:border-border-strong",
-                  forcePause && s !== 0 && "opacity-35",
                 )}
               >
                 <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -398,7 +443,7 @@ function GdtTopChrome({ forcePause }: { forcePause: boolean }) {
       </div>
       {forcePause && project && (
         <div className="mx-auto mt-1 max-w-xl px-3 text-center text-[11px] font-semibold text-accent">
-          Time paused — {phase.hint}
+          Desk decision — {phase.hint}
         </div>
       )}
     </header>
@@ -444,6 +489,7 @@ function BottomDock() {
     { id: "studio", label: "Garage", icon: Home },
     { id: "develop", label: "Desk", icon: Gamepad2 },
     { id: "games", label: "Games", icon: History },
+    { id: "market", label: "Market", icon: CalendarDays },
     { id: "research", label: "Research", icon: FlaskConical },
     { id: "settings", label: "More", icon: Settings },
   ];
@@ -451,12 +497,7 @@ function BottomDock() {
     <nav className="fixed bottom-0 inset-x-0 z-30 border-t-2 border-border-strong bg-paper/95 shadow-[0_-8px_24px_rgba(60,40,20,0.12)] backdrop-blur-md">
       <div className="mx-auto flex max-w-lg justify-around px-1 py-1.5 pb-[max(0.4rem,env(safe-area-inset-bottom))]">
         {items.map(({ id, label, icon: Icon }) => {
-          const lit =
-            id === "studio"
-              ? screen === "studio"
-              : id === "develop"
-                ? screen === "develop"
-                : screen === id;
+          const lit = screen === id;
           return (
             <button
               key={id}
@@ -621,6 +662,137 @@ function GarageRoomView() {
   );
 }
 
+
+function TechReadinessPanel({
+  project,
+  onOptimize,
+  onEvaluate,
+}: {
+  project: NonNullable<ReturnType<typeof useGame.getState>["currentProject"]>;
+  onOptimize: (taskId: string) => void;
+  onEvaluate: () => void;
+}) {
+  const tech = project.techSpec;
+  const readiness = tech?.readiness;
+  const profile = tech?.profile;
+  if (!tech && !readiness) {
+    return (
+      <div className="mt-3 rounded-xl border border-border bg-panel/80 p-3 text-center text-xs text-muted">
+        Tech targets set at project start. Open Pre-Release or Evaluate to refresh gates.
+        <Button className="mt-2 w-full" size="sm" variant="secondary" onClick={onEvaluate}>
+          Evaluate tech readiness
+        </Button>
+      </div>
+    );
+  }
+  const rec = readiness?.recommendation ?? "hold";
+  const recTone =
+    rec === "ship" ? "good" : rec === "ship_with_risk" ? "warn" : rec === "blocked" ? "bad" : "neutral";
+  const relevant = profile?.axes.filter((a) => a.relevant).slice(0, 6) ?? [];
+  const openTasks = (tech?.tasks ?? []).filter((t) => t.state !== "done" && t.state !== "cancelled").slice(0, 4);
+  const topBugs = (tech?.classifiedBugs ?? []).filter((b) => !b.fixed).slice(0, 4);
+
+  return (
+    <div className="mt-3 space-y-2 rounded-xl border border-border bg-panel/90 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-xs font-bold uppercase tracking-wide text-subtle">Release tech gates</h3>
+        {readiness && <Badge tone={recTone === "neutral" ? "accent" : recTone}>{rec.replace(/_/g, " ")}</Badge>}
+      </div>
+      {readiness && (
+        <p className="text-[11px] text-muted">{readiness.recommendationReason}</p>
+      )}
+      {profile && (
+        <div>
+          <div className="mb-1 flex justify-between text-[10px] font-bold uppercase text-subtle">
+            <span>Runtime health · {profile.targetFps} FPS target</span>
+            <span className="tabular">{Math.round(profile.overallHealth * 100)}%</span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-black/20">
+            <div
+              className="h-full rounded-full bg-accent transition-all"
+              style={{ width: `${Math.round(profile.overallHealth * 100)}%` }}
+            />
+          </div>
+          <p className="mt-1 text-[10px] text-muted">
+            Weakest: {profile.weakestCriticalAxis ?? "—"} · confidence {Math.round(profile.confidence * 100)}%
+          </p>
+          <ul className="mt-2 grid grid-cols-2 gap-1">
+            {relevant.map((a) => (
+              <li key={a.axis} className="rounded-md border border-border/60 bg-black/10 px-1.5 py-1 text-[10px]">
+                <span className="font-semibold uppercase">{a.axis}</span>
+                <span className="float-right tabular text-muted">{Math.round(a.utilization * 100)}%</span>
+                <div className="mt-0.5 h-1 overflow-hidden rounded-full bg-black/20">
+                  <div
+                    className="h-full rounded-full"
+                    style={{
+                      width: `${Math.min(100, Math.round(a.utilization * 100))}%`,
+                      background:
+                        a.band === "critical" || a.band === "over"
+                          ? "var(--color-bad, #e55)"
+                          : a.band === "tight"
+                            ? "var(--color-warn, #da4)"
+                            : "var(--color-good, #4a8)",
+                    }}
+                  />
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {topBugs.length > 0 && (
+        <div>
+          <p className="text-[10px] font-bold uppercase text-subtle">Priority defects</p>
+          <ul className="mt-1 space-y-0.5 text-[11px] text-muted">
+            {topBugs.map((b) => (
+              <li key={b.bugId}>
+                <span className="font-semibold text-foreground">{b.severity}</span> · {b.category}
+                {b.certificationBlocker ? " · cert block" : ""}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {openTasks.length > 0 && (
+        <div>
+          <p className="text-[10px] font-bold uppercase text-subtle">Optimization tasks</p>
+          <ul className="mt-1 space-y-1">
+            {openTasks.map((t) => (
+              <li key={t.taskId} className="flex items-center justify-between gap-2 text-[11px]">
+                <span className="min-w-0 truncate">
+                  {t.label}
+                  <span className="text-muted">
+                    {" "}
+                    · {Math.round((t.completedWork / Math.max(1, t.estimatedWork)) * 100)}%
+                  </span>
+                </span>
+                <Button size="sm" variant="secondary" onClick={() => onOptimize(t.taskId)}>
+                  Work
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {readiness && readiness.blockers.length > 0 && (
+        <ul className="text-[11px] text-bad">
+          {readiness.blockers.slice(0, 3).map((b) => (
+            <li key={b}>• {b}</li>
+          ))}
+        </ul>
+      )}
+      {readiness?.certification?.map((c) => (
+        <p key={c.platformId} className="text-[10px] text-muted">
+          Cert {c.platformId}: <span className="font-semibold">{c.result.replace(/_/g, " ")}</span>
+        </p>
+      ))}
+      <Button className="w-full" size="sm" variant="ghost" onClick={onEvaluate}>
+        Refresh tech evaluation
+      </Button>
+    </div>
+  );
+}
+
 /* ═══════════════════════════ Desk overlay (stage + polish) ═══════════════════════════ */
 
 function DevelopOverlay() {
@@ -672,6 +844,8 @@ function DevelopPanel() {
   const confirmStage = useGame((s) => s.confirmStage);
   const enterPreRelease = useGame((s) => s.enterPreRelease);
   const workPolishWeek = useGame((s) => s.workPolishWeek);
+  const runOptimizationTask = useGame((s) => s.runOptimizationTask);
+  const evaluateTechReadiness = useGame((s) => s.evaluateTechReadiness);
   const setLaunchPrice = useGame((s) => s.setLaunchPrice);
   const setProjectTitle = useGame((s) => s.setProjectTitle);
   const releaseGame = useGame((s) => s.releaseGame);
@@ -755,8 +929,22 @@ function DevelopPanel() {
         <>
           <div className="mt-4 text-center">
             <div className="text-3xl font-bold tabular text-accent">{pct}%</div>
-            <div className="mx-auto mt-2 h-2 max-w-xs overflow-hidden rounded-full bg-panel">
-              <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${Math.max(pct > 0 ? 3 : 0, pct)}%` }} />
+            <p className="text-[10px] font-bold uppercase tracking-wide text-muted">Stage {stageNum} progress</p>
+            <div className="mx-auto mt-2 h-2.5 max-w-xs overflow-hidden rounded-full bg-panel ring-1 ring-border">
+              <div className="h-full rounded-full bg-accent transition-all duration-500" style={{ width: `${Math.max(pct > 0 ? 3 : 0, pct)}%` }} />
+            </div>
+            <div className="mx-auto mt-3 max-w-xs">
+              <div className="mb-0.5 flex justify-between text-[10px] font-bold uppercase tracking-wide text-subtle">
+                <span>Full project</span>
+                <span className="tabular">{Math.round(overallProjectProgress(project) * 100)}%</span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-panel">
+                <div
+                  className="h-full rounded-full bg-good transition-all duration-500"
+                  style={{ width: `${Math.round(overallProjectProgress(project) * 100)}%` }}
+                />
+              </div>
+              <p className="mt-1 text-[10px] text-muted">{project.weeksDev} weeks in development · Y-based calendar</p>
             </div>
           </div>
           {discProg.length > 0 && (
@@ -794,11 +982,33 @@ function DevelopPanel() {
 
       {isPolish && (
         <>
-          <p className="mt-3 text-center text-sm text-muted">Fix bugs and polish before Pre-Release.</p>
-          <div className="mt-3 h-2 overflow-hidden rounded-full bg-panel">
-            <div className="h-full rounded-full bg-good transition-all" style={{ width: `${Math.round((project.stageProgress || 0) * 100)}%` }} />
+          <p className="mt-3 text-center text-sm text-muted">
+            Polish and clear bugs. Open bugs stay on the build and clear faster after Bug Squashing training.
+          </p>
+          <div className="mt-3">
+            <div className="mb-0.5 flex justify-between text-[10px] font-bold uppercase text-subtle">
+              <span>Polish / bug fix</span>
+              <span className="tabular">{Math.round((project.stageProgress || 0) * 100)}%</span>
+            </div>
+            <div className="h-2.5 overflow-hidden rounded-full bg-panel ring-1 ring-border">
+              <div className="h-full rounded-full bg-good transition-all duration-500" style={{ width: `${Math.round((project.stageProgress || 0) * 100)}%` }} />
+            </div>
           </div>
-          <p className="mt-1 text-center text-sm font-bold tabular text-bugs">{project.bugs} open bugs</p>
+          <div className="mx-auto mt-2 max-w-xs">
+            <div className="mb-0.5 flex justify-between text-[10px] font-bold uppercase text-subtle">
+              <span>Full project</span>
+              <span className="tabular">{Math.round(overallProjectProgress(project) * 100)}%</span>
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-panel">
+              <div className="h-full rounded-full bg-accent/80 transition-all" style={{ width: `${Math.round(overallProjectProgress(project) * 100)}%` }} />
+            </div>
+          </div>
+          <p className="mt-2 text-center text-sm font-bold tabular text-bugs">{project.bugs} open bugs · {project.weeksDev}w dev</p>
+          <TechReadinessPanel
+            project={project}
+            onOptimize={(id) => setMsg(runOptimizationTask(id) ?? "")}
+            onEvaluate={() => setMsg(evaluateTechReadiness() ?? "")}
+          />
           <div className="mt-4 flex flex-col gap-2">
             <Button size="lg" onClick={() => setMsg(workPolishWeek() ?? "")}>
               Work on bugs (1 week)
@@ -813,7 +1023,12 @@ function DevelopPanel() {
 
       {isRelease && (
         <>
-          <p className="mt-3 text-center text-sm text-muted">Reviews appear only after Release. Price does not change scores.</p>
+          <p className="mt-3 text-center text-sm text-muted">Reviews appear only after Release. Price does not change scores. Tech health can still shift reviews.</p>
+          <TechReadinessPanel
+            project={project}
+            onOptimize={(id) => setMsg(runOptimizationTask(id) ?? "")}
+            onEvaluate={() => setMsg(evaluateTechReadiness() ?? "")}
+          />
           <div className="mt-3 space-y-3">
             <div>
               <label className="mb-1 block text-xs font-bold uppercase text-subtle">Final title</label>
@@ -1019,9 +1234,22 @@ function ResearchScreen() {
   const researched = useGame((s) => s.researched);
   const researchPoints = useGame((s) => s.researchPoints);
   const active = useGame((s) => s.activeResearch);
+  const pipeline = useGame((s) => s.researchPipeline);
+  const year = useGame((s) => s.year);
   const startResearch = useGame((s) => s.startResearch);
   const [msg, setMsg] = useState("");
+  const [tab, setTab] = useState<"studio" | "pipeline">("pipeline");
   const available = RESEARCH.filter((r) => !researched.includes(r.id)).slice(0, 24);
+  const pipeRows = TECH_CATALOG.filter((t) => year >= t.earliestYear - 2).map((def) => {
+    const st = pipeline?.knowledge[def.id];
+    return {
+      def,
+      state: st?.state ?? (year >= def.normalYear ? "researchable" : "observed"),
+      maturity: st?.maturity ?? 0,
+      uses: st?.commercialUses ?? 0,
+    };
+  });
+
   return (
     <ScreenBackdrop screen="research">
       <h2 className="text-center text-2xl font-bold text-white drop-shadow">Research</h2>
@@ -1029,59 +1257,503 @@ function ResearchScreen() {
       <p className="mt-2 text-center text-sm text-white/80">
         {Math.floor(researchPoints)} RP{active ? ` · ${active.name}` : ""}
       </p>
+      <p className="mx-auto mt-1 max-w-md text-center text-[11px] text-white/60">
+        Research is a pipeline — observe, research, prototype, integrate, ship, mature. Not a shop.
+      </p>
+      <div className="mx-auto mt-3 flex max-w-sm gap-1">
+        <Button size="sm" variant={tab === "pipeline" ? "primary" : "secondary"} className="flex-1" onClick={() => setTab("pipeline")}>
+          Tech pipeline
+        </Button>
+        <Button size="sm" variant={tab === "studio" ? "primary" : "secondary"} className="flex-1" onClick={() => setTab("studio")}>
+          Studio unlocks
+        </Button>
+      </div>
       {msg && <p className="mt-2 text-center text-sm text-amber-200">{msg}</p>}
-      <ul className="mt-4 space-y-2">
-        {available.map((r) => (
-          <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/15 bg-black/55 px-3 py-3 backdrop-blur-sm">
-            <div>
-              <div className="font-semibold text-white">{r.name}</div>
-              <div className="text-xs text-white/65">
-                {r.category} · {r.cost} RP
+      {tab === "pipeline" ? (
+        <ul className="mt-4 space-y-2">
+          {pipeRows.slice(0, 28).map(({ def, state, maturity, uses }) => {
+            const ready = researched.includes(def.id) || ["production_ready", "first_commercial", "mature", "legacy"].includes(state);
+            const canStart =
+              !ready &&
+              !active &&
+              (state === "researchable" || state === "observed" || state === "unknown");
+            return (
+              <li
+                key={def.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/15 bg-black/55 px-3 py-3 backdrop-blur-sm"
+              >
+                <div className="min-w-0">
+                  <div className="font-semibold text-white">{def.name}</div>
+                  <div className="text-xs text-white/65">
+                    {def.category.replace(/_/g, " ")} · {def.researchRp} RP
+                    {def.isDesignOnly ? " · design" : ""} ·{" "}
+                    <span className="text-cyan-200/90">{String(state).replace(/_/g, " ")}</span>
+                    {uses > 0 ? ` · ${uses} ships` : ""}
+                    {maturity > 0 ? ` · mat ${Math.round(maturity * 100)}%` : ""}
+                  </div>
+                </div>
+                {ready ? (
+                  <Badge tone="good">Ready</Badge>
+                ) : (
+                  <Button
+                    size="sm"
+                    disabled={!canStart}
+                    onClick={() => setMsg(startResearch(def.id) ?? "Started.")}
+                  >
+                    Research
+                  </Button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <ul className="mt-4 space-y-2">
+          {available.map((r) => (
+            <li
+              key={r.id}
+              className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/15 bg-black/55 px-3 py-3 backdrop-blur-sm"
+            >
+              <div>
+                <div className="font-semibold text-white">{r.name}</div>
+                <div className="text-xs text-white/65">
+                  {r.category} · {r.cost} RP
+                </div>
               </div>
-            </div>
-            <Button size="sm" disabled={!!active} onClick={() => setMsg(startResearch(r.id) ?? "Started.")}>
-              Research
-            </Button>
-          </li>
-        ))}
-      </ul>
+              <Button size="sm" disabled={!!active} onClick={() => setMsg(startResearch(r.id) ?? "Started.")}>
+                Research
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
     </ScreenBackdrop>
   );
 }
 
 function StaffScreen() {
   const staff = useGame((s) => s.staff);
+  const office = useGame((s) => s.office);
+  const unlocks = useGame((s) => s.unlocks);
+  const cash = useGame((s) => s.cash);
+  const rp = useGame((s) => s.researchPoints);
+  const hireStaff = useGame((s) => s.hireStaff);
+  const fireStaff = useGame((s) => s.fireStaff);
+  const refreshCandidates = useGame((s) => s.refreshCandidates);
+  const getCandidates = useGame((s) => s.getCandidates);
+  const trainStaff = useGame((s) => s.trainStaff);
+  const getTrainingCourses = useGame((s) => s.getTrainingCourses);
+  const [cands, setCands] = useState(() => getCandidates());
+  const [msg, setMsg] = useState("");
+  const [trainFor, setTrainFor] = useState<string | null>(null);
+  const hiringOpen = unlocks.hiring === "owned" || office >= 2;
+  const trainingOpen = unlocks.training === "owned" || office >= 2;
+  const courses = getTrainingCourses();
+
   return (
     <ScreenBackdrop screen="staff">
       <h2 className="text-center text-2xl font-bold text-white drop-shadow">People</h2>
-      <p className="mt-2 text-center text-sm text-white/75">Garage phase is founder-led.</p>
+      <p className="mt-2 text-center text-sm text-white/75">
+        {hiringOpen ? "Hire up to your HQ seats · signing cap $2M" : "Garage is founder-led until First Office."}
+      </p>
+      {msg && <p className="mt-2 text-center text-sm text-amber-200">{msg}</p>}
+
       <ul className="mt-4 space-y-2">
         {staff.map((m) => (
           <li key={m.id} className="rounded-xl border border-white/15 bg-black/55 px-4 py-3 backdrop-blur-sm">
-            <div className="font-bold text-white">{m.name}</div>
-            <div className="text-xs text-white/65">
-              Lv {m.level} · Design {m.design} · Tech {m.tech}
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <div className="font-bold text-white">
+                  {m.name}
+                  {m.id === "founder" ? " (You)" : ""}
+                </div>
+                <div className="text-xs text-white/65">
+                  Lv {m.level} · D{m.design} · T{m.tech} · S{m.speed}
+                  {m.specialization ? ` · ${m.specialization}` : ""}
+                  {(m.bugFixBonus ?? 0) > 0 ? ` · QA +${Math.round((m.bugFixBonus ?? 0) * 100)}%` : ""}
+                </div>
+                {m.training && (
+                  <div className="mt-1 text-xs text-cyan-200">
+                    Training… {m.training.weeksLeft}w left / {m.training.totalWeeks}w
+                    <div className="mt-0.5 h-1.5 max-w-[12rem] overflow-hidden rounded-full bg-white/10">
+                      <div
+                        className="h-full rounded-full bg-cyan-400 transition-all"
+                        style={{
+                          width: `${Math.round(((m.training.totalWeeks - m.training.weeksLeft) / m.training.totalWeeks) * 100)}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {trainingOpen && !m.training && m.id !== "founder" && (
+                  <Button size="sm" variant="secondary" onClick={() => setTrainFor(trainFor === m.id ? null : m.id)}>
+                    Train
+                  </Button>
+                )}
+                {trainingOpen && !m.training && m.id === "founder" && (
+                  <Button size="sm" variant="secondary" onClick={() => setTrainFor(trainFor === m.id ? null : m.id)}>
+                    Self-study
+                  </Button>
+                )}
+                {m.id !== "founder" && hiringOpen && (
+                  <Button size="sm" variant="danger" onClick={() => { fireStaff(m.id); setMsg(`Let go ${m.name}.`); }}>
+                    Fire
+                  </Button>
+                )}
+              </div>
             </div>
+            {trainFor === m.id && (
+              <div className="mt-2 space-y-1.5 border-t border-white/10 pt-2">
+                {courses.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    className="flex w-full items-center justify-between gap-2 rounded-lg border border-white/10 bg-black/40 px-2 py-1.5 text-left text-xs text-white/90 hover:border-cyan-400/40"
+                    onClick={() => {
+                      const err = trainStaff(m.id, c.id);
+                      setMsg(err ?? `${m.name} → ${c.name}`);
+                      if (!err) setTrainFor(null);
+                    }}
+                  >
+                    <span>
+                      <span className="font-bold">{c.name}</span>
+                      <span className="block text-white/55">{c.description}</span>
+                    </span>
+                    <span className="shrink-0 tabular text-white/70">
+                      {c.weeks}w · {formatCash(c.cashCost)} · {c.rpCost} RP
+                    </span>
+                  </button>
+                ))}
+                <p className="text-[10px] text-white/50">
+                  Cash {formatCash(cash)} · RP {Math.floor(rp)}
+                </p>
+              </div>
+            )}
           </li>
         ))}
       </ul>
+
+      {hiringOpen && (
+        <div className="mt-6">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h3 className="text-sm font-bold uppercase tracking-wide text-white/80">Candidates</h3>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                setCands(refreshCandidates());
+                setMsg("Refreshed candidate pool.");
+              }}
+            >
+              Refresh
+            </Button>
+          </div>
+          <ul className="space-y-2">
+            {cands.map((c) => (
+              <li
+                key={c.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/15 bg-black/55 px-3 py-3 backdrop-blur-sm"
+              >
+                <div className="min-w-0">
+                  <div className="font-semibold text-white">
+                    {c.name}
+                    {c.level >= 5 ? (
+                      <span className="ml-1 rounded bg-amber-400/20 px-1.5 py-0.5 text-[10px] font-bold text-amber-200">
+                        STAR
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="text-xs text-white/65">
+                    Lv {c.level} · D{c.design} T{c.tech} S{c.speed}
+                    {c.specialization ? ` · ${c.specialization}` : ""}
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    const err = hireStaff(c);
+                    setMsg(err ?? `Hired ${c.name}`);
+                    if (!err) setCands(refreshCandidates());
+                  }}
+                >
+                  Hire {formatCash(Math.min(c.salary, 2_000_000))}
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </ScreenBackdrop>
   );
 }
 
 function EnginesScreen() {
   const engines = useGame((s) => s.engines);
+  const workshop = useGame((s) => s.engineWorkshop);
+  const startEngineVersion = useGame((s) => s.startEngineVersion);
+  const year = useGame((s) => s.year);
+  const cash = useGame((s) => s.cash);
+  const unlockedPlatforms = useGame((s) => s.unlockedPlatforms);
+  const [msg, setMsg] = useState("");
+  const [name, setName] = useState("Forge");
+  const [purpose, setPurpose] = useState<EnginePurpose>("fast_2d");
+  const [architecture, setArchitecture] = useState<ArchitectureStyle>("modular");
+  const [selected, setSelected] = useState<string[]>(["core_loop", "sprite_2d"]);
+  const build = workshop?.activeBuild ?? null;
+  const versions = workshop?.versions ?? [];
+  const families = workshop?.families ?? [];
+
+  const modules = SELECTABLE_MODULES.filter((m) => !m.minYear || m.minYear <= year + 1);
+
+  const toggle = (id: string) => {
+    setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const start = () => {
+    const err = startEngineVersion({
+      name,
+      purpose,
+      architecture,
+      lifespan: "multi_project",
+      moduleIds: selected,
+      targetPlatforms: unlockedPlatforms.slice(0, 3),
+      targetSizes: ["small", "medium"],
+    });
+    setMsg(err ?? "Engine project started — time advances work.");
+  };
+
   return (
     <ScreenBackdrop screen="engines">
-      <h2 className="text-center text-2xl font-bold text-white drop-shadow">Engines</h2>
-      <ul className="mt-4 space-y-2">
-        {engines.map((e) => (
-          <li key={e.id} className="rounded-xl border border-white/15 bg-black/55 px-4 py-3 backdrop-blur-sm">
-            <div className="font-bold text-white">{e.name}</div>
-            <div className="text-xs text-white/65">{e.features.join(", ") || "Core only"}</div>
-          </li>
-        ))}
-      </ul>
+      <h2 className="text-center text-2xl font-bold text-white drop-shadow">Engine Workshop</h2>
+      <p className="mx-auto mt-1 max-w-lg text-center text-xs text-white/60">
+        Engines create capability and efficiency — your team turns that into games. Released versions
+        are immutable; each project freezes a snapshot.
+      </p>
+      {msg && <p className="mt-2 text-center text-sm text-amber-200">{msg}</p>}
+
+      {build && (
+        <div className="mt-4 rounded-xl border border-cyan-400/30 bg-cyan-950/40 px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div className="font-bold text-cyan-100">{build.name}</div>
+              <div className="text-xs text-cyan-100/70">
+                Phase: {build.phase.replace(/_/g, " ")} · Week {build.weeksElapsed}/~
+                {build.weeksEstimate}
+              </div>
+            </div>
+            <Badge tone="accent">{Math.round(build.overallProgress * 100)}%</Badge>
+          </div>
+          <div className="mt-2 h-2 overflow-hidden rounded-full bg-black/40">
+            <div
+              className="h-full rounded-full bg-cyan-400 transition-all"
+              style={{ width: `${Math.round(build.overallProgress * 100)}%` }}
+            />
+          </div>
+          {build.conflicts.length > 0 && (
+            <p className="mt-2 text-xs text-amber-200/90">
+              Soft conflicts (extra work): {build.conflicts.join("; ")}
+            </p>
+          )}
+          <p className="mt-1 text-xs text-white/55">
+            Debt {Math.round(build.technicalDebt)} · Capacity {Math.round(build.weeklyCapacity)}/wk ·
+            Work {Math.round(build.completedWork)}/{build.requiredWork}
+          </p>
+        </div>
+      )}
+
+      <section className="mt-4">
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-white/70">Released versions</h3>
+        <ul className="mt-2 space-y-2">
+          {(versions.length ? versions : engines.map((e) => ({
+              versionId: e.id,
+              label: e.name,
+              status: "stable" as const,
+              features: e.features,
+              technicalDebt: 0,
+              immutable: true,
+              modules: [] as { moduleId: string }[],
+            }))).map((v) => (
+            <li
+              key={v.versionId}
+              className="rounded-xl border border-white/15 bg-black/55 px-4 py-3 backdrop-blur-sm"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="font-bold text-white">{v.label}</div>
+                <Badge tone="good">
+                  {SUPPORT_STATE_LABEL[v.status as keyof typeof SUPPORT_STATE_LABEL] ?? v.status}
+                  {v.immutable ? " · locked" : ""}
+                </Badge>
+              </div>
+              <div className="mt-1 text-xs text-white/65">
+                {(v.features ?? v.modules?.map((m) => m.moduleId) ?? []).slice(0, 8).join(" · ") ||
+                  "Core runtime"}
+              </div>
+              {"technicalDebt" in v && (
+                <div className="mt-1 text-[11px] text-white/45">
+                  Tech debt {Math.round(Number(v.technicalDebt) || 0)}
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      {families.length > 0 && (
+        <section className="mt-4">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-white/70">Families</h3>
+          <ul className="mt-2 flex flex-wrap gap-2">
+            {families.map((f) => (
+              <li
+                key={f.familyId}
+                className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-white/80"
+              >
+                <span className="font-semibold text-white">{f.name}</span>
+                <span className="text-white/50">
+                  {" "}
+                  · {PURPOSE_LABEL[f.purpose]} · {ARCH_LABEL[f.architecture]}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {!build && (
+        <section className="mt-5 overflow-hidden rounded-[1.5rem] border border-[var(--glass-border)] bg-[rgba(10,40,52,0.72)] p-4 shadow-[var(--glass-glow)] backdrop-blur-md sm:p-5">
+          <div className="flex items-start justify-between gap-2">
+            <h3 className="text-xl font-black tracking-tight text-white sm:text-2xl">
+              Create a new Engine
+            </h3>
+          </div>
+          {(() => {
+            const moduleCost = (m: (typeof modules)[0]) =>
+              Math.max(5_000, Math.round((m.baseWork || 60) * 400 * (m.minYear && m.minYear > 2000 ? 1.6 : 1)));
+            const totalCost = selected.reduce((s, id) => {
+              const m = modules.find((x) => x.id === id);
+              return s + (m ? moduleCost(m) : 0);
+            }, 80_000);
+            const catOrder: { key: string; label: string }[] = [
+              { key: "world", label: "World Design" },
+              { key: "rendering", label: "Graphic" },
+              { key: "audio", label: "Audio" },
+              { key: "ai", label: "AI" },
+              { key: "networking", label: "Networking" },
+              { key: "tools", label: "Tools" },
+              { key: "core_runtime", label: "Core" },
+              { key: "save_data", label: "Save" },
+              { key: "physics", label: "Physics" },
+              { key: "ui", label: "UI" },
+              { key: "scripting", label: "Scripting" },
+              { key: "build_deploy", label: "Build" },
+              { key: "quality_telemetry", label: "Telemetry" },
+            ];
+            const byCat = new Map<string, typeof modules>();
+            for (const m of modules) {
+              const list = byCat.get(m.category) ?? [];
+              list.push(m);
+              byCat.set(m.category, list);
+            }
+            return (
+              <>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <Input
+                    className="min-w-[10rem] flex-1 !border-white/25 !bg-[rgba(8,28,38,0.9)] !text-white"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Game Engine #1"
+                  />
+                  <div className="flex items-center gap-1.5 rounded-xl border border-white/20 bg-black/35 px-3 py-2 text-sm font-bold text-cyan-100">
+                    Cost: {formatCash(totalCost)}
+                    <Diamond className="h-4 w-4 text-cyan-300" aria-hidden />
+                  </div>
+                </div>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  <label className="block text-[11px] font-bold uppercase tracking-wide text-white/55">
+                    Purpose
+                    <select
+                      className="mt-1 w-full rounded-xl border border-white/20 bg-black/50 px-3 py-2.5 text-sm font-semibold text-white"
+                      value={purpose}
+                      onChange={(e) => setPurpose(e.target.value as EnginePurpose)}
+                    >
+                      {(Object.keys(PURPOSE_LABEL) as EnginePurpose[]).map((p) => (
+                        <option key={p} value={p}>
+                          {PURPOSE_LABEL[p]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block text-[11px] font-bold uppercase tracking-wide text-white/55">
+                    Architecture
+                    <select
+                      className="mt-1 w-full rounded-xl border border-white/20 bg-black/50 px-3 py-2.5 text-sm font-semibold text-white"
+                      value={architecture}
+                      onChange={(e) => setArchitecture(e.target.value as ArchitectureStyle)}
+                    >
+                      {(Object.keys(ARCH_LABEL) as ArchitectureStyle[]).map((a) => (
+                        <option key={a} value={a}>
+                          {ARCH_LABEL[a]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <div className="mt-4 max-h-[50vh] space-y-3 overflow-y-auto pr-0.5">
+                  {catOrder.map(({ key, label }) => {
+                    const list = byCat.get(key);
+                    if (!list?.length) return null;
+                    const isRender = key === "rendering";
+                    return (
+                      <div
+                        key={key}
+                        className="rounded-2xl border border-white/15 bg-[rgba(8,30,40,0.55)] p-3"
+                      >
+                        <h4 className="mb-2 text-base font-bold text-cyan-200">{label}</h4>
+                        <div className={cnJoin("grid gap-2", isRender ? "grid-cols-2" : "grid-cols-1")}>
+                          {list.map((m) => {
+                            const on = selected.includes(m.id);
+                            const cost = moduleCost(m);
+                            return (
+                              <button
+                                key={m.id}
+                                type="button"
+                                onClick={() => toggle(m.id)}
+                                className={cnJoin(
+                                  "flex items-center justify-between gap-2 rounded-xl border px-3 py-2.5 text-left text-sm transition",
+                                  on
+                                    ? "border-cyan-300/70 bg-gradient-to-r from-cyan-500/25 to-teal-500/15 text-white shadow-[0_0_14px_rgba(77,240,255,0.2)]"
+                                    : "border-white/15 bg-[rgba(6,24,34,0.75)] text-white/80 hover:border-cyan-300/40",
+                                )}
+                              >
+                                <span className="min-w-0 font-semibold leading-snug">{m.name}</span>
+                                <span className="flex shrink-0 items-center gap-1 text-xs font-bold tabular text-cyan-200">
+                                  {cost >= 1000 ? `${Math.round(cost / 1000)}K` : formatCash(cost)}
+                                  <Diamond className="h-3.5 w-3.5" aria-hidden />
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="mt-2 text-center text-[11px] text-white/50">
+                  Cash on hand {formatCash(cash)}. Modules set capability — not free review points.
+                </p>
+                <Button
+                  size="lg"
+                  className="mt-3 w-full !rounded-full !bg-gradient-to-b from-[#4df0ff] to-[#1ab8c8] !text-[#042028] !shadow-[0_0_20px_rgba(77,240,255,0.35)]"
+                  onClick={start}
+                >
+                  Create Engine
+                </Button>
+              </>
+            );
+          })()}
+        </section>
+      )}
     </ScreenBackdrop>
   );
 }
@@ -1091,7 +1763,7 @@ function PlatformsScreen() {
   const year = useGame((s) => s.year);
   const licensePlatform = useGame((s) => s.licensePlatform);
   const [msg, setMsg] = useState("");
-  const list = PLATFORMS.filter((p) => p.year <= year + 1).slice(0, 20);
+  const list = PLATFORMS.filter((p) => p.year <= year + 1);
   return (
     <ScreenBackdrop screen="platforms">
       <h2 className="text-center text-2xl font-bold text-white drop-shadow">Systems</h2>
@@ -1099,7 +1771,7 @@ function PlatformsScreen() {
       <ul className="mt-4 space-y-2">
         {list.map((p) => {
           const owned = unlocked.includes(p.id);
-          const thumb = platformThumb(p.id);
+          const thumb = platformThumb(p.id, year);
           return (
             <li key={p.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/15 bg-black/55 px-3 py-3 backdrop-blur-sm">
               <div className="flex min-w-0 items-center gap-3">
@@ -1150,36 +1822,6 @@ function FinancesScreen() {
           </li>
         ))}
         {!entries.length && <li className="text-center text-sm text-white/60">No ledger entries yet.</li>}
-      </ul>
-    </ScreenBackdrop>
-  );
-}
-
-function MarketScreen() {
-  const sales = useGame((s) => s.activeSales);
-  const fans = useGame((s) => s.fans);
-  return (
-    <ScreenBackdrop screen="market">
-      <h2 className="text-center text-2xl font-bold text-white drop-shadow">Market</h2>
-      <p className="mt-2 text-center text-sm text-white/75">{formatFans(fans)} fans</p>
-      <ul className="mt-4 space-y-2">
-        {sales
-          .filter((g) => g.onSale)
-          .map((g) => (
-            <li key={g.id} className="rounded-xl border border-white/15 bg-black/55 p-4 backdrop-blur-sm">
-              <div className="flex justify-between">
-                <span className="font-bold text-white">{g.title}</span>
-                <span className="tabular font-bold text-cyan-200">{g.avgReview.toFixed(1)}</span>
-              </div>
-              <p className="mt-1 text-sm text-white/70">
-                {g.sales.toLocaleString()} units · {formatCash(g.revenue)}
-              </p>
-              <p className="mt-2 text-xs text-white/55">{explainSales(g)}</p>
-            </li>
-          ))}
-        {!sales.filter((g) => g.onSale).length && (
-          <li className="text-center text-sm text-white/60">No titles selling.</li>
-        )}
       </ul>
     </ScreenBackdrop>
   );
@@ -1247,7 +1889,7 @@ function NewGameModal() {
   const year = useGame((s) => s.year);
   const topics = TOPICS.filter((t) => unlockedTopics.includes(t.id) && (!garageSlice || isGarageTopic(t.id)));
   const genres = GENRES.filter((g) => unlockedGenres.includes(g.id));
-  const platforms = PLATFORMS.filter((p) => unlockedPlatforms.includes(p.id) && p.year <= year);
+  const platforms = PLATFORMS.filter((p) => unlockedPlatforms.includes(p.id) && (p.year <= year || p.startUnlocked));
   const sizes = availableSizes(researched, unlocks, { office, staffCount });
   const [topicId, setTopicId] = useState(topics[0]?.id ?? "space");
   const [genreId, setGenreId] = useState<GenreId>((genres[0]?.id as GenreId) ?? "action");
@@ -1258,6 +1900,7 @@ function NewGameModal() {
   const [featureIds, setFeatureIds] = useState<string[]>(["basic_2d_v1"]);
   const [title, setTitle] = useState("");
   const [marketing, setMarketing] = useState(0);
+  const [pillar, setPillar] = useState<ProjectPillar>("default");
   const [err, setErr] = useState("");
   // Classic GDT path: concept → topic → genre → platform → tech → start
   const [step, setStep] = useState<"concept" | "topic" | "genre" | "platform" | "tech">("concept");
@@ -1374,7 +2017,17 @@ function NewGameModal() {
             </button>
             <button type="button" className={chipBtn(!!platformId)} onClick={() => setStep("platform")}>
               <div className="text-[10px] font-bold uppercase tracking-wide text-cyan-200/80">Platform</div>
-              <div>{getPlatform(platformId)?.name ?? "Pick Platform"}</div>
+              <div className="flex items-center gap-2">
+                {(platformArt(platformId, year) || platformThumb(platformId, year)) && (
+                  <img
+                    src={platformArt(platformId, year) || platformThumb(platformId, year)}
+                    alt=""
+                    className="h-8 w-10 shrink-0 rounded-md object-contain bg-black/30"
+                    draggable={false}
+                  />
+                )}
+                <span>{getPlatform(platformId)?.name ?? "Pick Platform"}</span>
+              </div>
             </button>
             <button type="button" className={chipBtn(featureIds.length > 0)} onClick={() => setStep("tech")}>
               <div className="text-[10px] font-bold uppercase tracking-wide text-cyan-200/80">Tech pack</div>
@@ -1421,6 +2074,23 @@ function NewGameModal() {
           <p className="text-center text-xs text-[var(--glass-muted)]">
             Fit {combo.topicGenre}/{combo.platformGenre} · Cash {formatCash(cash)}
           </p>
+          <div className="mt-2">
+            <p className="mb-1 text-center text-[10px] font-bold uppercase text-[var(--glass-muted)]">
+              Project pillar
+            </p>
+            <div className="flex flex-wrap justify-center gap-1">
+              {(Object.keys(PILLAR_LABELS) as ProjectPillar[]).map((id) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={chipBtn(pillar === id)}
+                  onClick={() => setPillar(id)}
+                >
+                  {PILLAR_LABELS[id]}
+                </button>
+              ))}
+            </div>
+          </div>
           {err && <p className="text-center text-sm text-red-300">{err}</p>}
           <Button
             size="lg"
@@ -1436,6 +2106,7 @@ function NewGameModal() {
                 size,
                 engineId,
                 marketingSpend: marketing,
+                pillar,
                 features: featureIds
                   .map((id) => ENGINE_COMPONENTS.find((c) => c.id === id)?.engineFeature ?? id)
                   .filter(Boolean),
@@ -1520,18 +2191,31 @@ function NewGameModal() {
         </div>
       )}
 
-      {/* ── Pick Platform (cards: cost + market + fit) ── */}
+      {/* ── Pick Platform — product cards (reference glass layout) ── */}
       {step === "platform" && (
-        <div>
-          <button type="button" className="mb-3 text-xs font-bold text-cyan-200 underline" onClick={() => setStep("concept")}>
-            ← Game Concept
+        <div className="space-y-3">
+          <button
+            type="button"
+            className="flex items-center gap-1 text-xs font-bold text-cyan-200"
+            onClick={() => setStep("concept")}
+          >
+            ← Back
           </button>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="mx-auto flex max-w-md flex-col gap-4">
             {platforms.map((p) => {
               const share = Math.round((p.marketSize / marketTotal) * 1000) / 10;
-              const fit = p.genreAffinity[genreId] ?? "ok";
-              const fitLabel =
-                fit === "great" ? "★★★" : fit === "good" ? "★★" : fit === "ok" ? "★" : "·";
+              const devCost =
+                p.id === "pc"
+                  ? Math.round(SIZE_STATS[size].cost * 0.35)
+                  : Math.max(
+                      SIZE_STATS[size].cost,
+                      Math.round(SIZE_STATS[size].cost * (0.85 + p.marketSize * 0.35)),
+                    );
+              const art = platformArt(p.id, year) ?? platformThumb(p.id, year);
+              const selected = platformId === p.id;
+              const genres: GenreId[] = ["action", "adventure", "rpg", "simulation", "strategy", "casual"];
+              const tierMark = (t: string) =>
+                t === "great" ? "+++" : t === "good" ? "++" : t === "ok" ? "+" : "·";
               return (
                 <button
                   key={p.id}
@@ -1541,29 +2225,79 @@ function NewGameModal() {
                     setStep("concept");
                   }}
                   className={cnJoin(
-                    "rounded-xl border-2 p-3 text-left transition",
-                    platformId === p.id
-                      ? "border-[var(--glass-cyan)] bg-[rgba(77,240,255,0.15)]"
-                      : "border-white/15 bg-[rgba(8,28,38,0.9)]",
+                    "w-full overflow-hidden rounded-[1.35rem] border text-left transition active:scale-[0.99]",
+                    selected
+                      ? "border-[var(--glass-cyan)] bg-[rgba(12,48,62,0.88)] shadow-[0_0_28px_rgba(77,240,255,0.28)]"
+                      : "border-white/20 bg-[rgba(10,36,48,0.82)] hover:border-cyan-300/50",
                   )}
                 >
-                  <div className="text-base font-bold text-white">{p.name}</div>
-                  <div className="mt-2 space-y-1 text-xs text-[var(--glass-muted)]">
-                    <div className="flex justify-between">
-                      <span>Dev cost</span>
-                      <span className="font-bold text-amber-200">
-                        {p.licenseCost === 0 && p.id === "pc" ? formatCash(SIZE_STATS[size].cost) : formatCash(Math.max(SIZE_STATS[size].cost, Math.round(SIZE_STATS[size].cost * (0.8 + p.marketSize * 0.3))))}
-                      </span>
+                  <div className="relative flex h-40 items-center justify-center bg-gradient-to-b from-white/10 to-transparent px-4 pt-4 sm:h-48">
+                    {art ? (
+                      <img
+                        src={art}
+                        alt=""
+                        className="max-h-full max-w-[88%] object-contain drop-shadow-[0_12px_24px_rgba(0,0,0,0.45)]"
+                        draggable={false}
+                      />
+                    ) : (
+                      <div className="text-4xl font-black text-white/30">{p.short}</div>
+                    )}
+                  </div>
+                  <div className="px-5 pb-5 pt-1">
+                    <div className="text-center text-2xl font-black tracking-tight text-white">
+                      {p.short || p.name}
                     </div>
-                    <div className="flex justify-between">
-                      <span>Market share</span>
-                      <span className="font-bold text-cyan-200">{share.toFixed(1)}%</span>
+                    <div className="mt-3 space-y-1.5 text-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[var(--glass-muted)]">Dev. cost:</span>
+                        <span className="font-bold tabular text-[var(--glass-green)]">{formatCash(devCost)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[var(--glass-muted)]">Marketshare:</span>
+                        <span className="font-bold tabular text-white">{share.toFixed(1)} %</span>
+                      </div>
                     </div>
-                    <div className="flex justify-between">
-                      <span>Genre match</span>
-                      <span className="font-bold text-white">
-                        {fitLabel} {fit}
-                      </span>
+                    <div className="mt-3">
+                      <div className="mb-1.5 text-xs text-[var(--glass-muted)]">Genre match:</div>
+                      <div className="flex flex-wrap justify-center gap-1.5">
+                        {genres.map((g) => {
+                          const fit = p.genreAffinity[g] ?? "ok";
+                          const hot = g === genreId;
+                          return (
+                            <div
+                              key={g}
+                              className={cnJoin(
+                                "flex w-[3.1rem] flex-col items-center gap-0.5 rounded-xl border px-1 py-1.5",
+                                hot
+                                  ? "border-cyan-300/70 bg-cyan-400/15"
+                                  : "border-white/15 bg-black/25",
+                              )}
+                              title={`${getGenre(g).name}: ${fit}`}
+                            >
+                              <img
+                                src={genreIconSrc(g)}
+                                alt=""
+                                className="h-7 w-7 object-contain"
+                                draggable={false}
+                              />
+                              <span
+                                className={cnJoin(
+                                  "rounded-md px-1 text-[10px] font-black leading-none",
+                                  fit === "great"
+                                    ? "bg-emerald-500 text-white"
+                                    : fit === "good"
+                                      ? "bg-teal-600 text-white"
+                                      : fit === "ok"
+                                        ? "bg-slate-600 text-white"
+                                        : "bg-slate-800 text-white/70",
+                                )}
+                              >
+                                {tierMark(fit)}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
                 </button>
@@ -1571,7 +2305,9 @@ function NewGameModal() {
             })}
           </div>
           {platforms.length === 0 && (
-            <p className="text-center text-sm text-[var(--glass-muted)]">No platforms unlocked yet — PC should be day one.</p>
+            <p className="text-center text-sm text-[var(--glass-muted)]">
+              No platforms unlocked yet — PC should be day one.
+            </p>
           )}
         </div>
       )}

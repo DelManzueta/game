@@ -7,9 +7,9 @@ import { WEEKS_PER_MONTH, WEEKS_PER_YEAR } from "../data";
 
 /** First office gate (Garage → First Office). Bible §4.3. */
 export const FIRST_OFFICE_GATE = {
-  /** Campaign year 3 ≈ START_YEAR+2 */
-  minYear: 1984,
-  minMonth: 1,
+  /** Campaign year 3 ≈ START_YEAR+2 (1979 → 1981) */
+  minYear: 1981,
+  minMonth: 10,
   minReleasedGames: 5,
   minFans: 1_000,
   minCashOnHand: 1_000_000,
@@ -17,8 +17,8 @@ export const FIRST_OFFICE_GATE = {
   minRunwayWeeks: 26,
 } as const;
 
-/** Approximate week floor: Y2 M10 from START 1982 → 1y + 9m = 48 + 36 = 84 weeks. */
-export function firstOfficeMinWeek(startYear = 1982): number {
+/** Approximate week floor: 1981 M10 from START 1979. */
+export function firstOfficeMinWeek(startYear = 1979): number {
   const years = FIRST_OFFICE_GATE.minYear - startYear;
   const months = FIRST_OFFICE_GATE.minMonth - 1;
   return years * WEEKS_PER_YEAR + months * WEEKS_PER_MONTH;
@@ -63,18 +63,25 @@ export const PUBLISHING_UNLOCK = {
   minFans: 500,
 } as const;
 
-/** Passive market RP once per market week while on sale / not dormant. */
+/** Passive market RP once per market week while on sale / not dormant (learn-by-doing). */
 export const MARKET_RP = {
-  base: 0.4,
+  base: 0.55,
   sizeFactor: { small: 1.0, medium: 1.25, large: 1.5, aaa: 1.8 } as Record<GameSize, number>,
 };
 
-/** Founder activity RP per sim week of active work (brief uses per-day; we use week ≈ 7 days). */
+/**
+ * Learn-by-doing: RP from activity outside pure SWU build grind.
+ * Build still earns researchEarned on the project; this is extra studio learning.
+ */
 export const FOUNDER_RP_PER_WEEK = {
-  developing: 0.15 * 7, // ~1.05
-  researching: 0.25 * 7,
-  reporting: 0.2 * 7,
-  contract: 0.1 * 7,
+  developing: 0.12 * 7, // lighter on pure build — learn-by-doing covers the rest
+  researching: 0.28 * 7,
+  reporting: 0.22 * 7,
+  contract: 0.18 * 7,
+  /** Running studio ops: sales, platforms, inbox, office life */
+  operations: 0.08 * 7,
+  training: 0.2 * 7,
+  licensing: 0.15 * 7,
 } as const;
 
 /** Release RP spike: max(2, round(avgReview × 1.5)). */
@@ -84,11 +91,11 @@ export function releaseRpSpike(avgReview: number): number {
 
 /** Employee production RP by office stage (production seats only). */
 export const EMPLOYEE_RP_PER_WEEK: Record<1 | 2 | 3 | 4 | 5, number> = {
-  1: 0, // garage
-  2: 1,
-  3: 2,
-  4: 3,
-  5: 4,
+  1: 0, // garage — founder learn-by-doing only
+  2: 1.2,
+  3: 2.2,
+  4: 3.5,
+  5: 4.5,
 };
 
 /** Max hired production employees (excludes founder). */

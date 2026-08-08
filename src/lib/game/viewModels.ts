@@ -124,7 +124,34 @@ export function projectPhaseLabel(p: GameProject | null | undefined): PhaseLabel
 }
 
 export function calendarLabel(s: Pick<GameState, "year" | "month" | "week">): string {
-  return `Y${s.year} · M${s.month} · W${(s.week % 4) + 1}`;
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const m = months[Math.max(0, Math.min(11, (s.month || 1) - 1))] ?? `M${s.month}`;
+  return `${m} ${s.year} · W${(s.week % 4) + 1}`;
+}
+
+/** HUD clock — year first so 1979…2026 is always readable. */
+export function calendarHudLabel(s: Pick<GameState, "year" | "month" | "week">): string {
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const m = months[Math.max(0, Math.min(11, (s.month || 1) - 1))] ?? `M${s.month}`;
+  return `${s.year} · ${m} · W${(s.week % 4) + 1}`;
+}
+
+export function weekToCalendarLabel(week: number, startYear = 1979): string {
+  const year = startYear + Math.floor(week / 48);
+  const weekInYear = week % 48;
+  const month = Math.floor(weekInYear / 4) + 1;
+  const w = (weekInYear % 4) + 1;
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const m = months[Math.max(0, Math.min(11, month - 1))] ?? `M${month}`;
+  return `${m} ${year} · W${w}`;
+}
+
+export function weekToYearMonth(week: number, startYear = 1979) {
+  const year = startYear + Math.floor(week / 48);
+  const weekInYear = week % 48;
+  const month = Math.floor(weekInYear / 4) + 1;
+  const weekOfMonth = (weekInYear % 4) + 1;
+  return { year, month, weekOfMonth };
 }
 
 export function studioOverview(s: GameState) {

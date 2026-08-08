@@ -228,7 +228,7 @@ export function departmentRoom(id: DepartmentRoomId) {
 export function labRoom(
   kind: "rnd" | "hardware",
   office = 1,
-  year = 1982,
+  year = 1979,
 ): { src: string; label: string; objectPosition: string } {
   return LAB_ART[kind][labTierFor(office, year)];
 }
@@ -236,7 +236,7 @@ export function labRoom(
 export function screenRoomArt(
   screen: keyof typeof SCREEN_ROOM | ScreenRoomKey | string,
   office = 1,
-  year = 1982,
+  year = 1979,
 ): { src: string; label: string; objectPosition: string } {
   if (screen === "research" || screen === "engines") {
     return labRoom("rnd", office, year);

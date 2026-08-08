@@ -1,26 +1,60 @@
 # Platform product art map
 
-**Source:** Owner product photography (IMG_0829–IMG_0845), 2026-08.  
 **Path:** `public/art/platforms/{id}.jpg` + `{id}-thumb.jpg`  
-**Lookup:** `src/lib/game/content/platformArt.ts` → `platformArt(id)` / `platformThumb(id)`
+**Lookup:** `platformArt(id, year?)` / `platformThumb(id, year?)`
 
-| Catalog id | Display name | Year | Source file | Notes |
-|------------|--------------|------|-------------|--------|
-| `tes_64` | TES 64 | 1996 | IMG_0833 | Home Entertainment System; art badge reads 1993 |
-| `dreamvast` | DreamVast | 1999 | IMG_0829 | Orange swirl faceplate |
-| `playsystem_2` | Playsystem 2 | 2000 | IMG_0832 | Fat chassis |
-| `playsystem_2_slim` | Playsystem 2 Slim | — | IMG_0841 | Slim revision |
-| `mbox` | mBox | 2001 | IMG_0830 | Original black, green gem |
-| `game_sphere` | Game Sphere | 2001 | IMG_0831 | Spherical white/black |
-| `gs` | GS | 2001 | IMG_0836 | Purple cube home console |
-| `3gs` | 3GS | 2004 | IMG_0835 | Clamshell handheld (art badge 2003) |
-| `pps` | PPS | 2005 | IMG_0834 | Portable |
-| `nuu` | Nuu | 2006 | IMG_0839 | White living-room + motion pads |
-| `2gs` | 2GS | 2006 | IMG_0840 | Dual-screen handheld (art badge 2004) |
-| `mbox_360` | mBox 360 | — | IMG_0838 | White curved chassis |
-| `mpad` | mPad | 2012 | IMG_0843 | Tablet |
-| `oya` | OYA | 2013 | IMG_0842 | Microconsole |
-| `mbox_one` | mBox One | 2013 | IMG_0844 | Black cube, green vent |
-| `playsystem_4` | Playsystem 4 | 2013 | IMG_0845 | Angular black, blue light bar |
+## Batch 2026-08-08e — Classics refresh + 6th/7th gen
 
-Year conflicts between art badge and catalog year are intentional fiction polish — catalog `year` in `platforms.ts` remains authority for industry clock.
+| Catalog id | Display | Source | BG |
+|------------|---------|--------|-----|
+| `master_v` | Master V | IMG_1007 | black |
+| `mbox` | mBox | IMG_1008 | black |
+| `dreamvast` | DreamVast | IMG_1009 | black |
+| `playsystem` | Playsystem | IMG_1010 | black |
+| `gameling_color` | Gameling Color | IMG_1011 | black |
+| `grmac` | grMac | IMG_1012 | black |
+| `gameling` | Gameling | IMG_1013 | black |
+| `vena_gear` | Vena Gear | IMG_1014 | black |
+| `tes_64` | TES 64 | IMG_1015 | white |
+| `oya` | OYA | IMG_1016 | white |
+| `gs` | GS | IMG_1017 | white |
+| `mbox_360` | mBox 360 | IMG_1018 | white |
+
+## Prior HD / hybrid batch
+
+| Catalog id | Source notes |
+|------------|--------------|
+| `nuu` | Beige motion |
+| `2gs` | Dual-screen handheld |
+| `playsystem_2_slim` | Slim black/blue |
+| `mpad` / `grpad` | Classic tablet |
+| `mbox_one` | Black cube |
+| `playsystem_4` / `playsystem_5` | Angular + dual-wing |
+| `mbox_next` | Tall green tower |
+| `holo_box` | Translucent |
+| `grphone` | mPhone shot |
+| `vena_genesis_x` / `vena_nova` / `vena_edge` | Vena line |
+| `swap` | Nuu² hybrid form |
+
+## PC year art
+
+| Campaign year | File |
+|---------------|------|
+| < 2000 | `pc.jpg` beige CRT+tower |
+| 2000–2011 | `pc_mid.jpg` RGB tower |
+| ≥ 2012 | `pc_late.jpg` glass RGB |
+
+## Staged (no exclusive catalog id)
+
+`compustar`, `nuu_2`, `mphone`, `mpad_pro`, `mbox_one_studio`, `mpad_studio`
+
+## Still missing art
+
+`itara`, `odyssey`, `intelli`, `arcade`, `playsystem_3`, `wuu`, `mbox_360_slim`, `viva_playsystem`
+
+## Rules
+
+1. Catalog `year` in `platforms.ts` is industry-clock authority.
+2. Prefer no-bg product cards for dark Systems UI when available.
+3. Thumbs ~320px; full ~900px.
+4. Newer owner shots supersede older files for the same id.

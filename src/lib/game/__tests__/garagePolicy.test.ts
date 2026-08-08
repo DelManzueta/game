@@ -176,17 +176,18 @@ function releasedFrom(
 }
 
 describe("garage content slice", () => {
-  it("exposes ~12 topics and 3 platforms", () => {
+  it("exposes ~12 topics and early garage platforms", () => {
     assert.ok(GARAGE_TOPIC_IDS.length >= 8 && GARAGE_TOPIC_IDS.length <= 14);
-    assert.equal(GARAGE_PLATFORM_IDS.length, 5);
+    assert.equal(GARAGE_PLATFORM_IDS.length, 10);
     assert.equal(GARAGE_GENRE_IDS.length, 6);
     assert.ok(isGarageTopic("space"));
     assert.ok(isGaragePlatform("pc"));
+    assert.ok(isGaragePlatform("itara"));
     assert.equal(isGarageTopic("mecha"), false);
   });
 
-  it("schema version is 5", () => {
-    assert.equal(SCHEMA_VERSION, 5);
+  it("schema version is 6", () => {
+    assert.equal(SCHEMA_VERSION, 6);
   });
 
   it("campaign seed is deterministic from company name", () => {

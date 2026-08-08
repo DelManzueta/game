@@ -5,7 +5,7 @@ import { MEDIA_TOPICS, TRADE_SHOWS, tradeShowKey } from "./externalFactors";
  * Industry story arcs — scripted world events (not random filler).
  * Original Studio Empire fiction; not a port of any real-world studio.
  *
- * Calendar anchors assume START_YEAR 1982:
+ * Calendar anchors assume START_YEAR 1979:
  *  - Campaign year index 19 → calendar 2001 (brand rights)
  *  - Campaign year index 25 → calendar 2007 (first SAGA hardware)
  */

@@ -23,7 +23,7 @@ export const MOCK = {
   founder: "Alex Rivera",
   date: "Y1987 M3 W2",
   campaignYear: 5,
-  era: "8-Bit Expansion",
+  era: "8-Bit Era",
   cash: 184_200,
   monthlyBurn: 4_800,
   fans: 12_480,

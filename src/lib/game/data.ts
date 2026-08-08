@@ -13,7 +13,16 @@ import type {
   TopicDef,
 } from "./types";
 import { TOPICS as CANONICAL_TOPICS } from "./content/topics";
-import { PLATFORMS as CANONICAL_PLATFORMS, CUSTOM_CONSOLE } from "./content/platforms";
+import {
+  PLATFORMS as CANONICAL_PLATFORMS,
+  CUSTOM_CONSOLE,
+  TIMELINE_END_YEAR,
+  decadeLabel,
+  platformDecade,
+  platformTimelineEntries,
+  platformsUpcoming,
+} from "./content/platforms";
+export { TIMELINE_END_YEAR, decadeLabel, platformDecade, platformTimelineEntries, platformsUpcoming };
 import {
   ENGINE_COMPONENTS,
   STARTING_ENGINE_COMPONENT_ID,
@@ -29,8 +38,8 @@ import {
 export const START_YEAR = 1982;
 export const WEEKS_PER_MONTH = 4;
 export const WEEKS_PER_YEAR = 48;
-export const SAVE_KEY = "studio-empire-save-v5";
-export const SAVE_VERSION = 5;
+export const SAVE_KEY = "studio-empire-save-v6";
+export const SAVE_VERSION = 6;
 
 export const STAGE_FIELDS: Record<1 | 2 | 3, DevField[]> = {
   1: ["engine", "gameplay", "story"],
@@ -78,7 +87,8 @@ export const SIZE_STATS = {
   small: {
     label: "Small",
     cost: 10000,
-    weeks: 6,
+    /** ~2 in-game months (8 weeks @ 4 weeks/month). */
+    weeks: 8,
     maxScore: 7.5,
     staffSlots: 1,
     salesMult: 0.48,
@@ -87,7 +97,8 @@ export const SIZE_STATS = {
   medium: {
     label: "Medium",
     cost: 50000,
-    weeks: 12,
+    /** ~4 in-game months. */
+    weeks: 16,
     maxScore: 9,
     staffSlots: 3,
     salesMult: 0.9,
@@ -96,7 +107,8 @@ export const SIZE_STATS = {
   large: {
     label: "Large",
     cost: 200000,
-    weeks: 24,
+    /** ~7 in-game months. */
+    weeks: 28,
     maxScore: 9.6,
     staffSlots: 6,
     salesMult: 1.35,
@@ -105,13 +117,17 @@ export const SIZE_STATS = {
   aaa: {
     label: "AAA",
     cost: 950000,
-    weeks: 40,
+    /** ~11 in-game months production (bugs extra). */
+    weeks: 44,
     maxScore: 10,
     staffSlots: 10,
     salesMult: 1.9,
     pointsMult: 2.1,
   },
 } as const;
+
+/** Max signing package for any hire ($2M). */
+export const MAX_HIRE_BUDGET = 2_000_000;
 
 export const AUDIENCES: { id: AudienceId; name: string }[] = [
   { id: "young", name: "Young" },
@@ -247,6 +263,7 @@ function engineResearchItems(): ResearchItem[] {
     designBoost: c.category.includes("Story") || c.category === "Dialogue" || c.category === "Gameplay" ? 3 : undefined,
     techBoost: c.category === "Graphics" || c.category === "Engine" || c.category.includes("Intelligence") ? 3 : undefined,
     weeks: 2,
+    minYear: c.minYear,
   }));
 }
 
@@ -279,9 +296,9 @@ export const OFFICE_INFO = {
     fanRequirement: 1_000,
     gamesRequirement: 5,
     cashRequirement: 1_000_000,
-    /** Earliest: campaign year 3. */
-    minYear: 1984,
-    minMonth: 1,
+    /** Earliest: campaign year 3 (1979 start → 1981 M10 floor). */
+    minYear: 1981,
+    minMonth: 10,
   },
   2: {
     name: "First Office",

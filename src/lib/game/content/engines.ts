@@ -40,6 +40,7 @@ export const ENGINE_COMPONENTS: EngineComponentDef[] = [
     researchCost: 40,
     requires: ["2d_v2"],
     engineFeature: "3D Graphics V1",
+    minYear: 1993,
   },
   {
     id: "3d_v2",
@@ -50,6 +51,7 @@ export const ENGINE_COMPONENTS: EngineComponentDef[] = [
     researchCost: 45,
     requires: ["3d_v1"],
     engineFeature: "3D Graphics V2",
+    minYear: 1996,
   },
   {
     id: "3d_v3",
@@ -60,6 +62,7 @@ export const ENGINE_COMPONENTS: EngineComponentDef[] = [
     researchCost: 50,
     requires: ["3d_v2"],
     engineFeature: "3D Graphics V3",
+    minYear: 2000,
   },
   {
     id: "mono_sound",
@@ -89,6 +92,7 @@ export const ENGINE_COMPONENTS: EngineComponentDef[] = [
     researchCost: 65,
     requires: ["stereo_sound"],
     engineFeature: "Surround Sound",
+    minYear: 1995,
   },
   {
     id: "save_game",
@@ -118,6 +122,7 @@ export const ENGINE_COMPONENTS: EngineComponentDef[] = [
     researchCost: 80,
     requires: ["multiplayer"],
     engineFeature: "Online Play",
+    minYear: 1999,
   },
   {
     id: "mod_support",
@@ -128,6 +133,7 @@ export const ENGINE_COMPONENTS: EngineComponentDef[] = [
     researchCost: 85,
     requires: ["save_game"],
     engineFeature: "Mod Support",
+    minYear: 2001,
   },
   {
     id: "game_tutorials",
@@ -156,6 +162,7 @@ export const ENGINE_COMPONENTS: EngineComponentDef[] = [
     researchable: true,
     researchCost: 100,
     engineFeature: "Achievements",
+    minYear: 2005,
   },
   {
     id: "character_progression",
@@ -250,6 +257,7 @@ export const ENGINE_COMPONENTS: EngineComponentDef[] = [
     researchCost: 150,
     requires: ["better_ai"],
     engineFeature: "Advanced AI",
+    minYear: 2004,
   },
   {
     id: "open_world",
@@ -259,6 +267,7 @@ export const ENGINE_COMPONENTS: EngineComponentDef[] = [
     researchable: true,
     researchCost: 155,
     engineFeature: "Open World",
+    minYear: 2001,
   },
 ];
 

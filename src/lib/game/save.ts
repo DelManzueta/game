@@ -5,6 +5,7 @@ import { SAVE_KEY } from "./data";
 /** Current key first, followed by every save key shipped by an earlier build. */
 export const SAVE_KEYS = [
   SAVE_KEY,
+  "studio-empire-save-v5",
   "studio-empire-save-v4",
   "studio-empire-save-v3",
   "studio-empire-save-v2",
