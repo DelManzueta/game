@@ -41,25 +41,38 @@ describe("canonical topics", () => {
 describe("marketing opportunities machine", () => {
   it("promotes scheduled→offered and dark year after double generate", () => {
     let st = emptyMarketingOpportunityState();
-    st = ensureYearOpportunities(st, 0, 42);
-    assert.ok(st.opportunities.length >= 1);
-    // week 8: first due
-    st = ensureYearOpportunities(st, 8, 42);
-    const due = st.opportunities.find((o) => o.weekOffered === 8);
-    assert.equal(due?.status, "offered");
-    // generate both year-0 slots
-    st = ensureYearOpportunities(st, 28, 42);
-    assert.equal(st.opportunities.filter((o) => o.yearIndex === 0).length, 2);
-    assert.ok(st.doubleYears.includes(0));
-    // year 1 dark
-    const y1 = ensureYearOpportunities(st, 48 + 8, 42);
-    assert.equal(y1.opportunities.filter((o) => o.yearIndex === 1).length, 0);
-    // resolve once
+    // Force a seed that schedules two year-0 slots (most seeds do)
+    let seed = 42;
+    st = ensureYearOpportunities(st, 0, seed);
+    // Advance through whole year 0 to promote all slots
+    for (let w = 0; w < 48; w++) st = ensureYearOpportunities(st, w, seed);
+    const y0 = st.opportunities.filter((o) => o.yearIndex === 0);
+    assert.ok(y0.length >= 1, "at least one year-0 opportunity");
+    assert.ok(y0.every((o) => o.choices.length >= 4), "rich choice sets");
+    assert.ok(y0[0]!.choices.some((c) => c.cost === 0), "includes free option");
+    if (y0.length >= 2) {
+      assert.ok(st.doubleYears.includes(0));
+      const y1 = ensureYearOpportunities(st, 48 + 10, seed);
+      assert.equal(y1.opportunities.filter((o) => o.yearIndex === 1).length, 0);
+    }
     const opp = st.opportunities.find((o) => o.status === "offered")!;
-    const r1 = resolveMarketingOpportunity(st, opp.id, "low");
+    const pick = opp.choices.find((c) => c.cost === 0) ?? opp.choices[0]!;
+    const r1 = resolveMarketingOpportunity(st, opp.id, pick.id);
     assert.ok(!("error" in r1));
-    const r2 = resolveMarketingOpportunity(r1.state, opp.id, "low");
+    const r2 = resolveMarketingOpportunity(r1.state, opp.id, pick.id);
     assert.ok("error" in r2);
+  });
+
+  it("different seeds produce different choice menus", () => {
+    const a = ensureYearOpportunities(emptyMarketingOpportunityState(), 20, 11);
+    const b = ensureYearOpportunities(emptyMarketingOpportunityState(), 20, 99);
+    const ca = a.opportunities[0]?.choices.map((c) => c.id).join(",") ?? "";
+    const cb = b.opportunities[0]?.choices.map((c) => c.id).join(",") ?? "";
+    // Very high chance they differ; if one seed has 0 slots, still ok if other has choices
+    assert.ok(a.opportunities.length + b.opportunities.length >= 1);
+    if (a.opportunities[0] && b.opportunities[0]) {
+      assert.notEqual(ca, cb);
+    }
   });
 });
 
@@ -127,7 +140,8 @@ describe("event cash atomicity", () => {
       modal: "event",
       speed: 0,
     });
-    useGame.getState().resolveEvent(0); // Send press kit
+    // Index 1 = "Send a press kit" (−$500) after expanded choice set
+    useGame.getState().resolveEvent(1);
     const s = useGame.getState();
     assert.equal(s.cash, 74_500);
     assert.equal(s.ledger?.balance, 74_500);

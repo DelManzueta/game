@@ -673,113 +673,157 @@ const EVENT_POOL: EventDef[] = [
   {
     key: "trade_mag",
     title: "Trade magazine",
-    body: "A trade magazine offers coverage of indie studios. How do you respond?",
-    cd: 48,
+    body: "A trade magazine is compiling an indie studio feature. How do you respond?",
+    cd: 40,
     choices: [
-      {
-        label: "Send a press kit",
-        effect: "+hype, small cost",
-        apply: (s) => {
-          s.hype += 10;
-          s.cash -= 500;
-        },
-      },
-      {
-        label: "Stay quiet",
-        effect: "tiny organic buzz",
-        apply: (s) => {
-          s.hype += 3;
-        },
-      },
+      { label: "Full press kit + interview", effect: "−$1,200 · +hype · +fans", apply: (s) => { s.hype += 14; s.fans += 40; s.cash -= 1200; } },
+      { label: "Send a press kit", effect: "−$500 · +hype", apply: (s) => { s.hype += 10; s.cash -= 500; } },
+      { label: "One-paragraph blurb only", effect: "+small hype free", apply: (s) => { s.hype += 5; } },
+      { label: "Stay quiet", effect: "tiny organic buzz", apply: (s) => { s.hype += 2; } },
+      { label: "Trade favor for coverage", effect: "−RP · +hype", apply: (s) => { s.researchPoints = Math.max(0, s.researchPoints - 3); s.hype += 11; } },
     ],
   },
   {
     key: "hardware_short",
     title: "Hardware shortage",
-    body: "Component prices spike industry-wide. Absorb the cost or delay purchases?",
-    cd: 64,
+    body: "Component prices spike industry-wide. Absorb the cost or adapt?",
+    cd: 52,
     choices: [
-      {
-        label: "Pay the premium",
-        effect: "−$3,000",
-        apply: (s) => {
-          s.cash -= 3000;
-        },
-      },
-      {
-        label: "Wait it out",
-        effect: "−hype, save cash",
-        apply: (s) => {
-          s.hype = Math.max(0, s.hype - 4);
-        },
-      },
+      { label: "Pay full premium", effect: "−$3,000 · keep pace", apply: (s) => { s.cash -= 3000; } },
+      { label: "Buy refurbished parts", effect: "−$1,200 · slight delay risk", apply: (s) => { s.cash -= 1200; s.hype = Math.max(0, s.hype - 1); } },
+      { label: "Wait it out", effect: "−hype, save cash", apply: (s) => { s.hype = Math.max(0, s.hype - 4); } },
+      { label: "Crowdsource spares", effect: "−$400 · +fans", apply: (s) => { s.cash -= 400; s.fans += 50; } },
+      { label: "Redesign around shortage", effect: "+RP effort · −cash small", apply: (s) => { s.cash -= 600; s.researchPoints += 4; } },
     ],
   },
   {
     key: "fan_club",
     title: "Fan club forms",
-    body: "Enthusiasts want to start a club around your last title.",
-    cd: 52,
+    body: "Enthusiasts want to organize around your last title.",
+    cd: 44,
     choices: [
-      {
-        label: "Sponsor them",
-        effect: "+fans, −$1,000",
-        apply: (s) => {
-          s.fans += 280;
-          s.cash -= 1000;
-        },
-      },
-      {
-        label: "Send merch files",
-        effect: "+fans free",
-        apply: (s) => {
-          s.fans += 90;
-        },
-      },
+      { label: "Sponsor them fully", effect: "−$1,000 · +fans · +hype", apply: (s) => { s.fans += 280; s.cash -= 1000; s.hype += 6; } },
+      { label: "Seed a starter kit", effect: "−$350 · +fans", apply: (s) => { s.fans += 150; s.cash -= 350; } },
+      { label: "Send merch files only", effect: "+fans free", apply: (s) => { s.fans += 90; } },
+      { label: "Host a Q&A night", effect: "−$200 · +hype · +RP", apply: (s) => { s.cash -= 200; s.hype += 5; s.researchPoints += 2; s.fans += 60; } },
+      { label: "Ignore politely", effect: "no change", apply: () => {} },
     ],
   },
   {
     key: "dev_meetup",
     title: "Dev meetup",
-    body: "Local developers invite you to share tips.",
-    cd: 44,
+    body: "Local developers invite you to share tips — or stay heads-down shipping.",
+    cd: 36,
     choices: [
-      {
-        label: "Speak & network",
-        effect: "+RP, +hype",
-        apply: (s) => {
-          s.researchPoints += 6;
-          s.hype += 4;
-        },
-      },
-      {
-        label: "Skip — ship instead",
-        effect: "focus on product",
-        apply: (s) => {
-          s.researchPoints += 1;
-        },
-      },
+      { label: "Keynote the night", effect: "+RP · +hype · −$150", apply: (s) => { s.researchPoints += 8; s.hype += 6; s.cash -= 150; } },
+      { label: "Speak & network", effect: "+RP · +hype", apply: (s) => { s.researchPoints += 6; s.hype += 4; } },
+      { label: "Send a short talk tape", effect: "+small RP", apply: (s) => { s.researchPoints += 3; } },
+      { label: "Skip — ship instead", effect: "focus · tiny RP", apply: (s) => { s.researchPoints += 1; } },
+      { label: "Hire a recruiter booth", effect: "−$900 · future hire bias", apply: (s) => { s.cash -= 900; s.hype += 3; s.researchPoints += 2; } },
     ],
   },
   {
     key: "magazine_ad_offer",
     title: "Magazine ad slot",
     body: "A leftover ad page is available at a discount this week only.",
-    cd: 56,
+    cd: 48,
     choices: [
-      {
-        label: "Buy the slot",
-        effect: "−$4,000, +hype",
-        apply: (s) => {
-          s.cash -= 4000;
-          s.hype += 14;
-        },
-      },
-      {
-        label: "Pass",
-        effect: "no change",
-        apply: () => {},
-      },
+      { label: "Buy the full page", effect: "−$4,000 · +hype", apply: (s) => { s.cash -= 4000; s.hype += 14; } },
+      { label: "Split a half page", effect: "−$2,200 · +hype", apply: (s) => { s.cash -= 2200; s.hype += 9; } },
+      { label: "Classifieds only", effect: "−$600 · +small hype", apply: (s) => { s.cash -= 600; s.hype += 4; } },
+      { label: "Trade a review copy", effect: "−0 cash · +hype · +RP risk", apply: (s) => { s.hype += 7; s.researchPoints += 1; } },
+      { label: "Pass", effect: "no change", apply: () => {} },
+    ],
+  },
+  {
+    key: "bb_reviewer",
+    title: "Bulletin board reviewer",
+    body: "A popular sysop offers to feature your next game — for a favor.",
+    cd: 42,
+    choices: [
+      { label: "Pay for a banner week", effect: "−$1,800 · +hype · +fans", apply: (s) => { s.cash -= 1800; s.hype += 12; s.fans += 80; } },
+      { label: "Offer exclusive demo", effect: "+hype · +fans free", apply: (s) => { s.hype += 8; s.fans += 55; } },
+      { label: "Co-write a tip sheet", effect: "+RP · +small hype", apply: (s) => { s.researchPoints += 5; s.hype += 4; } },
+      { label: "Decline", effect: "no change", apply: () => {} },
+      { label: "Counter with interview", effect: "−$400 · +hype", apply: (s) => { s.cash -= 400; s.hype += 9; } },
+    ],
+  },
+  {
+    key: "power_outage",
+    title: "Neighborhood outage",
+    body: "Storms knock power for half the week. How do you adapt?",
+    cd: 60,
+    choices: [
+      { label: "Rent a generator", effect: "−$900 · keep working", apply: (s) => { s.cash -= 900; } },
+      { label: "Work from a cafe", effect: "−$120 · +tiny hype", apply: (s) => { s.cash -= 120; s.hype += 2; } },
+      { label: "Take a forced rest", effect: "+RP reflection · −hype", apply: (s) => { s.researchPoints += 3; s.hype = Math.max(0, s.hype - 2); } },
+      { label: "Paper design only", effect: "+design focus · free", apply: (s) => { s.researchPoints += 2; } },
+      { label: "Ignore and lose time", effect: "no cash · −small hype", apply: (s) => { s.hype = Math.max(0, s.hype - 3); } },
+    ],
+  },
+  {
+    key: "angel_call",
+    title: "Curious angel investor",
+    body: "Someone with deep pockets wants a chat about “optional” capital.",
+    cd: 70,
+    choices: [
+      { label: "Take a small note", effect: "+$12,000 · −future freedom feel", apply: (s) => { s.cash += 12000; s.hype += 2; } },
+      { label: "Ask for advice only", effect: "+RP · free", apply: (s) => { s.researchPoints += 6; } },
+      { label: "Pitch hard for more", effect: "50/50 vibe · +$6k · +hype", apply: (s) => { s.cash += 6000; s.hype += 5; } },
+      { label: "Politely pass", effect: "independence", apply: () => {} },
+      { label: "Show a prototype", effect: "−$300 · +hype · +RP", apply: (s) => { s.cash -= 300; s.hype += 7; s.researchPoints += 3; } },
+    ],
+  },
+  {
+    key: "rival_taunt",
+    title: "Rival studio taunt",
+    body: "A rival brags about their next launch in the trades.",
+    cd: 46,
+    choices: [
+      { label: "Ignore them", effect: "focus", apply: () => {} },
+      { label: "Quiet counter-ad", effect: "−$2,500 · +hype", apply: (s) => { s.cash -= 2500; s.hype += 10; } },
+      { label: "Double down on craft", effect: "+RP", apply: (s) => { s.researchPoints += 7; } },
+      { label: "Friendly collab feeler", effect: "−$500 · +fans", apply: (s) => { s.cash -= 500; s.fans += 70; s.hype += 3; } },
+      { label: "Leak a teaser", effect: "+hype · free", apply: (s) => { s.hype += 8; } },
+    ],
+  },
+  {
+    key: "community_bug_report",
+    title: "Community bug report",
+    body: "Players found an edge-case crash in an older build floating online.",
+    cd: 50,
+    choices: [
+      { label: "Hotfix & thank publicly", effect: "−$400 · +fans · +hype", apply: (s) => { s.cash -= 400; s.fans += 90; s.hype += 5; } },
+      { label: "Quiet patch only", effect: "−$150 · +small fans", apply: (s) => { s.cash -= 150; s.fans += 30; } },
+      { label: "Pay a bug bounty", effect: "−$800 · +RP · +fans", apply: (s) => { s.cash -= 800; s.researchPoints += 4; s.fans += 110; } },
+      { label: "Ask them to repro steps", effect: "+RP free", apply: (s) => { s.researchPoints += 2; } },
+      { label: "Shrug it off", effect: "−hype", apply: (s) => { s.hype = Math.max(0, s.hype - 5); } },
+    ],
+  },
+  {
+    key: "family_visit",
+    title: "Family drops by",
+    body: "Relatives want a garage tour and to “see the computer games.”",
+    cd: 55,
+    choices: [
+      { label: "Host a mini demo day", effect: "−$100 · +hype · +fans", apply: (s) => { s.cash -= 100; s.hype += 4; s.fans += 25; } },
+      { label: "Quick tour then back to work", effect: "tiny hype", apply: (s) => { s.hype += 1; } },
+      { label: "Ask them to playtest", effect: "+RP · free", apply: (s) => { s.researchPoints += 3; s.fans += 15; } },
+      { label: "Reschedule", effect: "no change", apply: () => {} },
+      { label: "Record a family reaction clip", effect: "+hype free", apply: (s) => { s.hype += 6; } },
+    ],
+  },
+  {
+    key: "shareware_offer",
+    title: "Shareware distributor",
+    body: "A disk catalog wants to list your games for a cut of future mail orders.",
+    cd: 58,
+    choices: [
+      { label: "Sign a trial listing", effect: "−$700 · +hype · +fans", apply: (s) => { s.cash -= 700; s.hype += 9; s.fans += 100; } },
+      { label: "Send one title only", effect: "−$250 · +hype", apply: (s) => { s.cash -= 250; s.hype += 5; s.fans += 40; } },
+      { label: "Negotiate better terms", effect: "−time · +RP · +small hype", apply: (s) => { s.researchPoints += 2; s.hype += 3; } },
+      { label: "Decline", effect: "no change", apply: () => {} },
+      { label: "Ask them to feature a demo", effect: "−$100 · +fans", apply: (s) => { s.cash -= 100; s.fans += 60; s.hype += 4; } },
     ],
   },
 ];
@@ -808,31 +852,41 @@ function tryFireEvent(next: GameState): GameState {
     return next;
   }
 
-  // Global pacing: at most one flavor event every 16 weeks
+  // Global pacing with seeded jitter so gaps feel irregular (10–22 weeks)
   const lastAny = next.eventCooldowns["__any_event__"] ?? -999;
-  if (next.week - lastAny < 16) return next;
+  const minGap =
+    10 + (hashSeed(next.campaignSeed, "evt-gap", lastAny) % 13); // 10..22
+  if (next.week - lastAny < minGap) return next;
 
-  // ~2% chance per eligible week (was ~11%)
+  // Irregular chance: threshold 1–4% of weeks (seeded), not a fixed clock
+  const chancePct = 1 + (hashSeed(next.campaignSeed, next.week, "evt-chance") % 4);
   const roll = hashSeed(next.campaignSeed, next.week, "event") % 100;
-  if (roll > 1) return next;
+  if (roll >= chancePct) return next;
 
   const eligible = EVENT_POOL.filter((e) => {
     const until = next.eventCooldowns[e.key] ?? 0;
     if (next.week < until) return false;
-    if (next.recentEventKeys[0] === e.key) return false;
-    // Extra long cool-down in early garage
-    if (isGaragePhaseOne(next) && next.week < until) return false;
+    // Avoid recent repeats (last 3)
+    if (next.recentEventKeys.slice(0, 3).includes(e.key)) return false;
     return true;
   });
   if (!eligible.length) return next;
 
-  const idx = hashSeed(next.campaignSeed, next.week, "eventpick") % eligible.length;
-  const ev = eligible[idx]!;
-  // Cooldown reserved when event is *presented* so save/load cannot re-roll forever
-  // Double cooldowns vs table (was already 24–40 weeks)
+  // Weighted-ish pick: scramble with two hashes so order isn't pool-order bias
+  const scramble = [...eligible].sort(
+    (a, b) =>
+      hashSeed(next.campaignSeed, next.week, "ep", a.key) -
+      hashSeed(next.campaignSeed, next.week, "ep", b.key),
+  );
+  const idx =
+    hashSeed(next.campaignSeed, next.week, "eventpick") % scramble.length;
+  const ev = scramble[idx]!;
+  // Per-event cooldown jitter ±8 weeks so the same story doesn't rhythm-match
+  const cdJitter = (hashSeed(next.campaignSeed, ev.key, next.week, "cdj") % 17) - 8;
+  const cd = Math.max(28, ev.cd + cdJitter);
   next.eventCooldowns = {
     ...next.eventCooldowns,
-    [ev.key]: next.week + Math.max(ev.cd * 2, 48),
+    [ev.key]: next.week + cd,
     __any_event__: next.week,
   };
   next.recentEventKeys = [ev.key, ...next.recentEventKeys].slice(0, 8);
@@ -2367,23 +2421,21 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         !next.currentProject
       ) {
         next.eventCooldowns = { ...next.eventCooldowns, [notifiedKey]: next.week };
+        const head = due.headline ?? "A marketing window opened.";
         next.pendingEvent = {
           id: due.id,
           title: "Marketing opportunity",
-          body:
-            `Optional campaign (skip anytime):\n` +
-            due.choices.map((c) => `• ${c.label} — $${c.cost.toLocaleString()} (+${c.hypeGain} hype)`).join("\n") +
-            `\n\nTip: pass if you are saving cash.`,
-        };
-        (next.pendingEvent as { marketingOpportunityId?: string }).marketingOpportunityId = due.id;
-        // Prepend a free "Not now" by handling in UI — store resolveEvent(0) still works; add soft choice via choices
-        next.pendingEvent = {
-          ...next.pendingEvent,
+          body: `${head}\n\nPick a channel — or wait.`,
           choices: [
-            { label: "Not now", effect: "Dismiss" },
+            { label: "Not now", effect: "Keep offer · no spend" },
             ...due.choices.map((c) => ({
               label: c.label,
-              effect: `$${c.cost.toLocaleString()} · +${c.hypeGain} hype`,
+              effect:
+                c.cost <= 0
+                  ? `Free · +${c.hypeGain} hype${c.blurb ? ` · ${c.blurb}` : ""}`
+                  : `$${c.cost.toLocaleString()} · +${c.hypeGain} hype · +${c.marketingPoints} mkt${
+                      c.blurb ? ` · ${c.blurb}` : ""
+                    }`,
             })),
           ],
         };
@@ -2668,7 +2720,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
           decisionChoices: pending.choices,
           choices: pending.choices.map((c) => ({
             label: c.label,
-            effect: c.id,
+            effect: c.summary,
           })),
         };
         next.modal = "event";
