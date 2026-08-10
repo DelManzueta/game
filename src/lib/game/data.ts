@@ -289,7 +289,8 @@ export const REVIEWER_NAMES = [
 export const OFFICE_INFO = {
   1: {
     name: "Founder Garage",
-    rent: 0,
+    /** TYCOON v2.1 monthly_rent — garage burn pressure */
+    rent: 8_000,
     /** Total HQ seats including founder (bible §2). */
     capacity: 1,
     upgradeCost: 150_000,

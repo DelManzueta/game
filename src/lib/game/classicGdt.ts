@@ -1,20 +1,26 @@
 /**
- * Classic GDT spine — aligned to the modular text-engine blueprint:
+ * Classic GDT spine — implements TYCOON-ENGINE CORE v2.1.0 (frozen).
+ * See `tycoonEngine.ts` for the authoritative formulas.
  *
- *   score_ratio = total_points / historical_average
- *   raw_score   = score_ratio * combo * 7.5 * sliderFit * bugFit
- *   final       = clamp(1..sizeMax)
- *   historical  = historical * 0.7 + total_points * 0.3
- *   units       = (T+D) * review^2.2 * 12 * size * platform
- *   net         = units * price * 0.85   (15% platform tax)
- *
- * Deterministic (no Math.random). Browser Studio Empire uses this at release.
+ *   Review  = (points / historical) × 7.0   [slider/bug damp only]
+ *   Hist    = hist×0.7 + points×0.3
+ *   Units   = points × review^2.3 × 15 × hype_mult × platform_share
+ *   Net     = units × price × 0.85
  */
 
 import { SIZE_STATS, getGenre, STAGE_FIELDS, REVIEWER_NAMES } from "./data";
 import { topicGenreCompatibility } from "./content/genreFit";
 import type { DevField, GameSize, GenreId } from "./types";
 import { clamp } from "./scoring/qualityEngine";
+import {
+  tycoonComboMultiplier,
+  tycoonReviewScore,
+  tycoonUnitsSold,
+  tycoonAudienceMultiplier,
+  TYCOON_DEFAULTS,
+  TYCOON_ENGINE_VERSION,
+} from "./tycoonEngine";
+export { TYCOON_ENGINE_VERSION, TYCOON_DEFAULTS };
 
 /** Genre tech/design bias — blueprint Part 1 weights. */
 export const GENRE_WEIGHTS: Record<
@@ -64,15 +70,12 @@ export function idealPhaseSliders(
 
 /** Topic×genre combo: blueprint 1.3 / 0.7 with soft matrix blend. */
 export function classicComboMultiplier(topicId: string, genreId: GenreId): number {
-  const compat = topicGenreCompatibility(topicId, genreId); // 0–100
-  // Map: 100→1.30, 70→1.0, 40→0.75, 15→0.55
-  const soft = clamp(0.4 + (compat / 100) * 0.9, 0.5, 1.3);
-  const best = GENRE_BEST_TOPICS[genreId] ?? [];
-  const id = topicId.toLowerCase().replace(/\s+/g, "_");
-  if (best.some((b) => id.includes(b) || b.includes(id))) {
-    return Math.max(soft, 1.25);
-  }
-  return soft;
+  // Frozen v2.1 hard pairs first
+  const hard = tycoonComboMultiplier(topicId, genreId);
+  if (hard === 1.3 || hard === 0.7) return hard;
+  // Soft matrix for everything else
+  const compat = topicGenreCompatibility(topicId, genreId);
+  return clamp(0.55 + (compat / 100) * 0.7, 0.55, 1.2);
 }
 
 /** 0 = perfect genre focus, 1 = completely flat/wrong. */
@@ -179,60 +182,50 @@ export function classicReviewScore(opts: {
   designPoints: number;
   techPoints: number;
   bugs: number;
-  /** Moving market bar — blueprint historical_average (points scale). */
+  /** Moving market bar — historical_average (points scale). */
   targetHighScore: number;
   comboMult: number;
   size: GameSize;
   sliderMiss?: number;
   expertise?: number;
+  audienceId?: import("./types").AudienceId;
 }): {
   avg: number;
   scores: number[];
   basePoints: number;
   hidden: number;
-  /** Next historical average after this release. */
   nextHistoricalAverage: number;
   criticReviews: { name: string; score: number; comment: string }[];
 } {
   const design = Math.max(0, opts.designPoints);
   const tech = Math.max(0, opts.techPoints);
-  const totalPoints = design + tech;
-  const historical = Math.max(12, opts.targetHighScore || 30);
-
-  // Slider fit: flat equal sliders → ~0.55–0.7; focused → ~0.95–1.1
-  const sliderFit = clamp(1.12 - (opts.sliderMiss ?? 0) * 0.85, 0.5, 1.15);
-  const bugFit = clamp(1 - opts.bugs / 55, 0.45, 1);
-  const expertise = opts.expertise ?? 1;
-
-  const scoreRatio = totalPoints / historical;
-  let raw =
-    scoreRatio * opts.comboMult * 7.5 * sliderFit * bugFit * expertise;
-
-  // Mild size pressure (small games still cap via maxScore)
-  if (opts.size === "medium") raw *= 0.98;
-  if (opts.size === "large") raw *= 0.95;
-  if (opts.size === "aaa") raw *= 0.92;
-
+  // Spec 2.3: Score Ratio uses Total Points (raw design+tech from production weeks).
+  // Combo/audience applied in generation & sales — not double-counted into reviews.
+  const totalPoints = (design + tech) * (opts.expertise ?? 1);
   const maxScore = SIZE_STATS[opts.size]?.maxScore ?? 10;
-  const hidden = clamp(Math.round(raw * 10) / 10, 1, maxScore);
-
-  const seed = Math.floor(totalPoints * 17 + opts.bugs * 3 + historical * 5);
+  const t = tycoonReviewScore({
+    totalPoints,
+    historicalAverage: opts.targetHighScore || TYCOON_DEFAULTS.historicalAveragePoints,
+    sliderMiss: opts.sliderMiss,
+    bugs: opts.bugs,
+    sizeMax: maxScore,
+  });
+  void opts.comboMult;
+  void opts.audienceId;
+  const hidden = t.final;
+  const seed = Math.floor(totalPoints * 17 + opts.bugs * 3 + t.nextHistorical * 5);
   const scores = [0, 1, 2, 3].map((i) => {
-    const j = (((seed + i * 41) % 100) / 100 - 0.5) * 1.0;
+    const j = (((seed + i * 41) % 100) / 100 - 0.5) * 0.9;
     return Math.round(clamp(hidden + j, 1, maxScore) * 10) / 10;
   });
   const avg =
     Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10;
-
-  // Blueprint: historical_average = hist * 0.7 + total_points * 0.3
-  const nextHistoricalAverage = historical * 0.7 + totalPoints * 0.3;
-
   return {
     avg,
     scores,
     basePoints: totalPoints,
     hidden,
-    nextHistoricalAverage,
+    nextHistoricalAverage: t.nextHistorical,
     criticReviews: criticReviewsForScores(scores, seed),
   };
 }
@@ -252,32 +245,13 @@ export function classicUnitsSold(opts: {
   marketingSpend?: number;
   fans?: number;
   hype?: number;
+  audienceId?: import("./types").AudienceId;
 }): { totalUnits: number; weekly: number[]; price: number; gross: number; net: number } {
+  // Points already combo-weighted at review; use raw T+D for sales base per spec 2.5
   const points = Math.max(1, opts.designPoints + opts.techPoints);
-  const review = clamp(opts.reviewScore, 1, 10);
-  const size = SIZE_STATS[opts.size];
-  const fanBoost = 1 + Math.min(1.2, (opts.fans ?? 0) / 60_000);
-  // Blueprint: hype_mult = 1 + current_hype / 100
-  const hypeBoost = 1 + Math.min(1.5, Math.max(0, opts.hype ?? 0) / 100);
-  const mktBoost = 1 + Math.min(0.5, (opts.marketingSpend ?? 0) / 100_000);
-
-  const base =
-    points *
-    Math.pow(review, 2.2) *
-    12 *
-    size.salesMult *
-    Math.max(0.4, opts.platformMarket) *
-    opts.comboMult *
-    fanBoost *
-    hypeBoost *
-    mktBoost;
-
-  const totalUnits = Math.max(0, Math.floor(base));
-  const weights = [0.22, 0.16, 0.12, 0.1, 0.08, 0.07, 0.06, 0.05, 0.04, 0.04, 0.03, 0.03];
-  const weekly = weights.map((w) => Math.floor(totalUnits * w));
-  const sum = weekly.reduce((a, b) => a + b, 0);
-  if (weekly[0] != null) weekly[0] += Math.max(0, totalUnits - sum);
-
+  // Mild size scale (spec is small-game oriented; keep larger titles viable)
+  const sizeScale =
+    opts.size === "small" ? 1 : opts.size === "medium" ? 1.35 : opts.size === "large" ? 1.7 : 2.1;
   const price =
     opts.size === "small"
       ? 9.99
@@ -286,9 +260,21 @@ export function classicUnitsSold(opts: {
         : opts.size === "large"
           ? 39.99
           : 59.99;
+  const sold = tycoonUnitsSold({
+    totalPoints: points * sizeScale * Math.max(0.7, opts.comboMult),
+    reviewScore: opts.reviewScore,
+    hype: opts.hype ?? 0,
+    platformMarketShare: Math.max(0.15, opts.platformMarket),
+    unitPrice: price,
+  });
+  // light fan boost (extension)
+  const fanBoost = 1 + Math.min(0.8, (opts.fans ?? 0) / 80_000);
+  const totalUnits = Math.floor(sold.totalUnits * fanBoost);
+  const weekly = sold.weekly.map((w) => Math.floor(w * fanBoost));
+  const sum = weekly.reduce((a, b) => a + b, 0);
+  if (weekly[0] != null) weekly[0] += Math.max(0, totalUnits - sum);
   const gross = totalUnits * price;
-  const net = gross * 0.85; // 15% platform tax per blueprint
-  return { totalUnits, weekly, price, gross, net };
+  return { totalUnits, weekly, price, gross, net: gross * 0.85 };
 }
 
 /** Fans gained from a release (blueprint: units * 0.05 * score/10). */
@@ -297,7 +283,7 @@ export function classicFansFromRelease(units: number, reviewScore: number): numb
 }
 
 /** Initial historical average for first game (blueprint: 30). */
-export const CLASSIC_INITIAL_HISTORICAL = 30;
+export const CLASSIC_INITIAL_HISTORICAL = TYCOON_DEFAULTS.historicalAveragePoints; // 35.0 frozen
 
 /** Expected points band for garage small (solo). */
 export const GARAGE_SMALL_POINT_BAND = { weak: 20, ok: 40, strong: 70 };

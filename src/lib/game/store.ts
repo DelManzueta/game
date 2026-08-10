@@ -135,6 +135,7 @@ import {
   sliderDeviation,
   CLASSIC_INITIAL_HISTORICAL,
 } from "./classicGdt";
+import { tycoonHypeDecay, tycoonStaffEnergyTick, TYCOON_DEFAULTS } from "./tycoonEngine";
 import {
   startMarketingCampaign,
   getCampaignSpec,
@@ -308,7 +309,7 @@ function initialState(): GameState {
     week: 0,
     year: START_YEAR,
     month: 1,
-    cash: 70000,
+    cash: TYCOON_DEFAULTS.cash,
     fans: 0,
     researchPoints: 0,
     researchPipeline: seedGarageTechPipeline(START_YEAR),
@@ -388,7 +389,7 @@ function initialState(): GameState {
     activePublisherDealId: null,
     researchPointsFrac: 0,
     seriesRecords: {},
-    ledger: emptyLedger(70000),
+    ledger: emptyLedger(TYCOON_DEFAULTS.cash),
     progression: createStudioProgression("classic_35"),
   };
 }
@@ -797,6 +798,7 @@ function releaseProject(next: GameState, project: GameProject): GameState {
       size: scored.size,
       sliderMiss: miss,
       expertise: next.office <= 1 ? 0.94 : 1,
+      audienceId: scored.audience,
     });
     hidden = classic.hidden;
     productQuality = classic.hidden * 10;
@@ -1707,24 +1709,14 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       if (rent > 0) next.cash -= rent;
     }
 
-    // Staff AI (blueprint): work costs energy; ≤20 forces rest week (+25)
+    // Staff energy — TYCOON-ENGINE v2.1 Module 4 step 3
     next.staff = next.staff.map((m) => {
       if (m.id === "founder" || next.settings.noVacationMode) return { ...m, energy: 100 };
-      let energy = m.energy ?? 100;
       const working =
         !!next.currentProject &&
         (next.currentProject.devPhase.includes("RUNNING") ||
           next.currentProject.devPhase === "POLISHING");
-      if (working) {
-        if (energy <= 20) {
-          energy = Math.min(100, energy + 25); // forced rest
-        } else {
-          energy = Math.max(0, energy - 5);
-        }
-      } else {
-        energy = Math.min(100, energy + 8);
-      }
-      return { ...m, energy };
+      return { ...m, energy: tycoonStaffEnergyTick(m.energy ?? 100, working) };
     });
 
     for (const plat of PLATFORMS) {
@@ -2045,7 +2037,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     }
 
     next = tryFireEvent(next);
-    next.hype = Math.max(0, Math.floor(next.hype * 0.88)); // ~12% weekly decay (Module 4)
+    next.hype = tycoonHypeDecay(next.hype); // v2.1 Module 4: MAX(1, INT(hype*0.12))
 
     if (
       !next.settings.disableBankruptcy &&
