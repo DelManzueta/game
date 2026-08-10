@@ -20,6 +20,17 @@ import {
   TYCOON_DEFAULTS,
   TYCOON_ENGINE_VERSION,
 } from "./tycoonEngine";
+import {
+  gdtReviewScore,
+  buildShelfSchedule,
+  baseSalesPool,
+  fansFromLifecycle,
+  platformFitMult,
+  SHELF_LIFE_WEEKS,
+  UNIT_PRICE,
+  GDT_CANON_VERSION,
+} from "./gdtCanon";
+export { GDT_CANON_VERSION, SHELF_LIFE_WEEKS };
 export { TYCOON_ENGINE_VERSION, TYCOON_DEFAULTS };
 
 /** Genre tech/design bias — blueprint Part 1 weights. */
@@ -199,23 +210,26 @@ export function classicReviewScore(opts: {
 } {
   const design = Math.max(0, opts.designPoints);
   const tech = Math.max(0, opts.techPoints);
-  // Spec 2.3: Score Ratio uses Total Points (raw design+tech from production weeks).
-  // Combo/audience applied in generation & sales — not double-counted into reviews.
   const totalPoints = (design + tech) * (opts.expertise ?? 1);
   const maxScore = SIZE_STATS[opts.size]?.maxScore ?? 10;
-  const t = tycoonReviewScore({
-    totalPoints,
+  // GDT canon: Raw = (pts/hist)×7×combo×plat − bugs×0.1
+  // Platform mult soft-default 1.0 here; store may pass via combo if needed
+  const platMult = 1.0;
+  const gdt = gdtReviewScore({
+    designPoints: design * (opts.expertise ?? 1),
+    techPoints: tech * (opts.expertise ?? 1),
     historicalAverage: opts.targetHighScore || TYCOON_DEFAULTS.historicalAveragePoints,
-    sliderMiss: opts.sliderMiss,
+    comboMult: opts.comboMult,
+    platformMult: platMult,
     bugs: opts.bugs,
-    sizeMax: maxScore,
+    maxScore,
   });
-  void opts.comboMult;
-  void opts.audienceId;
-  const hidden = t.final;
-  const seed = Math.floor(totalPoints * 17 + opts.bugs * 3 + t.nextHistorical * 5);
+  // Soft slider damp only (never inflate above canon)
+  const sliderFit = clamp(1 - (opts.sliderMiss ?? 0) * 0.2, 0.85, 1);
+  const hidden = clamp(Math.round(gdt.final * sliderFit * 10) / 10, 1, maxScore);
+  const seed = Math.floor(totalPoints * 17 + opts.bugs * 3 + gdt.nextHistorical * 5);
   const scores = [0, 1, 2, 3].map((i) => {
-    const j = (((seed + i * 41) % 100) / 100 - 0.5) * 0.9;
+    const j = (((seed + i * 41) % 100) / 100 - 0.5) * 0.7;
     return Math.round(clamp(hidden + j, 1, maxScore) * 10) / 10;
   });
   const avg =
@@ -225,7 +239,7 @@ export function classicReviewScore(opts: {
     scores,
     basePoints: totalPoints,
     hidden,
-    nextHistoricalAverage: t.nextHistorical,
+    nextHistoricalAverage: gdt.nextHistorical,
     criticReviews: criticReviewsForScores(scores, seed),
   };
 }
@@ -247,39 +261,44 @@ export function classicUnitsSold(opts: {
   hype?: number;
   audienceId?: import("./types").AudienceId;
 }): { totalUnits: number; weekly: number[]; price: number; gross: number; net: number } {
-  // Points already combo-weighted at review; use raw T+D for sales base per spec 2.5
-  const points = Math.max(1, opts.designPoints + opts.techPoints);
-  // Mild size scale (spec is small-game oriented; keep larger titles viable)
-  const sizeScale =
-    opts.size === "small" ? 1 : opts.size === "medium" ? 1.35 : opts.size === "large" ? 1.7 : 2.1;
+  // GDT canon shelf: Weekly(t) = BasePool × (score/10)^2.5 × (1−t/L)^2 × hype
+  const pool = baseSalesPool({
+    designPoints: opts.designPoints,
+    techPoints: opts.techPoints,
+    platformShare: Math.max(0.2, opts.platformMarket) * Math.max(0.7, opts.comboMult),
+    size: opts.size,
+  });
+  const hypeMod = 1 + Math.min(1.5, Math.max(0, opts.hype ?? 0) / 100);
+  const fanBoost = 1 + Math.min(0.6, (opts.fans ?? 0) / 100_000);
+  const mktBoost = 1 + Math.min(0.35, (opts.marketingSpend ?? 0) / 120_000);
+  const sched = buildShelfSchedule({
+    basePool: pool * fanBoost * mktBoost,
+    reviewScore: opts.reviewScore,
+    size: opts.size,
+    hypeModifier: hypeMod,
+  });
   const price =
     opts.size === "small"
-      ? 9.99
+      ? UNIT_PRICE
       : opts.size === "medium"
         ? 19.99
         : opts.size === "large"
           ? 39.99
           : 59.99;
-  const sold = tycoonUnitsSold({
-    totalPoints: points * sizeScale * Math.max(0.7, opts.comboMult),
-    reviewScore: opts.reviewScore,
-    hype: opts.hype ?? 0,
-    platformMarketShare: Math.max(0.15, opts.platformMarket),
-    unitPrice: price,
-  });
-  // light fan boost (extension)
-  const fanBoost = 1 + Math.min(0.8, (opts.fans ?? 0) / 80_000);
-  const totalUnits = Math.floor(sold.totalUnits * fanBoost);
-  const weekly = sold.weekly.map((w) => Math.floor(w * fanBoost));
-  const sum = weekly.reduce((a, b) => a + b, 0);
-  if (weekly[0] != null) weekly[0] += Math.max(0, totalUnits - sum);
-  const gross = totalUnits * price;
-  return { totalUnits, weekly, price, gross, net: gross * 0.85 };
+  const gross = sched.totalUnits * price;
+  return {
+    totalUnits: sched.totalUnits,
+    weekly: sched.weekly,
+    price,
+    gross,
+    net: gross * 0.85,
+  };
 }
 
 /** Fans gained from a release (blueprint: units * 0.05 * score/10). */
 export function classicFansFromRelease(units: number, reviewScore: number): number {
-  return Math.max(0, Math.floor(units * 0.05 * (clamp(reviewScore, 1, 10) / 10)));
+  // Canon: Units × 0.05 × ((score − 5.5) / 4.5) — can be negative
+  return fansFromLifecycle(units, reviewScore);
 }
 
 /** Initial historical average for first game (blueprint: 30). */

@@ -862,6 +862,7 @@ function releaseProject(next: GameState, project: GameProject): GameState {
       next.targetHighScore && next.targetHighScore > 5
         ? next.targetHighScore
         : CLASSIC_INITIAL_HISTORICAL;
+    const platFit = Math.max(0.6, Math.min(1.35, 0.65 + (platform?.marketSize ?? 0.8) * 0.35));
     const classic = classicReviewScore({
       designPoints: scored.designPoints,
       techPoints: scored.techPoints,
@@ -871,7 +872,7 @@ function releaseProject(next: GameState, project: GameProject): GameState {
         return applyTEngineBugMitigation(raw, !!eng?.tEngineFramework);
       })(),
       targetHighScore: hist,
-      comboMult: combo,
+      comboMult: combo * platFit,
       size: scored.size,
       sliderMiss: miss,
       expertise: next.office <= 1 ? 0.94 : 1,
@@ -1281,7 +1282,8 @@ function releaseProject(next: GameState, project: GameProject): GameState {
       reviews.avg,
     );
     // Prefer blueprint fan curve when commercial delta is tiny
-    const fanGain = Math.max(commercial.fansDelta, classicFans);
+    // GDT canon fans can fall on flops (score < 5.5)
+    const fanGain = classicFans !== 0 ? classicFans : commercial.fansDelta;
     next.fans = Math.max(0, next.fans + fanGain);
   }
   if (commercial.notification) {

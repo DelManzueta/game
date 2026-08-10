@@ -114,8 +114,8 @@ export type ProductionBalance = {
 };
 
 export const DEFAULT_PRODUCTION_BALANCE: ProductionBalance = {
-  // Small ~2 months stages+polish; AAA ~10–13 months production (bugs extra).
-  stageBaseSwu: { 1: 2200, 2: 2400, 3: 2300 },
+  // GDT canon: Small 4w · Medium 8w · Large 12w · AAA 16w (3 equal phases).
+  stageBaseSwu: { 1: 1860, 2: 1860, 3: 1860 },
   dailyWorkUnits: 200,
   dailyCashCost: 70,
   scopeSwuMultiplier: 0.2,
@@ -128,12 +128,11 @@ export const DEFAULT_PRODUCTION_BALANCE: ProductionBalance = {
   bugFixWorkPerSeverity: 95,
   bugFixWorkPerDay: 115,
   bugFixDailyCost: 60,
-  polishRequiredWork: 380,
-  polishWorkPerDay: 140,
+  polishRequiredWork: 200,
+  polishWorkPerDay: 200,
   polishDailyCost: 55,
-  // SWU scale by size — AAA lands ~11 months pure production.
-  sizeSwuFactor: { small: 1, medium: 2.15, large: 3.9, aaa: 7.4 },
-  // Small: light bug load so first garage ship ≈ 2 months total; AAA bugs extra.
+  // Linear size: 1× / 2× / 3× / 4× → 4 / 8 / 12 / 16 weeks.
+  sizeSwuFactor: { small: 1, medium: 2, large: 3, aaa: 4 },
   sizeBugFactor: { small: 0.62, medium: 1, large: 1.15, aaa: 1.35 },
 };
 
