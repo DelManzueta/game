@@ -674,7 +674,7 @@ const EVENT_POOL: EventDef[] = [
     key: "trade_mag",
     title: "Trade magazine",
     body: "A trade magazine offers coverage of indie studios. How do you respond?",
-    cd: 28,
+    cd: 48,
     choices: [
       {
         label: "Send a press kit",
@@ -697,7 +697,7 @@ const EVENT_POOL: EventDef[] = [
     key: "hardware_short",
     title: "Hardware shortage",
     body: "Component prices spike industry-wide. Absorb the cost or delay purchases?",
-    cd: 40,
+    cd: 64,
     choices: [
       {
         label: "Pay the premium",
@@ -719,7 +719,7 @@ const EVENT_POOL: EventDef[] = [
     key: "fan_club",
     title: "Fan club forms",
     body: "Enthusiasts want to start a club around your last title.",
-    cd: 32,
+    cd: 52,
     choices: [
       {
         label: "Sponsor them",
@@ -742,7 +742,7 @@ const EVENT_POOL: EventDef[] = [
     key: "dev_meetup",
     title: "Dev meetup",
     body: "Local developers invite you to share tips.",
-    cd: 24,
+    cd: 44,
     choices: [
       {
         label: "Speak & network",
@@ -765,7 +765,7 @@ const EVENT_POOL: EventDef[] = [
     key: "magazine_ad_offer",
     title: "Magazine ad slot",
     body: "A leftover ad page is available at a discount this week only.",
-    cd: 36,
+    cd: 56,
     choices: [
       {
         label: "Buy the slot",
@@ -792,18 +792,36 @@ function tryFireEvent(next: GameState): GameState {
     next.modal === "reviews" ||
     next.modal === "report" ||
     next.modal === "newGame" ||
-    next.modal === "event"
+    next.modal === "event" ||
+    next.modal === "officeOffer"
   ) {
     return next;
   }
 
+  // Never interrupt active development stage work — only between projects or polish/idle
+  const phase = next.currentProject?.devPhase ?? "";
+  if (
+    phase.includes("RUNNING") ||
+    phase.includes("CONFIG") ||
+    phase === "POLISHING"
+  ) {
+    return next;
+  }
+
+  // Global pacing: at most one flavor event every 16 weeks
+  const lastAny = next.eventCooldowns["__any_event__"] ?? -999;
+  if (next.week - lastAny < 16) return next;
+
+  // ~2% chance per eligible week (was ~11%)
   const roll = hashSeed(next.campaignSeed, next.week, "event") % 100;
-  if (roll > 10) return next;
+  if (roll > 1) return next;
 
   const eligible = EVENT_POOL.filter((e) => {
     const until = next.eventCooldowns[e.key] ?? 0;
     if (next.week < until) return false;
     if (next.recentEventKeys[0] === e.key) return false;
+    // Extra long cool-down in early garage
+    if (isGaragePhaseOne(next) && next.week < until) return false;
     return true;
   });
   if (!eligible.length) return next;
@@ -811,7 +829,12 @@ function tryFireEvent(next: GameState): GameState {
   const idx = hashSeed(next.campaignSeed, next.week, "eventpick") % eligible.length;
   const ev = eligible[idx]!;
   // Cooldown reserved when event is *presented* so save/load cannot re-roll forever
-  next.eventCooldowns = { ...next.eventCooldowns, [ev.key]: next.week + ev.cd };
+  // Double cooldowns vs table (was already 24–40 weeks)
+  next.eventCooldowns = {
+    ...next.eventCooldowns,
+    [ev.key]: next.week + Math.max(ev.cd * 2, 48),
+    __any_event__: next.week,
+  };
   next.recentEventKeys = [ev.key, ...next.recentEventKeys].slice(0, 8);
   next.pendingEvent = {
     id: ev.key,
@@ -821,7 +844,7 @@ function tryFireEvent(next: GameState): GameState {
   };
   next.modal = "event";
   next.speed = 0;
-  next.notifications = pushNote(next, `Decision: ${ev.title}`, "warn");
+  next.notifications = pushNote(next, `Decision: ${ev.title}`, "info");
   return next;
 }
 
@@ -829,11 +852,23 @@ function applyEventChoice(state: GameState, choiceIndex: number): GameState {
   const pe = state.pendingEvent;
   if (!pe) return state;
 
-  // Marketing opportunity events: map choiceIndex → low/mid/high
+  // Marketing opportunity events: choice 0 = Not now (dismiss, keep offered for later idle)
   const mktId = (pe as { marketingOpportunityId?: string }).marketingOpportunityId;
   if (mktId && state.marketingOpportunities) {
+    const offset = (pe as { marketingChoiceOffset?: number }).marketingChoiceOffset ?? 0;
+    if (offset > 0 && choiceIndex < offset) {
+      return {
+        ...state,
+        pendingEvent: null,
+        modal: null,
+        speed: 1,
+        dirty: true,
+        notifications: pushNote(state, "Marketing deferred — available again when idle.", "info"),
+      };
+    }
     const due = state.marketingOpportunities.opportunities.find((o) => o.id === mktId);
-    const choice = due?.choices[choiceIndex] ?? due?.choices[0];
+    const mapped = Math.max(0, choiceIndex - offset);
+    const choice = due?.choices[mapped] ?? due?.choices[0];
     if (due && choice && due.status === "offered") {
       const res = resolveMarketingOpportunity(state.marketingOpportunities, mktId, choice.id);
       if ("error" in res) {
@@ -2320,19 +2355,49 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         next.campaignSeed,
       );
       next.marketingOpportunities = mkt;
+      // Soft offer: notify once when an opportunity becomes due — never spam-pause gameplay.
+      // Player can open it from notifications / wait; only surface modal if idle (no project).
       const due = mkt.opportunities.find((o) => o.status === "offered");
-      if (due && !next.pendingEvent && next.modal !== "event") {
+      const notifiedKey = due ? `mkt-notified-${due.id}` : "";
+      if (
+        due &&
+        !(next.eventCooldowns[notifiedKey] != null) &&
+        !next.pendingEvent &&
+        next.modal == null &&
+        !next.currentProject
+      ) {
+        next.eventCooldowns = { ...next.eventCooldowns, [notifiedKey]: next.week };
         next.pendingEvent = {
           id: due.id,
           title: "Marketing opportunity",
-          body: `Choose a campaign for year ${due.yearIndex + 1}:\n` +
-            due.choices.map((c) => `• ${c.label} — $${c.cost.toLocaleString()} (+${c.hypeGain} hype, +${c.marketingPoints} mkt pts)`).join("\n"),
-          // choices resolved via resolveMarketingChoice action / event choice mapping
+          body:
+            `Optional campaign (skip anytime):\n` +
+            due.choices.map((c) => `• ${c.label} — $${c.cost.toLocaleString()} (+${c.hypeGain} hype)`).join("\n") +
+            `\n\nTip: pass if you are saving cash.`,
         };
-        // stash choice ids in event for resolveEvent mapping
         (next.pendingEvent as { marketingOpportunityId?: string }).marketingOpportunityId = due.id;
+        // Prepend a free "Not now" by handling in UI — store resolveEvent(0) still works; add soft choice via choices
+        next.pendingEvent = {
+          ...next.pendingEvent,
+          choices: [
+            { label: "Not now", effect: "Dismiss" },
+            ...due.choices.map((c) => ({
+              label: c.label,
+              effect: `$${c.cost.toLocaleString()} · +${c.hypeGain} hype`,
+            })),
+          ],
+        };
+        (next.pendingEvent as { marketingOpportunityId?: string }).marketingOpportunityId = due.id;
+        (next.pendingEvent as { marketingChoiceOffset?: number }).marketingChoiceOffset = 1;
         next.modal = "event";
         next.speed = 0;
+      } else if (due && !(next.eventCooldowns[notifiedKey] != null) && next.currentProject) {
+        next.eventCooldowns = { ...next.eventCooldowns, [notifiedKey]: next.week };
+        next.notifications = pushNote(
+          next,
+          `Marketing option available after you ship — check next idle week.`,
+          "info",
+        );
       }
     }
 
@@ -2577,8 +2642,13 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       }
     }
 
-    // Part 2: decision events (not pure flavor)
-    if (!next.pendingEvent && next.modal == null) {
+    // Part 2: decision events — idle weeks only, low rate (see maybeSpawnDecisionEvent)
+    if (
+      !next.pendingEvent &&
+      next.modal == null &&
+      !next.currentProject &&
+      (next.eventCooldowns["__any_event__"] ?? -999) <= next.week - 20
+    ) {
       const pending = maybeSpawnDecisionEvent({
         year: next.year,
         week: next.week,
@@ -2586,8 +2656,8 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         office: next.office,
         cooldowns: next.eventCooldowns,
         campaignSeed: next.campaignSeed,
-        hasProject: !!next.currentProject,
-        eventSeverity: next.difficulty?.eventSeverity ?? 1,
+        hasProject: false,
+        eventSeverity: Math.min(0.55, next.difficulty?.eventSeverity ?? 1) * 0.45,
       });
       if (pending) {
         next.pendingEvent = {
@@ -2602,7 +2672,11 @@ export const useGame = create<GameState & Actions>((set, get) => ({
           })),
         };
         next.modal = "event";
-        next.eventCooldowns = { ...next.eventCooldowns, [pending.defId]: next.week };
+        next.eventCooldowns = {
+          ...next.eventCooldowns,
+          [pending.defId]: next.week + 36,
+          __any_event__: next.week,
+        };
         next.speed = 0;
       }
     }
@@ -2694,8 +2768,8 @@ export const useGame = create<GameState & Actions>((set, get) => ({
             dGain *= ge;
             tGain *= ge;
           }
-          // Module 22 — tech debt on active engine
-          {
+          // Module 22 — tech debt only after First Office (garage engines do not "fail" post-ship)
+          if (!isGaragePhaseOne(next)) {
             const eng =
               next.engines.find((e) => e.id === next.currentProject!.engineId) ??
               next.engines[0];
@@ -2812,11 +2886,14 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       }
     }
 
-    // Module 8 — crisis every 2 weeks while developing
+    // Module 8 — development crises: OFF in Garage Phase One.
+    // Later offices: rare soft note only (no modal pause, no forced engine fail).
     if (
+      !isGaragePhaseOne(next) &&
+      lateSystemAllowed(next, "qualityCrisisEvents") &&
       next.currentProject &&
       next.currentProject.devPhase.includes("RUNNING") &&
-      next.week % 2 === 0 &&
+      next.week % 12 === 0 &&
       next.currentProject.lastCrisisWeek !== next.week
     ) {
       const crisis = rollDevelopmentCrisis({
@@ -2825,61 +2902,20 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         projectId: next.currentProject.id,
         crunch: !!next.currentProject.crunchMode,
       });
-      let p = {
-        ...next.currentProject,
-        lastCrisisWeek: next.week,
-        bugs: next.currentProject.bugs + crisis.bugsDelta,
-        crisisReviewPenalty:
-          (next.currentProject.crisisReviewPenalty ?? 0) + crisis.reviewPenalty,
-        fluWeeksLeft: Math.max(
-          next.currentProject.fluWeeksLeft ?? 0,
-          crisis.designGenMultWeeks,
-        ),
-      };
-      if (crisis.extraWeeks > 0) {
-        p = {
-          ...p,
-          weeksDev: (p.weeksDev ?? 0) - crisis.extraWeeks, // effectively need more calendar time
-          production: p.production
-            ? {
-                ...p.production,
-                polishRequired: (p.production.polishRequired ?? 0) + crisis.extraWeeks * 80,
-              }
-            : p.production,
+      // Soft only: small bug tick, no review penalty, no modal, no rent charge
+      if (crisis.code !== "CRISIS_05" && crisis.bugsDelta > 0) {
+        next.currentProject = {
+          ...next.currentProject,
+          lastCrisisWeek: next.week,
+          bugs: next.currentProject.bugs + Math.min(2, crisis.bugsDelta),
         };
-      }
-      next.currentProject = p;
-      if (crisis.rpDelta) {
-        next.researchPoints = Math.max(0, next.researchPoints + crisis.rpDelta);
-      }
-      if (crisis.hypeDelta) {
-        next.hype = Math.max(0, next.hype + crisis.hypeDelta);
-      }
-      if (crisis.chargeRentNow) {
-        const rent =
-          (next.office === 2 && isHighDensity(next.officeSubTier)
-            ? HIGH_DENSITY.rent
-            : OFFICE_INFO[next.office as 1 | 2 | 3 | 4 | 5].rent) +
-          clutterTax((next.hardwareProducts ?? []).filter((h) => (h.fabWeeksLeft ?? 0) <= 0 || h.workbenchMode).length);
-        if (rent > 0) {
-          next = commitTxn(next, {
-            week: next.week,
-            amount: -rent,
-            category: "rent",
-            label: "Over-scope overhead (crisis)",
-            ref: `crisis-rent-w${next.week}`,
-          });
-        }
-      }
-      if (crisis.code !== "CRISIS_05") {
-        next.notifications = pushNote(next, crisis.note, "warn");
-        next.pendingEvent = {
-          id: `crisis_${crisis.code}_${next.week}`,
-          title: crisis.name,
-          body: crisis.note,
-        };
-        next.modal = "event";
-        next.speed = 0;
+        next.notifications = pushNote(
+          next,
+          `Minor hiccup: ${crisis.name}. Keep shipping.`,
+          "info",
+        );
+      } else if (next.currentProject) {
+        next.currentProject = { ...next.currentProject, lastCrisisWeek: next.week };
       }
     }
 
@@ -3052,13 +3088,6 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         next.activeSales = sales;
         next.releasedGames = games;
         next.notifications = pushNote(next, `"${item.title}" — ${lit.msg}`, lit.salesHalted ? "bad" : "warn");
-        next.pendingEvent = {
-          id: `tm_${item.gameId}`,
-          title: lit.code.replace(/_/g, " "),
-          body: lit.msg,
-        };
-        next.modal = "event";
-        next.speed = 0;
       }
       next.infringementDue = remain;
     }
@@ -3102,14 +3131,8 @@ export const useGame = create<GameState & Actions>((set, get) => ({
               ref: `lit-${g.id}`,
             });
           }
+          // Notification only — never pause the campaign with a post-ship "engine/IP fail" modal
           next.notifications = pushNote(next, lit.note, lit.salesHalted ? "bad" : "warn");
-          next.pendingEvent = {
-            id: `lit_${g.id}`,
-            title: "IP Litigation",
-            body: `"${g.title}" — ${lit.note}`,
-          };
-          next.modal = "event";
-          next.speed = 0;
         }
       }
       next.releasedGames = games;

@@ -4277,28 +4277,31 @@ function EventModal() {
   const resolveEvent = useGame((s) => s.resolveEvent);
   const open = modal === "event" && !!pending;
   if (!pending) return null;
+  const choices = pending.choices ?? [{ label: "Continue", effect: "Dismiss" }];
+  // Prefer dismiss-safe first option for soft events (Not now / Pass / Continue)
   return (
     <Modal
       open={open}
       onClose={() => {
-        /* Must choose — closing without choice defaults to first option */
         resolveEvent(0);
       }}
       title={pending.title}
     >
-      <p className="text-sm leading-relaxed text-fg">{pending.body}</p>
-      <div className="mt-4 flex flex-col gap-2">
-        {(pending.choices ?? [{ label: "Continue", effect: "Dismiss" }]).map((c, i) => (
+      <p className="max-h-[28dvh] overflow-y-auto whitespace-pre-line text-sm leading-relaxed text-fg sm:max-h-none">
+        {pending.body}
+      </p>
+      <div className="mt-4 flex max-h-[42dvh] flex-col gap-2 overflow-y-auto sm:max-h-none">
+        {choices.map((c, i) => (
           <Button
             key={`${c.label}-${i}`}
-            className="w-full justify-start text-left"
-            variant={i === 0 ? "primary" : "secondary"}
+            className="min-h-12 w-full justify-start px-3 py-3 text-left sm:min-h-11"
+            variant={i === 0 ? "secondary" : i === 1 ? "primary" : "secondary"}
             onClick={() => resolveEvent(i)}
           >
             <span className="flex w-full flex-col items-start gap-0.5">
-              <span>{c.label}</span>
+              <span className="text-[15px] font-semibold leading-snug">{c.label}</span>
               {c.effect ? (
-                <span className="text-[11px] font-medium opacity-80">{c.effect}</span>
+                <span className="text-[12px] font-medium leading-snug opacity-80">{c.effect}</span>
               ) : null}
             </span>
           </Button>

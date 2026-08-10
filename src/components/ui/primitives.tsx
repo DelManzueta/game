@@ -144,12 +144,12 @@ export function Modal({
         <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-overlay backdrop-blur-[2px] data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out data-[state=open]:fade-in" />
         <DialogPrimitive.Content
           className={cnJoin(
-            "fixed inset-x-0 bottom-0 z-50 flex max-h-[92dvh] flex-col overflow-hidden rounded-t-2xl border-2 border-border-strong bg-paper text-fg shadow-[var(--shadow-soft)] outline-none data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:slide-out-to-bottom-4 data-[state=open]:slide-in-from-bottom-4 sm:bottom-auto sm:left-1/2 sm:top-1/2 sm:w-[calc(100%-2rem)] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:data-[state=closed]:zoom-out-95 sm:data-[state=open]:zoom-in-95",
+            "fixed inset-x-0 bottom-0 z-50 flex max-h-[min(90dvh,100%)] flex-col overflow-hidden rounded-t-2xl border-2 border-border-strong bg-paper text-fg shadow-[var(--shadow-soft)] outline-none data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:slide-out-to-bottom-4 data-[state=open]:slide-in-from-bottom-4 max-sm:left-0 max-sm:right-0 max-sm:w-full sm:bottom-auto sm:left-1/2 sm:top-1/2 sm:w-[calc(100%-2rem)] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:data-[state=closed]:zoom-out-95 sm:data-[state=open]:zoom-in-95",
             wide ? "sm:max-w-3xl" : "sm:max-w-lg",
           )}
         >
-          <header className="relative border-b border-border px-12 pb-3 pt-4 text-center">
-            <DialogPrimitive.Title className="text-lg font-bold tracking-tight text-fg sm:text-xl">
+          <header className="relative shrink-0 border-b border-border px-11 pb-2.5 pt-3 text-center sm:px-12 sm:pb-3 sm:pt-4">
+            <DialogPrimitive.Title className="text-base font-bold tracking-tight text-fg sm:text-xl">
               {title}
             </DialogPrimitive.Title>
             {description ? (
@@ -163,7 +163,7 @@ export function Modal({
               </IconButton>
             </DialogPrimitive.Close>
           </header>
-          <div className="overflow-y-auto px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-3 text-fg">
+          <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-2.5 text-fg sm:px-5 sm:pt-3">
             {children}
           </div>
         </DialogPrimitive.Content>

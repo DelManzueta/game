@@ -13,7 +13,7 @@ export const DECISION_EVENTS: DecisionEventDef[] = [
     body: "The team wants to celebrate a recent milestone. How do you mark it?",
     earliestYear: 1979,
     latestYear: 2050,
-    cooldownWeeks: 48,
+    cooldownWeeks: 96,
     minGames: 1,
     choices: [
       {
@@ -43,7 +43,7 @@ export const DECISION_EVENTS: DecisionEventDef[] = [
     body: "Dedicated fans want a studio tour. Great PR — or a security headache.",
     earliestYear: 1982,
     latestYear: 2050,
-    cooldownWeeks: 72,
+    cooldownWeeks: 144,
     minGames: 2,
     choices: [
       {
@@ -73,7 +73,7 @@ export const DECISION_EVENTS: DecisionEventDef[] = [
     body: "Critical workstations failed. Cost and disruption scale with studio size.",
     earliestYear: 1979,
     latestYear: 2050,
-    cooldownWeeks: 96,
+    cooldownWeeks: 192,
     choices: [
       {
         id: "replace",
@@ -102,7 +102,7 @@ export const DECISION_EVENTS: DecisionEventDef[] = [
     body: "Rivals are demoing a technique you have only heard about. Do you investigate?",
     earliestYear: 1985,
     latestYear: 2050,
-    cooldownWeeks: 60,
+    cooldownWeeks: 120,
     choices: [
       {
         id: "scout",
@@ -136,10 +136,11 @@ export function maybeSpawnDecisionEvent(opts: {
   hasProject: boolean;
   eventSeverity: number;
 }): PendingDecisionEvent | null {
-  // ~4% base chance per week, scaled by severity (creative lower, executive higher)
+  // ~1% base chance per idle week (severity further reduces). Never spam mid-project.
   const roll = stableUnit(opts.campaignSeed, opts.week, "decision_event_spawn");
-  const chance = 0.035 * opts.eventSeverity;
+  const chance = 0.012 * opts.eventSeverity;
   if (roll > chance) return null;
+  if (opts.hasProject) return null;
 
   const eligible = DECISION_EVENTS.filter((e) => {
     if (opts.year < e.earliestYear || opts.year > e.latestYear) return false;
