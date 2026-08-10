@@ -127,7 +127,7 @@ export function MarketScreen() {
   ];
 
   return (
-    <div className="mx-auto max-w-6xl px-3 pb-10 pt-3">
+    <div className="mx-auto max-w-6xl px-1 pb-4 pt-1">
       <div className="game-panel mb-3 flex flex-wrap items-end justify-between gap-3 p-4">
         <div>
           <h2 className="text-2xl font-bold tracking-tight text-fg">Market</h2>

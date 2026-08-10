@@ -1,6 +1,6 @@
 /**
- * Studio Empire — GDT-inspired Garage presentation
- * Room-first layout. Domain mutations via useGame only.
+ * Studio Empire — stage shell (locked viewport, room world).
+ * Domain mutations via useGame only.
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
@@ -72,6 +72,9 @@ import {
   Palette,
   CalendarDays,
   Diamond,
+  Users,
+  Wallet,
+  TrendingUp,
 } from "lucide-react";
 
 const BAR_COLORS = ["#e86a4a", "#3aaa6a", "#3aa0d8", "#e8941a", "#9b6ad8", "#4ecb8a"];
@@ -127,7 +130,7 @@ function MainMenu() {
   }, []);
 
   return (
-    <div className="relative flex min-h-[100dvh] flex-col text-fg">
+    <div className="se-app relative text-fg">
       {/* Full-bleed 2D garage scene */}
       <div className="absolute inset-0 overflow-hidden">
         <img
@@ -245,7 +248,7 @@ function GameOverScreen() {
   const published = useGame((s) => s.gamesPublished);
   const returnToMenu = useGame((s) => s.returnToMenu);
   return (
-    <div className="room-void flex min-h-[100dvh] flex-col items-center justify-center px-4">
+    <div className="se-app flex flex-col items-center justify-center px-4">
       <div className="w-full max-w-md rounded-2xl border border-border bg-paper p-8 text-center shadow-[var(--shadow-soft)]">
         <p className="text-xs font-bold uppercase tracking-widest text-bad">Bankrupt</p>
         <h1 className="mt-2 text-3xl font-bold">{company}</h1>
@@ -270,32 +273,47 @@ function PlayingShell() {
   const project = useGame((s) => s.currentProject);
   const phase = projectPhaseLabel(project);
   const forcePause = phase.needsPlayerInput && !!project;
-
-  // Secondary routes (library etc.) still work; home is always room-first garage
-  const showRoom = screen === "studio" || screen === "develop";
+  const secondary =
+    screen === "games" ||
+    screen === "research" ||
+    screen === "staff" ||
+    screen === "engines" ||
+    screen === "platforms" ||
+    screen === "finances" ||
+    screen === "market" ||
+    screen === "settings";
 
   return (
-    <div className="room-void flex min-h-[100dvh] flex-col text-fg" data-era={era}>
-      <GdtTopChrome forcePause={forcePause} />
-      <main className="relative flex-1 overflow-y-auto pb-20">
-        {showRoom && <GarageRoomView />}
-        {showRoom && <DevelopOverlay />}
-        {screen === "games" && <GamesScreen />}
-        {screen === "research" && <ResearchScreen />}
-        {screen === "staff" && <StaffScreen />}
-        {screen === "engines" && <EnginesScreen />}
-        {screen === "platforms" && <PlatformsScreen />}
-        {screen === "finances" && <FinancesScreen />}
-        {screen === "market" && <MarketScreen />}
-        {screen === "settings" && <SettingsScreen />}
-      </main>
-      <BottomDock />
+    <div className="se-app" data-era={era}>
+      <StudioTopBar forcePause={forcePause} />
+      <div className="se-stage">
+        {/* Always-on room world */}
+        <GarageRoomView immersive />
+        {/* Develop sheet over the room */}
+        {screen === "develop" && <DevelopOverlay sheet />}
+        {/* Department panels — scroll inside only */}
+        {secondary && (
+          <div className="se-panel">
+            <div className="se-panel-scroll">
+              {screen === "games" && <GamesScreen />}
+              {screen === "research" && <ResearchScreen />}
+              {screen === "staff" && <StaffScreen />}
+              {screen === "engines" && <EnginesScreen />}
+              {screen === "platforms" && <PlatformsScreen />}
+              {screen === "finances" && <FinancesScreen />}
+              {screen === "market" && <MarketScreen />}
+              {screen === "settings" && <SettingsScreen />}
+            </div>
+          </div>
+        )}
+      </div>
+      <StudioDock />
     </div>
   );
 }
 
 /* Top: project HUD center + vitals right + clock */
-function GdtTopChrome({ forcePause }: { forcePause: boolean }) {
+function StudioTopBar({ forcePause }: { forcePause: boolean }) {
   const company = useGame((s) => s.companyName);
   const week = useGame((s) => s.week);
   const year = useGame((s) => s.year);
@@ -311,337 +329,210 @@ function GdtTopChrome({ forcePause }: { forcePause: boolean }) {
   const unread = notifications.filter((n) => !n.read).length;
   const phase = projectPhaseLabel(project);
   const pct = Math.round((project?.stageProgress || 0) * 100);
-  const designPts = project ? Math.round(project.designPoints ?? 0) : null;
-  const techPts = project ? Math.round(project.techPoints ?? 0) : null;
-  const bugs = project?.bugs ?? 0;
 
   return (
-    <header className="sticky top-0 z-30 border-b border-border/80 bg-[color-mix(in_oklab,var(--color-paper)_92%,transparent)] ">
-      <div className="mx-auto grid max-w-6xl grid-cols-[auto_1fr_auto] items-center gap-2 px-2 py-2 sm:gap-3 sm:px-4">
-        {/* Menu */}
+    <header className="se-top relative">
+      <button
+        type="button"
+        className="shrink-0 text-left"
+        onClick={() => {
+          saveGame();
+          setModal("pauseMenu");
+        }}
+        aria-label="Menu"
+      >
+        <div className="text-[11px] font-bold tracking-wide text-white/90">{company || "Studio"}</div>
+        <div className="se-metric-muted text-[10px] tabular">
+          {calendarHudLabel({ year, month, week })}
+        </div>
+      </button>
+
+      {project ? (
+        <div className="se-project-pill min-w-0 flex-1 sm:flex-none">
+          <span className="title">{project.title}</span>
+          <span className="meta">
+            {phase.title}
+            {project.devPhase.includes("RUNNING") ? ` · ${pct}%` : ""}
+          </span>
+        </div>
+      ) : (
+        <div className="hidden min-w-0 flex-1 se-metric-muted text-[11px] sm:block">Garage floor · ship to grow</div>
+      )}
+
+      <div className="ml-auto flex items-center gap-2 sm:gap-3">
+        <span className="se-metric se-metric-fans hidden sm:inline">{formatFans(fans)} fans</span>
+        <span className="se-metric se-metric-cash">{formatCash(cash)}</span>
+        <div className="se-speed" role="group" aria-label="Game speed">
+          {(
+            [
+              [0, Pause, "Pause"],
+              [1, Play, "Play"],
+              [2, FastForward, "Fast"],
+              [4, FastForward, "Max"],
+            ] as const
+          ).map(([s, Icon, label]) => (
+            <button
+              key={s}
+              type="button"
+              title={label}
+              aria-label={label}
+              data-active={speed === s}
+              onClick={() => setSpeed(s as 0 | 1 | 2 | 4)}
+            >
+              <Icon className="h-3.5 w-3.5" aria-hidden />
+            </button>
+          ))}
+        </div>
         <button
           type="button"
-          className="hud-chip flex h-10 items-center gap-2 px-2.5 text-xs font-bold tracking-wide text-fg"
-          onClick={() => {
-            saveGame();
-            setModal("pauseMenu");
-          }}
-          aria-label="Menu"
+          className="relative flex h-8 w-8 items-center justify-center rounded-md border border-white/10 bg-white/[0.04] text-white/70"
+          aria-label={unread ? `Notifications, ${unread} unread` : "Notifications"}
+          onClick={() => setModal("notifications")}
         >
-          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-panel text-[11px] font-bold text-fg ring-1 ring-border">
-            {(company || "S").slice(0, 1).toUpperCase()}
-          </span>
-          <span className="hidden max-w-[8rem] truncate sm:inline">{company || "Menu"}</span>
+          <Bell className="h-3.5 w-3.5" />
+          {unread > 0 && (
+            <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-[#6affe0] px-0.5 text-[9px] font-bold text-[#061410]">
+              {unread > 9 ? "9+" : unread}
+            </span>
+          )}
         </button>
-
-        {/* Project strip — one design, one tech, clear progress */}
-        <div className="min-w-0 justify-self-center">
-          <div className="hud-chip flex max-w-full items-center gap-2 px-2.5 py-1.5 sm:gap-3 sm:px-3">
-            {project && <MetricPill label="Design" value={designPts} tone="design" />}
-            <div className="min-w-0 flex-1 px-1 text-center sm:min-w-[10rem]">
-              {project ? (
-                <>
-                  <div className="truncate text-sm font-bold leading-tight text-fg">{project.title}</div>
-                  <div className="truncate text-[10px] text-muted">
-                    {phase.title}
-                    {project.devPhase.includes("RUNNING") ? ` · ${pct}%` : ""}
-                  </div>
-                  {project.devPhase.includes("RUNNING") && (
-                    <div className="mx-auto mt-1 h-1.5 max-w-[11rem] overflow-hidden rounded-full bg-panel">
-                      <div
-                        className="h-full rounded-full bg-accent transition-all duration-300"
-                        style={{ width: `${Math.max(pct > 0 ? 4 : 0, pct)}%` }}
-                      />
-                    </div>
-                  )}
-                </>
-              ) : (
-                <div className="py-0.5 text-sm font-semibold text-muted">Ready · start a game</div>
-              )}
-            </div>
-            {project && <MetricPill label="Tech" value={techPts} tone="tech" />}
-            {project && bugs > 0 && <MetricPill label="Bugs" value={bugs} tone="bugs" />}
-          </div>
-        </div>
-
-        {/* Vitals + clock */}
-        <div className="flex items-center gap-1.5 sm:gap-2">
-          <div className="hud-chip hidden px-2.5 py-1 text-right text-[11px] leading-snug sm:block sm:text-xs">
-            <div className="font-semibold tabular text-fans">{formatFans(fans)} fans</div>
-            <div className="tabular text-muted">{calendarHudLabel({ year, month, week })}</div>
-            <div className="font-bold tabular text-cash">{formatCash(cash)}</div>
-          </div>
-          {/* Mobile vitals — one line */}
-          <div className="hud-chip px-2 py-1 text-[10px] font-semibold tabular sm:hidden">
-            <span className="text-cash">{formatCash(cash)}</span>
-            <span className="mx-1 text-border-strong">·</span>
-            <span className="text-muted">{year}</span>
-          </div>
-          <div className="flex items-center gap-0.5" role="group" aria-label="Game speed">
-            {(
-              [
-                [0, Pause, "Pause"],
-                [1, Play, "Play"],
-                [2, FastForward, "Fast"],
-                [4, FastForward, "Max"],
-              ] as const
-            ).map(([s, Icon, label]) => (
-              <button
-                key={s}
-                type="button"
-                title={label}
-                aria-label={label}
-                aria-pressed={speed === s}
-                onClick={() => setSpeed(s as 0 | 1 | 2 | 4)}
-                className={cnJoin(
-                  "flex h-9 w-9 items-center justify-center rounded-lg border transition-colors",
-                  speed === s
-                    ? "border-accent bg-accent text-accent-fg"
-                    : "border-border bg-paper text-fg hover:border-border-strong",
-                )}
-              >
-                <Icon className="h-3.5 w-3.5" aria-hidden="true" />
-              </button>
-            ))}
-            <button
-              type="button"
-              className="relative flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-paper text-fg hover:border-border-strong"
-              aria-label={unread ? `Notifications, ${unread} unread` : "Notifications"}
-              title="Inbox"
-              onClick={() => setModal("notifications")}
-            >
-              <Bell className="h-3.5 w-3.5" aria-hidden="true" />
-              {unread > 0 && (
-                <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-accent-fg">
-                  {unread > 9 ? "9+" : unread}
-                </span>
-              )}
-            </button>
-          </div>
-        </div>
       </div>
       {forcePause && project && (
-        <div className="border-t border-border/60 bg-panel/80 px-3 py-1 text-center text-[11px] font-semibold text-fg">
-          Desk decision — {phase.hint}
+        <div className="absolute left-0 right-0 top-full z-40 border-b border-amber-400/30 bg-amber-950/90 px-3 py-1 text-center text-[11px] font-semibold text-amber-100">
+          Decision needed — {phase.hint}
         </div>
       )}
     </header>
   );
 }
 
-function MetricPill({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: number | null;
-  tone: "design" | "tech" | "bugs";
-}) {
-  const color =
-    tone === "design" ? "var(--color-design)" : tone === "tech" ? "var(--color-tech)" : "var(--color-bugs)";
-  return (
-    <div className="flex shrink-0 flex-col items-center" title={label}>
-      <div
-        className="flex h-9 w-9 items-center justify-center rounded-full border-2 bg-elevated text-xs font-bold tabular sm:h-10 sm:w-10 sm:text-sm"
-        style={{ borderColor: color, color }}
-      >
-        {value == null ? "—" : value}
-      </div>
-      <span className="mt-0.5 text-[9px] font-bold uppercase tracking-wide text-muted">{label}</span>
-    </div>
-  );
-}
-
-function BottomDock() {
+function StudioDock() {
   const screen = useGame((s) => s.screen);
   const setScreen = useGame((s) => s.setScreen);
-  const items: { id: ScreenId; label: string; icon: typeof Home }[] = [
-    { id: "studio", label: "Garage", icon: Home },
-    { id: "develop", label: "Desk", icon: Gamepad2 },
-    { id: "games", label: "Games", icon: History },
-    { id: "market", label: "Market", icon: CalendarDays },
-    { id: "research", label: "Research", icon: FlaskConical },
-    { id: "settings", label: "More", icon: Settings },
+  const office = useGame((s) => s.office);
+  const items: { id: typeof screen; label: string; icon: typeof Home }[] = [
+    { id: "studio", label: "Studio", icon: Home },
+    { id: "games", label: "Games", icon: Gamepad2 },
+    { id: "research", label: "Lab", icon: FlaskConical },
+    { id: "market", label: "Market", icon: TrendingUp },
+    { id: "staff", label: "People", icon: Users },
+    { id: "finances", label: "Books", icon: Wallet },
   ];
+  if (office >= 2) {
+    items.splice(4, 0, { id: "engines", label: "Engine", icon: Cpu });
+  }
+
   return (
-    <nav className="fixed bottom-0 inset-x-0 z-30 border-t-2 border-border-strong bg-paper/95 shadow-[0_-8px_24px_rgba(60,40,20,0.12)] ">
-      <div className="mx-auto flex max-w-lg justify-around px-1 py-1.5 pb-[max(0.4rem,env(safe-area-inset-bottom))]">
-        {items.map(({ id, label, icon: Icon }) => {
-          const lit = screen === id;
-          return (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setScreen(id)}
-              className={cnJoin(
-                "flex min-h-12 min-w-[3.5rem] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg px-1 py-1.5 text-[10px] font-bold transition-colors",
-                lit ? "text-accent" : "text-muted hover:text-fg",
-              )}
-            >
-              <Icon className="h-4 w-4" />
-              {label}
-            </button>
-          );
-        })}
-      </div>
+    <nav className="se-dock" aria-label="Studio navigation">
+      {items.map(({ id, label, icon: Icon }) => (
+        <button
+          key={id}
+          type="button"
+          data-active={screen === id || (id === "studio" && screen === "develop")}
+          onClick={() => setScreen(id === "studio" ? "studio" : id)}
+        >
+          <Icon className="h-4 w-4" aria-hidden />
+          <span className="truncate">{label}</span>
+        </button>
+      ))}
     </nav>
   );
 }
 
 /* ═══════════════════════════ Garage room ═══════════════════════════ */
 
-function GarageRoomView() {
+function GarageRoomView({ immersive = false }: { immersive?: boolean }) {
   const state = useGame();
   const ov = studioOverview(state);
   const setModal = useGame((s) => s.setModal);
   const setScreen = useGame((s) => s.setScreen);
   const busy = !!state.currentProject?.devPhase.includes("RUNNING");
   const art = roomArtDefForOffice(state.office);
+  const screen = useGame((s) => s.screen);
+  // Room is always the world under chrome; hide action chrome on pure secondary screens
+  const showChrome = screen === "studio" || screen === "develop";
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col items-center px-2 pt-1 sm:px-4">
-      {/* 2D room stage — uses your photo ladder, not the cartoon garage */}
-      <button
-        type="button"
-        className="group relative w-full max-w-3xl overflow-hidden rounded-2xl border-2 border-border-strong shadow-[var(--shadow-soft)] outline-none ring-offset-2 focus-visible:ring-2 focus-visible:ring-focus"
-        onClick={() => {
-          if (state.currentProject) setScreen("develop");
-          else setModal("newGame");
-        }}
-        aria-label={state.currentProject ? "Open desk" : "Develop new game"}
-      >
-        <img
-          src={art.room}
-          alt=""
-          className="aspect-[3/2] w-full object-cover transition duration-300 group-hover:scale-[1.02] sm:aspect-[16/10]"
-          style={{ objectPosition: art.objectPosition }}
-          draggable={false}
-        />
-        {/* Ambient vignette */}
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/45 via-transparent to-black/10" />
+    <div className={immersive ? "se-room" : "relative mx-auto w-full max-w-5xl"}>
+      <img
+        src={art.room}
+        alt=""
+        className={immersive ? "se-room-img" : "aspect-[16/10] w-full rounded-xl object-cover"}
+        style={immersive ? undefined : { objectPosition: art.objectPosition }}
+        draggable={false}
+      />
+      {immersive && <div className="se-room-vignette" />}
 
-        {/* Desk hotspot label */}
-        <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 flex-col items-center gap-1">
-          <span className="rounded-full border border-white/30 bg-black/65 px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-white shadow-md">
-            {state.currentProject
-              ? busy
-                ? art.hotspotBusy
-                : art.hotspotOpen
-              : art.hotspotIdle}
-          </span>
-        </div>
-
-        {/* Project plaque */}
-        {state.currentProject && (
-          <div className="absolute left-3 top-3 max-w-[70%] rounded-xl border border-white/25 bg-black/70 px-3 py-2 shadow-md">
-            <div className="truncate text-sm font-bold text-white">{state.currentProject.title}</div>
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-amber-200">
-              {ov.phase.title}
-            </div>
-          </div>
-        )}
-      </button>
-
-      {/* Quick actions */}
-      <div className="mt-3 flex w-full max-w-md flex-wrap justify-center gap-2">
-        {!state.currentProject ? (
-          <Button size="lg" className="min-w-[12rem]" onClick={() => setModal("newGame")}>
-            Develop New Game
-          </Button>
-        ) : state.currentProject.devPhase === "READY_TO_RELEASE" ? (
-          <Button
-            size="lg"
-            className="min-w-[12rem] !bg-emerald-500 !text-fg hover:!bg-emerald-400"
-            onClick={() => setScreen("develop")}
-          >
-            Finish · Release
-          </Button>
-        ) : state.currentProject.devPhase.includes("CONFIG") ? (
-          <Button size="lg" className="min-w-[12rem]" onClick={() => setScreen("develop")}>
-            Configure Stage
-          </Button>
-        ) : state.currentProject.devPhase === "POLISHING" ? (
-          <Button size="lg" className="min-w-[12rem]" onClick={() => setScreen("develop")}>
-            Finish · Polish
-          </Button>
-        ) : (
-          <Button size="lg" className="min-w-[12rem]" variant="secondary" onClick={() => setScreen("develop")}>
-            Open Desk · {ov.phase.title}
-          </Button>
-        )}
-        <Button size="md" variant="ghost" onClick={() => setModal("loopGuide")}>
-          How it works
-        </Button>
-      </div>
-
-      {/* Office goal card — bible proofs, no formulas computed here */}
-      {state.office === 1 && ov.officeGoal && (
-        <div className="game-panel mt-4 w-full max-w-md px-4 py-3">
-          <div className="mb-2 text-center text-[10px] font-bold uppercase tracking-wide text-muted">
-            {ov.officeGoal.activeMove
-              ? "Move in progress"
-              : ov.officeGoal.offerState === "offered" || ov.officeGoal.offerState === "deferred"
-                ? "Office offer ready"
-                : "Path to first office"}
-          </div>
-          {ov.officeGoal.activeMove ? (
-            <p className="text-center text-sm font-semibold text-fg">
-              Keys hand over week {ov.officeGoal.activeMove.completesWeek} (now W{state.week}).
+      {showChrome && immersive && (
+        <>
+          <div className="se-room-caption pointer-events-none">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#6affe0]/90">
+              {state.currentProject
+                ? busy
+                  ? art.hotspotBusy
+                  : art.hotspotOpen
+                : art.hotspotIdle}
             </p>
-          ) : (
-            <div className="space-y-2">
-              {(
-                [
-                  [
-                    "Fans",
-                    ov.fans,
-                    ov.officeGoal.fansNeed,
-                    formatFans(ov.fans),
-                    formatFans(ov.officeGoal.fansNeed),
-                  ],
-                  [
-                    "Games",
-                    ov.gamesPublished,
-                    ov.officeGoal.gamesNeed,
-                    String(ov.gamesPublished),
-                    String(ov.officeGoal.gamesNeed),
-                  ],
-                  [
-                    "Cash",
-                    ov.cash,
-                    ov.officeGoal.cashNeed,
-                    formatCash(ov.cash),
-                    formatCash(ov.officeGoal.cashNeed),
-                  ],
-                ] as [string, number, number, string, string][]
-              ).map(([label, cur, need, curL, needL]) => {
-                const pct = Math.min(100, Math.round((cur / Math.max(1, need)) * 100));
-                return (
-                  <div key={label}>
-                    <div className="mb-0.5 flex justify-between text-[11px] font-semibold text-fg">
-                      <span>{label}</span>
-                      <span className="tabular text-muted">
-                        {curL} / {needL}
-                      </span>
-                    </div>
-                    <div className="h-1.5 overflow-hidden rounded-full bg-panel">
-                      <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${pct}%` }} />
-                    </div>
-                  </div>
-                );
-              })}
-              {(ov.officeGoal.offerState === "offered" ||
-                ov.officeGoal.offerState === "deferred" ||
-                ov.officeGoal.offerState === "eligible" ||
-                ov.officeGoal.canMove) && (
-                <Button size="sm" className="mt-2 w-full" onClick={() => setModal("officeOffer")}>
-                  View office offer
-                </Button>
+            <div className="mt-1 flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h1 className="text-lg font-semibold tracking-tight text-white/90 sm:text-xl">
+                  {state.companyName}
+                </h1>
+                <p className="text-xs text-white/40">
+                  {state.office === 1
+                    ? "Garage · Phase One"
+                    : state.office === 2
+                      ? "Small office"
+                      : state.office >= 4
+                        ? "Global campus"
+                        : "Studio floor"}
+                </p>
+              </div>
+              {state.office === 1 && ov.officeGoal && !ov.officeGoal.activeMove && (
+                <p className="max-w-[16rem] text-right text-[12px] leading-snug text-white/50">
+                  <span className="text-[#6affe0]/80">Next · </span>
+                  {ov.gamesPublished}/{ov.officeGoal.gamesNeed} games ·{" "}
+                  {formatFans(ov.fans)}/{formatFans(ov.officeGoal.fansNeed)} fans · hold{" "}
+                  {formatCash(ov.officeGoal.cashNeed)}
+                </p>
               )}
             </div>
-          )}
-        </div>
+          </div>
+
+          <div className="se-float-actions">
+            {!state.currentProject ? (
+              <button type="button" className="se-cta" onClick={() => setModal("newGame")}>
+                Develop new game
+              </button>
+            ) : state.currentProject.devPhase === "READY_TO_RELEASE" ? (
+              <button type="button" className="se-cta" onClick={() => setScreen("develop")}>
+                Finish · Release
+              </button>
+            ) : state.currentProject.devPhase.includes("CONFIG") ? (
+              <button type="button" className="se-cta" onClick={() => setScreen("develop")}>
+                Configure stage
+              </button>
+            ) : state.currentProject.devPhase === "POLISHING" ? (
+              <button type="button" className="se-cta" onClick={() => setScreen("develop")}>
+                Polish build
+              </button>
+            ) : (
+              <button type="button" className="se-cta" onClick={() => setScreen("develop")}>
+                Open desk · {ov.phase.title}
+              </button>
+            )}
+            <button type="button" className="se-cta-secondary" onClick={() => setModal("loopGuide")}>
+              How it works
+            </button>
+            {(ov.officeGoal?.offerState === "offered" ||
+              ov.officeGoal?.offerState === "deferred" ||
+              ov.officeGoal?.canMove) && (
+              <button type="button" className="se-cta-secondary" onClick={() => setModal("officeOffer")}>
+                Office offer
+              </button>
+            )}
+          </div>
+        </>
       )}
     </div>
   );
@@ -780,43 +671,44 @@ function TechReadinessPanel({
 
 /* ═══════════════════════════ Desk overlay (stage + polish) ═══════════════════════════ */
 
-function DevelopOverlay() {
+function DevelopOverlay({ sheet = false }: { sheet?: boolean }) {
   const screen = useGame((s) => s.screen);
   const project = useGame((s) => s.currentProject);
+  const setScreen = useGame((s) => s.setScreen);
   const office = useGame((s) => s.office);
   const deskArt = roomArtDefForOffice(office).desk;
-  // Show desk panel when on develop screen, or auto when config needed on studio
-  const needsDesk =
-    project &&
-    (screen === "develop" ||
-      project.devPhase.includes("CONFIG") ||
-      project.devPhase === "POLISHING" ||
-      project.devPhase === "READY_TO_RELEASE");
 
-  if (!needsDesk || !project) return null;
-  if (screen !== "develop" && !project.devPhase.includes("CONFIG") && project.devPhase !== "POLISHING" && project.devPhase !== "READY_TO_RELEASE") {
-    return null;
+  if (!project || screen !== "develop") return null;
+
+  if (sheet) {
+    return (
+      <div className="se-desk-sheet" role="dialog" aria-label="Development desk">
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-white/10 px-3 py-2">
+          <div className="min-w-0">
+            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#6affe0]/90">Desk</p>
+            <p className="truncate text-sm font-bold text-white/90">{project.title}</p>
+          </div>
+          <button
+            type="button"
+            className="se-cta-secondary !min-h-9 !px-3 !text-xs"
+            onClick={() => setScreen("studio")}
+          >
+            Close
+          </button>
+        </div>
+        <div className="relative h-20 shrink-0 overflow-hidden sm:h-24">
+          <img src={deskArt} alt="" className="h-full w-full object-cover object-center" draggable={false} />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
+        </div>
+        <div className="se-desk-scroll">
+          <DevelopPanel />
+        </div>
+      </div>
+    );
   }
-  // On studio with only RUNNING — don't force overlay
-  if (screen === "studio" && project.devPhase.includes("RUNNING")) return null;
 
   return (
     <div className="mx-auto mt-2 w-full max-w-lg px-3 pb-6">
-      <div className="relative mb-3 overflow-hidden rounded-2xl border-2 border-border-strong shadow-[var(--shadow-card)]">
-        <img
-          src={deskArt}
-          alt=""
-          className="aspect-[21/9] w-full object-cover object-[center_50%]"
-          draggable={false}
-        />
-        <div className="absolute inset-0 bg-gradient-to-r from-black/55 via-black/20 to-transparent" />
-        <div className="absolute bottom-2 left-3 right-3 flex items-end justify-between gap-2">
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-muted">Work desk</p>
-            <p className="text-sm font-bold text-fg">{project.title}</p>
-          </div>
-        </div>
-      </div>
       <DevelopPanel />
     </div>
   );
@@ -1196,23 +1088,11 @@ function ScreenBackdrop({
   const year = useGame((s) => s.year);
   const art = screenRoomArt(screen, office, year);
   return (
-    <div className="relative min-h-[calc(100dvh-8rem)]">
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <img
-          src={art.src}
-          alt=""
-          className="h-full w-full scale-105 object-cover opacity-40 blur-[1px]"
-          style={{ objectPosition: art.objectPosition }}
-          draggable={false}
-        />
-        <div className="absolute inset-0 bg-[color-mix(in_oklab,var(--color-bg)_82%,transparent)]" />
-      </div>
-      <div className="relative z-10 mx-auto max-w-3xl px-3 pb-10 pt-3">
-        <p className="mb-2 text-center text-[10px] font-bold uppercase tracking-[0.18em] text-muted">
-          {art.label}
-        </p>
-        <div className="space-y-3">{children}</div>
-      </div>
+    <div className="mx-auto max-w-3xl space-y-3">
+      <p className="text-center text-[10px] font-bold uppercase tracking-[0.18em] text-white/40">
+        {art.label}
+      </p>
+      <div className="space-y-3">{children}</div>
     </div>
   );
 }
