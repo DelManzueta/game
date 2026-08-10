@@ -14,9 +14,9 @@ export type MarketingBalance = {
 export const DEFAULT_MARKETING_BALANCE: MarketingBalance = {
   awarenessDecayPerDay: 0.002,
   /** Per-day hype decay; week tick ≈ 7 days. */
-  hypeDecayPerDay: 0.08,
+  hypeDecayPerDay: 0.018,  // ~12%/week continuous
   maximumAwarenessPoints: 1000,
-  maximumHype: 100,
+  maximumHype: 150,
 };
 
 export type CampaignSpec = {
@@ -36,7 +36,22 @@ export type CampaignSpec = {
 };
 
 /** Garage → early office campaign catalog. */
+/** Blueprint Module 4 tiers + garage extras. Costs/hype match terminal tycoon. */
 export const CAMPAIGN_CATALOG: CampaignSpec[] = [
+  {
+    campaignId: "dev_blog",
+    name: "Raw Dev Blog Post",
+    description: "Free-ish DIY buzz. Small hype stack before launch.",
+    cost: 2000,
+    durationDays: 14,
+    immediateAwarenessPoints: 10,
+    immediateHypePoints: 8, // ~5–12 band midpoint +
+    dailyAwarenessPoints: 0.5,
+    dailyHypePoints: 0.1,
+    reachBonus: 0.03,
+    allowedPhases: ["pre_release", "released"],
+    requiredGate: "marketing",
+  },
   {
     campaignId: "flyer_run",
     name: "Garage Flyer Run",
@@ -53,22 +68,22 @@ export const CAMPAIGN_CATALOG: CampaignSpec[] = [
   },
   {
     campaignId: "magazine_ad",
-    name: "Magazine Ad",
-    description: "Trade press page. Steady awareness while live.",
-    cost: 8000,
+    name: "Gaming Magazine Ad",
+    description: "Trade press page. Solid pre-launch heat.",
+    cost: 15000,
     durationDays: 28,
-    immediateAwarenessPoints: 28,
-    immediateHypePoints: 12,
+    immediateAwarenessPoints: 30,
+    immediateHypePoints: 32, // ~20–45
     dailyAwarenessPoints: 1.4,
-    dailyHypePoints: 0.25,
-    reachBonus: 0.1,
+    dailyHypePoints: 0.3,
+    reachBonus: 0.12,
     allowedPhases: ["pre_release", "released"],
     requiredGate: "marketing",
   },
   {
     campaignId: "demo_push",
     name: "Demo Push",
-    description: "Playable snippets and booth time. Strong hype spike.",
+    description: "Playable snippets. Strong hype spike.",
     cost: 15000,
     durationDays: 21,
     immediateAwarenessPoints: 22,
@@ -78,6 +93,20 @@ export const CAMPAIGN_CATALOG: CampaignSpec[] = [
     reachBonus: 0.12,
     allowedPhases: ["pre_release", "released"],
     requiredGate: "marketing",
+  },
+  {
+    campaignId: "g3_booth",
+    name: "G3 Convention Booth",
+    description: "Big-show floor presence. Massive launch-week multiplier.",
+    cost: 65000,
+    durationDays: 21,
+    immediateAwarenessPoints: 70,
+    immediateHypePoints: 95, // ~60–130 clamped to max 100
+    dailyAwarenessPoints: 2.5,
+    dailyHypePoints: 0.8,
+    reachBonus: 0.35,
+    allowedPhases: ["pre_release", "released"],
+    requiredGate: "advanced_marketing",
   },
   {
     campaignId: "influencer_blitz",
@@ -94,6 +123,24 @@ export const CAMPAIGN_CATALOG: CampaignSpec[] = [
     requiredGate: "advanced_marketing",
   },
 ];
+
+/** Studio-level campaign (no released title yet) — blueprint Module 4. */
+export function studioCampaignHype(campaignId: string, seed: number): {
+  cost: number;
+  hypeGain: number;
+  name: string;
+} | null {
+  const spec = getCampaignSpec(campaignId);
+  if (!spec) return null;
+  // Deterministic band from min/max implied by immediateHype ± variance
+  const base = spec.immediateHypePoints;
+  const jitter = ((seed % 7) - 3); // -3..+3
+  return {
+    cost: spec.cost,
+    hypeGain: Math.max(1, base + jitter),
+    name: spec.name,
+  };
+}
 
 export function getCampaignSpec(id: string): CampaignSpec | undefined {
   return CAMPAIGN_CATALOG.find((c) => c.campaignId === id);

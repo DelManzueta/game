@@ -139,8 +139,8 @@ import {
   startMarketingCampaign,
   getCampaignSpec,
   emptyMarketingState,
+  studioCampaignHype,
   advanceMarketing,
-  CAMPAIGN_CATALOG,
 } from "./commercial/marketing";
 import { applyLedger, emptyLedger } from "./finance/ledger";
 import {
@@ -957,7 +957,8 @@ function releaseProject(next: GameState, project: GameProject): GameState {
       techPoints: scored.techPoints,
       reviewScore: reviews.avg,
       size: scored.size,
-      platformMarket: Math.max(0.35, platform.marketSize),
+      // Lifecycle-adjusted share (retired / late platforms hurt)
+      platformMarket: Math.max(0.15, platformMarket),
       comboMult: classicComboMultiplier(scored.topicId, scored.genreId),
       marketingSpend: scored.marketingSpend,
       fans: next.fans,
@@ -1246,7 +1247,7 @@ next.gamesPublished += 1;
     hidden * 1.5 +
     (scored.researchEarned ?? 0) * 0.12 +
     releaseRpSpike(reviews.avg);
-  next.hype = Math.max(0, next.hype * 0.5 + hidden);
+  next.hype = Math.max(0, Math.min(20, hidden * 0.4)); // launch burns hype pool
   next.currentProject = null;
   next.lastReviewGameId = released.id;
   next.selectedGameId = released.id;
@@ -1353,6 +1354,7 @@ interface Actions {
   selectGame: (id: string | null) => void;
   completeReport: (id: string) => void;
   startTitleCampaign: (gameId: string, campaignId: string) => string | null;
+  runStudioMarketing: (campaignId: string) => string | null;
   applyCheat: (cheat: string, arg?: string | number) => void;
   resolveEvent: (choiceIndex: number) => void;
   exportSave: () => string;
@@ -2043,7 +2045,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     }
 
     next = tryFireEvent(next);
-    next.hype = Math.max(0, next.hype * 0.98);
+    next.hype = Math.max(0, Math.floor(next.hype * 0.88)); // ~12% weekly decay (Module 4)
 
     if (
       !next.settings.disableBankruptcy &&
@@ -2978,6 +2980,62 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         "good",
       ),
     });
+  },
+
+
+  runStudioMarketing: (campaignId) => {
+    const state = get();
+    const unlocked =
+      state.unlocks.marketing === "owned" ||
+      state.flags.marketing ||
+      state.researched.includes("marketing") ||
+      state.gamesPublished >= 1 ||
+      state.currentProject != null;
+    if (!unlocked) {
+      return "Marketing opens after you start or ship a game (or research Marketing 101).";
+    }
+    const seed = hashSeed(state.campaignSeed, "studio-mkt", campaignId, state.week);
+    const pack = studioCampaignHype(campaignId, seed);
+    if (!pack) return "Unknown campaign.";
+    const advanced =
+      campaignId === "g3_booth" || campaignId === "influencer_blitz";
+    if (
+      advanced &&
+      state.unlocks.advanced_marketing !== "owned" &&
+      state.office < 2 &&
+      state.gamesPublished < 3
+    ) {
+      return "Advanced campaigns need more studio presence.";
+    }
+    if (state.cash < pack.cost) return `Need ${pack.cost.toLocaleString()} cash.`;
+    let next: GameState = {
+      ...state,
+      cash: state.cash - pack.cost,
+      hype: Math.min(150, state.hype + pack.hypeGain),
+      dirty: true,
+      notifications: pushNote(
+        state,
+        `${pack.name}: +${pack.hypeGain} hype (studio total ${Math.min(150, state.hype + pack.hypeGain)}).`,
+        "good",
+      ),
+    };
+    next.ledger = applyLedger(next.ledger, {
+      week: next.week,
+      amount: -pack.cost,
+      category: "marketing",
+      label: pack.name,
+      ref: `studio-mkt-${campaignId}-w${next.week}`,
+    });
+    // Fold into active project spend so release sales see it
+    if (next.currentProject) {
+      next.currentProject = {
+        ...next.currentProject,
+        marketingSpend: (next.currentProject.marketingSpend ?? 0) + pack.cost,
+        hype: (next.currentProject.hype ?? 0) + pack.hypeGain,
+      };
+    }
+    set(next);
+    return null;
   },
 
   startTitleCampaign: (gameId, campaignId) => {

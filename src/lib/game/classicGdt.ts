@@ -257,7 +257,8 @@ export function classicUnitsSold(opts: {
   const review = clamp(opts.reviewScore, 1, 10);
   const size = SIZE_STATS[opts.size];
   const fanBoost = 1 + Math.min(1.2, (opts.fans ?? 0) / 60_000);
-  const hypeBoost = 1 + Math.min(0.6, (opts.hype ?? 0) / 140);
+  // Blueprint: hype_mult = 1 + current_hype / 100
+  const hypeBoost = 1 + Math.min(1.5, Math.max(0, opts.hype ?? 0) / 100);
   const mktBoost = 1 + Math.min(0.5, (opts.marketingSpend ?? 0) / 100_000);
 
   const base =

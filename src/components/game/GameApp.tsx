@@ -56,6 +56,8 @@ import { Badge, Button, Input, Modal, SearchField, cnJoin } from "@/components/u
 import { GarageLoopFlowchart, ScoringPipelineFlow } from "@/components/game/LoopFlowchart";
 import { MarketScreen } from "@/components/game/MarketScreen";
 import { SalesChart, salesPointsFromGame } from "@/components/game/SalesChart";
+import { CAMPAIGN_CATALOG } from "@/lib/game/commercial/marketing";
+import { getPlatformSpec, platformMarketState, weekToCampaignDay } from "@/lib/game/platforms/lifecycle";
 import { SYSTEM_UNLOCKS, describeUnlockRequirements } from "@/lib/game/progression/unlockRegistry";
 import { idealPhaseSliders } from "@/lib/game/classicGdt";
 import {
@@ -303,8 +305,18 @@ function PlayingShell() {
               {screen === "staff" && <StaffScreen />}
               {screen === "engines" && <EnginesScreen />}
               {screen === "platforms" && <PlatformsScreen />}
-              {screen === "finances" && <FinancesScreen />}
-              {screen === "market" && <MarketScreen />}
+              {screen === "finances" && (
+        <div className="space-y-3">
+          <ContractsScreen />
+          <FinancesScreen />
+        </div>
+      )}
+              {screen === "market" && (
+        <div className="space-y-2">
+          <MarketingPanel />
+          <MarketScreen />
+        </div>
+      )}
               {screen === "settings" && <SettingsScreen />}
             </div>
           </div>
@@ -503,28 +515,44 @@ function GarageRoomView({ immersive = false }: { immersive?: boolean }) {
             </div>
           </div>
 
+          {/* Master loop command strip (Module 6) */}
           <div className="se-float-actions">
             {!state.currentProject ? (
               <button type="button" className="se-cta" onClick={() => setModal("newGame")}>
-                Develop new game
+                1 · Develop game
               </button>
             ) : state.currentProject.devPhase === "READY_TO_RELEASE" ? (
               <button type="button" className="se-cta" onClick={() => setScreen("develop")}>
-                Finish · Release
+                1 · Finish · Release
               </button>
             ) : state.currentProject.devPhase.includes("CONFIG") ? (
               <button type="button" className="se-cta" onClick={() => setScreen("develop")}>
-                Configure stage
+                1 · Configure stage
               </button>
             ) : state.currentProject.devPhase === "POLISHING" ? (
               <button type="button" className="se-cta" onClick={() => setScreen("develop")}>
-                Polish build
+                1 · Polish build
               </button>
             ) : (
               <button type="button" className="se-cta" onClick={() => setScreen("develop")}>
-                Open desk · {ov.phase.title}
+                1 · Desk · {ov.phase.title}
               </button>
             )}
+            <button type="button" className="se-cta-secondary" onClick={() => setScreen("market")}>
+              2 · Marketing
+            </button>
+            <button type="button" className="se-cta-secondary" onClick={() => setScreen("finances")}>
+              3 · Contracts
+            </button>
+            <button type="button" className="se-cta-secondary" onClick={() => setScreen("platforms")}>
+              4 · Systems
+            </button>
+            <button type="button" className="se-cta-secondary" onClick={() => setScreen("engines")}>
+              5 · Engines
+            </button>
+            <button type="button" className="se-cta-secondary" onClick={() => setScreen("staff")}>
+              6 · People
+            </button>
             <button type="button" className="se-cta-secondary" onClick={() => setModal("loopGuide")}>
               How it works
             </button>
@@ -536,6 +564,10 @@ function GarageRoomView({ immersive = false }: { immersive?: boolean }) {
               </button>
             )}
           </div>
+          <p className="mt-2 text-center text-[10px] font-semibold tabular text-white/55">
+            Hype {Math.round(state.hype)} · RP {Math.floor(state.researchPoints)} · Staff{" "}
+            {state.staff.length}
+          </p>
         </>
       )}
     </div>
@@ -1035,6 +1067,81 @@ function VerticalAllocBar({
 }
 
 /* ═══════════════════════════ Secondary screens ═══════════════════════════ */
+
+
+function PlatformLifecycleLine({ platformId, year }: { platformId: string; year: number }) {
+  const week = useGame((s) => s.week);
+  try {
+    const spec = getPlatformSpec(platformId);
+    const day = weekToCampaignDay(week);
+    const m = platformMarketState(spec, { day });
+    const launchYear = Math.floor(spec.launchDay / (48 * 7)) + 1982; // approximate from campaign day
+    const age = Math.max(0, year - (getPlatform(platformId)?.year ?? launchYear));
+    return (
+      <p className="mt-0.5 text-[11px] text-white/70">
+        Lifecycle: <span className="font-bold capitalize">{m.lifecycle.replace(/_/g, " ")}</span>
+        {m.isLegacy ? " · retired shelves" : ""} · live factor{" "}
+        {Math.round(m.lifecycleFactor * 100)}%
+        {age > 0 ? ` · age ${age}y` : ""}
+        {m.lifecycleFactor < 0.35 && !m.isLegacy ? " · late cycle (sales soft)" : ""}
+      </p>
+    );
+  } catch {
+    return null;
+  }
+}
+
+function MarketingPanel() {
+  const hype = useGame((s) => s.hype);
+  const cash = useGame((s) => s.cash);
+  const runStudioMarketing = useGame((s) => s.runStudioMarketing);
+  const project = useGame((s) => s.currentProject);
+  const [msg, setMsg] = useState("");
+  const tiers = CAMPAIGN_CATALOG.filter((c) =>
+    ["dev_blog", "magazine_ad", "g3_booth", "flyer_run", "demo_push"].includes(c.campaignId),
+  );
+
+  return (
+    <div className="game-panel mt-3 space-y-2 p-3">
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-bold text-fg">Marketing campaigns</h3>
+          <p className="text-xs text-muted">
+            Studio hype <span className="font-bold tabular text-accent">{Math.round(hype)}</span>
+            {" · "}decays ~12%/week · burns at launch
+          </p>
+        </div>
+        {project && (
+          <span className="text-[10px] text-muted">Title spend {formatCash(project.marketingSpend ?? 0)}</span>
+        )}
+      </div>
+      {msg && <p className="text-xs text-warn">{msg}</p>}
+      <ul className="space-y-2">
+        {tiers.map((c) => (
+          <li
+            key={c.campaignId}
+            className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-elevated px-3 py-2"
+          >
+            <div className="min-w-0">
+              <div className="font-semibold text-fg">{c.name}</div>
+              <p className="text-[11px] text-muted">{c.description}</p>
+              <p className="text-[10px] text-subtle">
+                ~+{c.immediateHypePoints} hype · {formatCash(c.cost)}
+              </p>
+            </div>
+            <Button
+              size="sm"
+              disabled={cash < c.cost}
+              onClick={() => setMsg(runStudioMarketing(c.campaignId) ?? `${c.name} live.`)}
+            >
+              Run
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 function GamesScreen() {
   const games = useGame((s) => s.releasedGames);
@@ -1796,8 +1903,9 @@ function PlatformsScreen() {
               <h3 className="text-xl font-bold text-white">{focused.name}</h3>
               <p className="text-xs text-white/60">
                 {focused.year} · {unlocked.includes(focused.id) ? "Licensed" : "Not licensed"} · market{" "}
-                {Math.round(focused.marketSize * 100)}%
+                {Math.round(focused.marketSize * 100)}% base
               </p>
+              <PlatformLifecycleLine platformId={focused.id} year={year} />
             </div>
           </div>
         </div>
