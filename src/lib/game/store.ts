@@ -906,6 +906,101 @@ function applyEventChoice(state: GameState, choiceIndex: number): GameState {
   const pe = state.pendingEvent;
   if (!pe) return state;
 
+  // Mid-dev crisis responses (office 2+ only; never spawned in Garage)
+  const crisisCode = (pe as { crisisCode?: string }).crisisCode;
+  if (crisisCode && state.currentProject) {
+    let p = { ...state.currentProject };
+    let cash = state.cash;
+    let ledger = state.ledger;
+    let hype = state.hype;
+    let rp = state.researchPoints;
+    let note = "Crisis acknowledged.";
+    const idx = Math.max(0, choiceIndex);
+
+    const spend = (amount: number, label: string, ref: string) => {
+      const t = applyCashTransaction(cash, ledger, {
+        week: state.week,
+        amount: -amount,
+        category: "other",
+        label,
+        ref,
+      });
+      if (t.applied) {
+        cash = t.cash;
+        ledger = t.ledger;
+        return true;
+      }
+      return false;
+    };
+
+    if (crisisCode === "CRISIS_01") {
+      if (idx === 0 && spend(2500, "Contain source leak", `crisis-01-a-w${state.week}`)) {
+        rp += 8;
+        note = "Keys rotated — recovered 8 RP.";
+      } else if (idx === 1 && spend(400, "Honesty post", `crisis-01-b-w${state.week}`)) {
+        hype = Math.min(150, hype + 8);
+        note = "Public honesty landed — hype recovers.";
+      } else {
+        note = "You push on quietly.";
+      }
+    } else if (crisisCode === "CRISIS_02") {
+      if (idx === 0 && spend(1800, "Bug bash", `crisis-02-a-w${state.week}`)) {
+        p = { ...p, bugs: Math.max(0, p.bugs - 12) };
+        note = "Bug bash cleared 12 bugs.";
+      } else if (idx === 1 && spend(4000, "Contractor week", `crisis-02-b-w${state.week}`)) {
+        p = {
+          ...p,
+          bugs: Math.max(0, p.bugs - 20),
+          crisisReviewPenalty: Math.max(0, (p.crisisReviewPenalty ?? 0) - 0.5),
+        };
+        note = "Contractors crushed bugs and softened the review hit.";
+      } else {
+        note = "Triage only — penalty stands.";
+      }
+    } else if (crisisCode === "CRISIS_03") {
+      if (idx === 0) {
+        if (p.production) {
+          p = {
+            ...p,
+            production: {
+              ...p.production,
+              polishRequired: Math.max(0, (p.production.polishRequired ?? 0) - 80),
+            },
+          };
+        }
+        note = "Scope cut — polish load eased.";
+      } else if (idx === 1 && spend(3000, "Overtime art pass", `crisis-03-b-w${state.week}`)) {
+        note = "Overtime keeps the scope.";
+      } else {
+        note = "You accept the delay tax.";
+      }
+    } else if (crisisCode === "CRISIS_04") {
+      if (idx === 0 && spend(300, "Forced rest", `crisis-04-a-w${state.week}`)) {
+        p = { ...p, fluWeeksLeft: 0 };
+        note = "Rest clears the flu.";
+      } else if (idx === 1) {
+        p = { ...p, fluWeeksLeft: Math.max(0, Math.floor((p.fluWeeksLeft ?? 0) / 2)) };
+        note = "Tasks redistributed — flu impact halved.";
+      } else {
+        note = "You push through sick.";
+      }
+    }
+
+    return {
+      ...state,
+      currentProject: p,
+      cash,
+      ledger,
+      hype,
+      researchPoints: rp,
+      pendingEvent: null,
+      modal: null,
+      dirty: true,
+      speed: 1,
+      notifications: pushNote(state, note, "info"),
+    };
+  }
+
   // Marketing opportunity events: choice 0 = Not now (dismiss, keep offered for later idle)
   const mktId = (pe as { marketingOpportunityId?: string }).marketingOpportunityId;
   if (mktId && state.marketingOpportunities) {
@@ -2938,14 +3033,17 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       }
     }
 
-    // Module 8 — development crises: OFF in Garage Phase One.
-    // Later offices: rare soft note only (no modal pause, no forced engine fail).
+    // Module 8 — mid-dev crises: NEVER in Garage (office 1 / Phase One).
+    // From First Office (office >= 2): full crisis rolls every 6 running weeks,
+    // with player choices to absorb, mitigate, or push through.
     if (
       !isGaragePhaseOne(next) &&
-      lateSystemAllowed(next, "qualityCrisisEvents") &&
+      (next.office ?? 1) >= 2 &&
       next.currentProject &&
       next.currentProject.devPhase.includes("RUNNING") &&
-      next.week % 12 === 0 &&
+      !next.pendingEvent &&
+      next.modal == null &&
+      next.week % 6 === 0 &&
       next.currentProject.lastCrisisWeek !== next.week
     ) {
       const crisis = rollDevelopmentCrisis({
@@ -2954,20 +3052,76 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         projectId: next.currentProject.id,
         crunch: !!next.currentProject.crunchMode,
       });
-      // Soft only: small bug tick, no review penalty, no modal, no rent charge
-      if (crisis.code !== "CRISIS_05" && crisis.bugsDelta > 0) {
-        next.currentProject = {
-          ...next.currentProject,
-          lastCrisisWeek: next.week,
-          bugs: next.currentProject.bugs + Math.min(2, crisis.bugsDelta),
+      let p = {
+        ...next.currentProject,
+        lastCrisisWeek: next.week,
+      };
+      if (crisis.code === "CRISIS_05") {
+        next.currentProject = p;
+        // Clean week — quiet (no modal)
+      } else {
+        // Stage mechanical baseline (mitigation choices may soften further in resolveEvent)
+        p = {
+          ...p,
+          bugs: p.bugs + crisis.bugsDelta,
+          crisisReviewPenalty:
+            (p.crisisReviewPenalty ?? 0) + crisis.reviewPenalty,
+          fluWeeksLeft: Math.max(p.fluWeeksLeft ?? 0, crisis.designGenMultWeeks),
         };
-        next.notifications = pushNote(
-          next,
-          `Minor hiccup: ${crisis.name}. Keep shipping.`,
-          "info",
-        );
-      } else if (next.currentProject) {
-        next.currentProject = { ...next.currentProject, lastCrisisWeek: next.week };
+        if (crisis.extraWeeks > 0 && p.production) {
+          p = {
+            ...p,
+            production: {
+              ...p.production,
+              polishRequired: (p.production.polishRequired ?? 0) + crisis.extraWeeks * 60,
+            },
+          };
+        }
+        next.currentProject = p;
+        if (crisis.rpDelta) {
+          next.researchPoints = Math.max(0, next.researchPoints + crisis.rpDelta);
+        }
+        if (crisis.hypeDelta) {
+          next.hype = Math.max(0, next.hype + crisis.hypeDelta);
+        }
+        // Present choice menu (not a dead-end "engine failed" dump)
+        const choicesByCode: Record<
+          string,
+          { label: string; effect: string }[]
+        > = {
+          CRISIS_01: [
+            { label: "Contain & rotate keys", effect: "−$2,500 · recover 8 RP" },
+            { label: "Public honesty post", effect: "+hype repair · −$400" },
+            { label: "Stay quiet & push", effect: "Accept the hit" },
+          ],
+          CRISIS_02: [
+            { label: "All-hands bug bash", effect: "−$1,800 · −12 bugs" },
+            { label: "Hire a contractor week", effect: "−$4,000 · −20 bugs · clear 0.5 score hit" },
+            { label: "Ship-quality triage only", effect: "Keep current bugs/penalty" },
+          ],
+          CRISIS_03: [
+            { label: "Cut scope immediately", effect: "Reduce polish load · free" },
+            { label: "Pay overtime art pass", effect: "−$3,000 · keep scope" },
+            { label: "Accept the delay tax", effect: "Keep extra polish debt" },
+          ],
+          CRISIS_04: [
+            { label: "Forced rest + soup", effect: "Clear flu · −$300" },
+            { label: "Redistribute tasks", effect: "Halve flu impact" },
+            { label: "Push through sick", effect: "Keep flu weeks" },
+          ],
+        };
+        next.notifications = pushNote(next, crisis.note, "warn");
+        next.pendingEvent = {
+          id: `crisis_${crisis.code}_${next.week}`,
+          title: crisis.name,
+          body: `${crisis.note}\n\nHow do you respond?`,
+          choices: choicesByCode[crisis.code] ?? [
+            { label: "Continue", effect: "Dismiss" },
+          ],
+        };
+        (next.pendingEvent as { crisisCode?: string }).crisisCode = crisis.code;
+        next.modal = "event";
+        next.speed = 0;
       }
     }
 
@@ -3561,8 +3715,9 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     let modal: GameState["modal"] = null;
     let pendingEvent: GameState["pendingEvent"] = state.pendingEvent;
 
-    // Quality crisis — quarantined in Garage Phase One (Foundation Lock)
+    // Quality crisis — never in Garage; optional later systems only
     if (
+      !isGaragePhaseOne(state) &&
       lateSystemAllowed(state, "qualityCrisisEvents") &&
       stageNum === 1 &&
       !(project as { qualityCrisisRolled?: boolean }).qualityCrisisRolled

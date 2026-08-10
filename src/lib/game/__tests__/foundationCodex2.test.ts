@@ -195,3 +195,27 @@ describe("rent exact", () => {
     assert.ok(!(s.ledger?.entries ?? []).some((e) => e.label === "Balance reconciliation"));
   });
 });
+
+
+describe("mid-dev crisis garage gate", () => {
+  it("never opens a crisis modal while still in the Garage", () => {
+    useGame.getState().newGame("Crisis Gate Garage", 424242);
+    // Simulate many development weeks if a project is running — force office 1
+    useGame.setState({ office: 1, speed: 1 });
+    const st0 = useGame.getState();
+    assert.equal(st0.office, 1);
+    // Even if we invent a running project, tick path must not crisis in garage
+    // (no project → no crisis; with project still gated by isGaragePhaseOne)
+    for (let i = 0; i < 30; i++) {
+      useGame.getState().tick();
+      if (useGame.getState().pendingEvent) {
+        const pe = useGame.getState().pendingEvent!;
+        assert.ok(
+          !String(pe.id).startsWith("crisis_"),
+          `Garage must not spawn mid-dev crisis, got ${pe.id}`,
+        );
+        useGame.setState({ pendingEvent: null, modal: null, speed: 1 });
+      }
+    }
+  });
+});
