@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Studio OS // v3.4.0 Extended Enterprise Grid</title>
+<style>
+:root{--bg:#040407;--panel:rgba(10,10,18,.92);--box:#0f0f1d;--border:#1b1b30;--cyan:#00f0ff;--violet:#a600ff;--lime:#00ff66;--rose:#ff0055;--gold:#ffcc00;--text:#f0f0f5;--dim:#5c5c75}
+*{box-sizing:border-box}body{margin:0;padding:16px;font-family:system-ui,sans-serif;background:linear-gradient(145deg,#100a21,#040407 60%);color:var(--text)}
+h1{font-size:1.15rem;letter-spacing:1.5px;text-transform:uppercase;border-bottom:1px solid var(--border);padding-bottom:10px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
+.grid{display:grid;grid-template-columns:minmax(280px,380px) 1fr;gap:16px;max-width:1600px;margin:0 auto}
+@media(max-width:900px){.grid{grid-template-columns:1fr}}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 16px 40px #000a}
+.hud{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+.tile{background:var(--box);border:1px solid var(--border);border-left:4px solid var(--violet);padding:10px;border-radius:8px}
+.tile.lime{border-left-color:var(--lime)}.tile.cyan{border-left-color:var(--cyan)}.tile.gold{border-left-color:var(--gold)}
+.lbl{font-size:.62rem;color:var(--dim);text-transform:uppercase;font-weight:700}.val{font:900 1.1rem monospace;color:#fff}
+.tabs{display:flex;gap:4px;background:#0006;padding:4px;border-radius:6px;border:1px solid var(--border);margin-bottom:12px;flex-wrap:wrap}
+.tab{flex:1;min-width:5rem;background:0;border:0;color:var(--dim);padding:10px 4px;border-radius:4px;font-size:.68rem;font-weight:800;text-transform:uppercase;cursor:pointer}
+.tab.on{background:#17172e;color:var(--cyan);border:1px solid #00f0ff33}
+.bar{height:6px;background:#08080f;border-radius:3px;overflow:hidden;border:1px solid #141424}
+.fill{height:100%;width:0;background:linear-gradient(90deg,var(--violet),var(--cyan))}
+.btn{width:100%;padding:12px;border:0;border-radius:6px;font-weight:800;font-size:.75rem;text-transform:uppercase;letter-spacing:1px;cursor:pointer;background:linear-gradient(135deg,#0044ff,var(--cyan));color:#fff;margin-top:8px}
+.btn.ghost{background:#17172e;border:1px solid var(--border);box-shadow:none}
+.btn.violet{background:linear-gradient(135deg,var(--violet),#4a0072)}
+label{display:block;font-size:.65rem;color:var(--dim);font-weight:700;margin:10px 0 4px;text-transform:uppercase}
+input,select{width:100%;padding:10px;background:#080811;color:#fff;border:1px solid var(--border);border-radius:6px}
+.row{background:var(--box);border:1px solid var(--border);border-radius:8px;padding:12px;display:grid;grid-template-columns:2fr 1fr auto;gap:8px;align-items:center;margin-bottom:8px;font-size:.82rem}
+.log{height:180px;overflow:auto;background:#020204;border:1px solid var(--border);border-radius:8px;padding:10px;font:12px monospace;margin-top:12px}
+.ok{color:var(--lime)}.err{color:var(--rose)}.warn{color:var(--gold)}
+.view{display:none}.view.on{display:block}
+</style></head><body>
+<h1><span>CORE ENGINE SUITE v3.4.0</span><span id="clock" style="font:monospace;color:var(--dim)">Y1 M1 W1</span></h1>
+<div class="grid">
+<div class="panel">
+  <h3 style="color:var(--cyan);font-size:.9rem">Financial Telemetry</h3>
+  <div class="hud">
+    <div class="tile lime"><div class="lbl">Capital</div><div class="val" id="cash">$75,000</div></div>
+    <div class="tile"><div class="lbl">RP</div><div class="val" id="rp">30</div></div>
+    <div class="tile cyan"><div class="lbl">Fans</div><div class="val" id="fans">0</div></div>
+    <div class="tile gold"><div class="lbl">Tech Debt</div><div class="val" id="debt">0%</div></div>
+  </div>
+  <h3 style="font-size:.85rem">Personnel</h3>
+  <div style="background:var(--box);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px">
+    <div style="display:flex;justify-content:space-between;font-size:.75rem"><span>Lead burnout</span><span id="fatLbl">0%</span></div>
+    <div class="bar" style="margin:6px 0"><div class="fill" id="fatBar" style="background:var(--rose)"></div></div>
+    <div class="lbl" id="status">STATUS: ACTIVE</div>
+    <button class="btn ghost" onclick="vacation()">Grant Rest Leave (2w)</button>
+  </div>
+  <h3 style="font-size:.85rem">Engine</h3>
+  <div style="background:var(--box);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:.8rem;line-height:1.5">
+    <div>Core: <b style="color:var(--cyan)" id="engName">Text Core V1</b></div>
+    <div>Games on profile: <span id="engUses" style="font-family:monospace">0</span> · Age <span id="engAge">0</span>y</div>
+    <button class="btn violet" onclick="refactor()">Refactor (−$25k · 20 RP)</button>
+  </div>
+  <div class="log" id="log"></div>
+</div>
+<div class="panel">
+  <div class="tabs">
+    <button class="tab on" data-v="dev" onclick="tab('dev',this)">Sandbox</button>
+    <button class="tab" data-v="contracts" onclick="tab('contracts',this)">Deals</button>
+    <button class="tab" data-v="market" onclick="tab('market',this)">Store</button>
+    <button class="tab" data-v="save" onclick="tab('save',this)">Save</button>
+  </div>
+  <div id="dev" class="view on">
+    <label>Title</label><input id="title" value="Project Alpha"/>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div><label>Topic</label><select id="topic"><option>Sci-Fi</option><option>City</option><option>Fantasy</option></select></div>
+      <div><label>Genre</label><select id="genre"><option>Action</option><option>Simulation</option><option>RPG</option></select></div>
+    </div>
+    <label>Engine allocation <span id="s1v">50%</span></label>
+    <input type="range" id="s1" min="0" max="100" value="50" oninput="s1v.textContent=this.value+'%'"/>
+    <label><input type="checkbox" id="crunch"/> Crunch mode (+12 fatigue/wk)</label>
+    <div id="bound" style="margin-top:10px;font-size:.75rem;color:var(--gold)">Bound contract: None</div>
+    <button class="btn" onclick="compile()">Execute Compilation</button>
+    <button class="btn ghost" onclick="tick(1)">Idle week</button>
+  </div>
+  <div id="contracts" class="view">
+    <h3 style="font-size:.95rem">Corporate deals</h3>
+    <div id="deals"></div>
+  </div>
+  <div id="market" class="view">
+    <h3 style="font-size:.95rem">Storefront shelves</h3>
+    <div id="shelf"></div>
+  </div>
+  <div id="save" class="view">
+    <button class="btn" onclick="dlSave()">Download JSON</button>
+    <label>Paste JSON</label>
+    <textarea id="paste" rows="8" style="width:100%;background:#080811;color:#fff;border:1px solid var(--border);border-radius:6px;font:11px monospace"></textarea>
+    <button class="btn ghost" onclick="ldSave()">Load</button>
+  </div>
+</div>
+</div>
+<script>
+const DEALS=[
+  {id:'vina_games',company:'Vina Games',minFans:0,req:6.5,advance:45000,cut:0.22},
+  {id:'electronic_arts',company:'Electronic Arts',minFans:25000,req:7.5,advance:180000,cut:0.15},
+  {id:'nintendont',company:'Nintendont',minFans:100000,req:8.5,advance:600000,cut:0.08}
+];
+let S={
+  year:1,month:1,week:1,cash:75000,rp:30,fans:0,trailing:35,hype:0,
+  engineUses:0,engineAge:0,engineName:'Text Core V1',
+  contract:null,
+  worker:{fatigue:0,status:'Active'},
+  market:[], crunch:false
+};
+function log(m,c){const el=document.getElementById('log');const d=document.createElement('div');d.className=c||'';d.textContent='[Y'+S.year+' M'+S.month+' W'+S.week+'] '+m;el.appendChild(d);el.scrollTop=el.scrollHeight}
+function debt(){return Math.min(0.6,S.engineUses*0.06+S.engineAge*0.08)}
+function debtMult(){return Math.max(0.4,1-debt())}
+function outMod(){if(S.worker.status==='Vacation')return 0;if(S.worker.fatigue>75)return 0.45;if(S.worker.fatigue>40)return 0.8;return 1}
+function hud(){
+  clock.textContent='Y'+S.year+' M'+S.month+' W'+S.week;
+  cash.textContent='$'+Math.round(S.cash).toLocaleString();
+  rp.textContent=S.rp; fans.textContent=Math.floor(S.fans).toLocaleString();
+  debt.textContent=Math.round(debt()*100)+'%';
+  fatLbl.textContent=S.worker.fatigue+'%'; fatBar.style.width=S.worker.fatigue+'%';
+  status.textContent='STATUS: '+S.worker.status.toUpperCase();
+  engUses.textContent=S.engineUses; engAge.textContent=S.engineAge; engName.textContent=S.engineName;
+  bound.textContent='Bound contract: '+(S.contract?S.contract.company:'None');
+  renderDeals(); renderShelf();
+}
+function tab(id,btn){document.querySelectorAll('.view').forEach(v=>v.classList.remove('on'));document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));document.getElementById(id).classList.add('on');btn.classList.add('on')}
+function tick(n){
+  for(let i=0;i<n;i++){
+    S.week++;
+    if(S.worker.status==='Vacation'){
+      S.worker.fatigue=Math.max(0,S.worker.fatigue-20);
+      if(S.worker.fatigue===0){S.worker.status='Active';log('Staff recovered.','ok')}
+    } else {
+      const strain=(document.getElementById('crunch').checked?12:3);
+      S.worker.fatigue=Math.min(100,S.worker.fatigue+strain);
+      if(S.worker.fatigue>=100){S.worker.status='Vacation';log('Exhaustion critical — forced leave.','warn')}
+    }
+    if(S.hype>0)S.hype=Math.max(0,S.hype-Math.max(1,Math.floor(S.hype*0.12)));
+    if(S.week>4){
+      S.week=1;S.month++;S.cash-=8000;log('Rent −$8,000','warn'); shelfWeek();
+    }
+    if(S.month>12){S.month=1;S.year++;S.engineAge++;log('New year — engine age +1','warn')}
+  }
+  hud();
+}
+function vacation(){if(S.worker.status==='Vacation')return;S.worker.status='Vacation';log('Rest leave granted.','warn');tick(2)}
+function refactor(){
+  if(S.cash<25000||S.rp<20){log('Refactor denied.','err');return}
+  S.cash-=25000;S.rp-=20;S.engineUses=0;S.engineAge=0;log('Engine refactored — debt cleared.','ok');hud();
+}
+function renderDeals(){
+  const el=document.getElementById('deals');el.innerHTML='';
+  DEALS.forEach(d=>{
+    const locked=S.fans<d.minFans;
+    const div=document.createElement('div');div.className='row';
+    div.innerHTML='<div><b>'+d.company+'</b><br><span style="font-size:.7rem;color:var(--dim)">★'+d.req+' · '+(d.cut*100)+'% cut · '+d.minFans.toLocaleString()+' fans</span></div><div style="color:var(--lime);font-weight:800">+$'+d.advance.toLocaleString()+'</div>';
+    const b=document.createElement('button');b.className='btn';b.style.width='auto';b.style.padding='8px 10px';b.style.margin=0;b.textContent=S.contract&&S.contract.id===d.id?'Bound':'Sign';
+    b.disabled=locked||!!S.contract;b.onclick=()=>sign(d.id);div.appendChild(b);el.appendChild(div);
+  });
+}
+function sign(id){
+  const d=DEALS.find(x=>x.id===id);if(!d||S.contract)return;
+  if(S.fans<d.minFans){log('Need more fans.','err');return}
+  S.contract=d;S.cash+=d.advance;log('Signed '+d.company+' advance +$'+d.advance.toLocaleString(),'ok');hud();
+}
+function compile(){
+  if(S.worker.status==='Vacation'){alert('Lead on leave');return}
+  const title=document.getElementById('title').value||'Untitled';
+  const topic=document.getElementById('topic').value;
+  const genre=document.getElementById('genre').value;
+  const s1=+document.getElementById('s1').value||50;
+  let pts=(Math.random()*20+35)*outMod()*debtMult()*(0.7+s1/200);
+  const combo=((genre==='Action'&&topic==='Sci-Fi')||(genre==='Simulation'&&topic==='City'))?1.3:0.7;
+  pts*=combo;
+  let score=Math.max(1,Math.min(10,Math.round(((pts/S.trailing)*7)*10)/10));
+  S.trailing=S.trailing*0.7+pts*0.3;
+  S.engineUses++;
+  const pool=pts*Math.pow(score,2.3)*22;
+  if(S.contract){
+    const c=S.contract;
+    if(score>=c.req){
+      const roy=pool*9.99*c.cut;S.cash+=roy;log('Deal met '+c.company+' +$'+Math.round(roy).toLocaleString(),'ok');
+    } else {
+      const fine=Math.round(c.advance*0.6);S.cash-=fine;log('Deal failed −$'+fine.toLocaleString(),'err');
+    }
+    S.contract=null;
+  } else {
+    S.market.push({title,info:topic+'/'+genre,score,weeks:12,base:Math.max(5,Math.round(pool/12)),sold:0});
+  }
+  S.rp+=Math.floor(Math.random()*6)+6;
+  log('Shipped "'+title+'" ★'+score,'ok');
+  tick(4);
+}
+function shelfWeek(){
+  S.market.forEach(g=>{
+    if(g.weeks<=0)return;
+    const t=12-g.weeks;const decay=Math.pow(1-t/12,2.2);
+    let u=Math.max(5,Math.round(g.base*decay));g.sold+=u;g.weeks--;
+    S.cash+=u*9.99*0.85;S.fans=Math.max(0,S.fans+Math.round(u*0.03*((g.score-5.5)/4.5)));
+  });
+  S.market=S.market.filter(g=>g.weeks>0);
+}
+function renderShelf(){
+  const el=document.getElementById('shelf');
+  if(!S.market.length){el.innerHTML='<div style="text-align:center;color:var(--dim);padding:30px">No active products on shelves.</div>';return}
+  el.innerHTML='';S.market.forEach(p=>{
+    const d=document.createElement('div');d.className='row';
+    d.innerHTML='<div><b>'+p.title+'</b><br><span style="font-size:.7rem;color:var(--dim)">'+p.info+' · '+p.sold+' sold</span></div><div style="color:var(--cyan);font-weight:800">★ '+p.score+'</div><div style="color:var(--rose);font-size:.7rem">'+p.weeks+'w left</div>';
+    el.appendChild(d);
+  });
+}
+function exportSave(){return JSON.stringify({system_version:'3.4.0',chronometer:{year:S.year,month:S.month,week:S.week},balances:{cash_liquidity:S.cash,research_units:S.rp,fan_footprints:S.fans},tech_debt_tracker:{engine_uses:S.engineUses,engine_age_years:S.engineAge},personnel_tracker:{worker_fatigue:S.worker.fatigue,worker_status:S.worker.status},state:S},null,2)}
+function dlSave(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([exportSave()],{type:'application/json'}));a.download='studio_os_v34.json';a.click()}
+function ldSave(){try{const d=JSON.parse(document.getElementById('paste').value);if(d.state)S=d.state;else{S.year=d.chronometer.year;S.month=d.chronometer.month;S.week=d.chronometer.week;S.cash=d.balances.cash_liquidity;S.rp=d.balances.research_units;S.fans=d.balances.fan_footprints;S.engineUses=d.tech_debt_tracker.engine_uses;S.engineAge=d.tech_debt_tracker.engine_age_years;S.worker.fatigue=d.personnel_tracker.worker_fatigue;S.worker.status=d.personnel_tracker.worker_status}log('Loaded.','ok');hud()}catch(e){log('Bad JSON','err')}}
+log('SYSTEM CORE RUNTIME INITIALIZED — fatigue & tech debt active.','ok');hud();
+</script></body></html>

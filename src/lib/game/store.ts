@@ -140,6 +140,17 @@ import {
   staffPoolStats,
   FEATURE_INJECTION_DB,
 } from "./gdtAllocation";
+import {
+  applyWeeklyFatigue,
+  weeklyOutputModifier,
+  settlePublisherContract,
+  availablePublisherOffers,
+  techDebtPenaltyMultiplier,
+  techDebtPenaltyPercent,
+  ENGINE_REFACTOR,
+  PUBLISHER_MATRIX,
+  type PublisherOffer,
+} from "./tycoonOps34";
 import { tycoonHypeDecay, tycoonStaffEnergyTick, TYCOON_DEFAULTS } from "./tycoonEngine";
 import {
   competitorRelease,
@@ -1158,6 +1169,32 @@ function releaseProject(next: GameState, project: GameProject): GameState {
     }));
   }
 
+  // Module 21 — ops publisher matrix settlement (Vina / EA / Nintendont)
+  if (next.activePublisherDealId && PUBLISHER_MATRIX.some((p) => p.id === next.activePublisherDealId)) {
+    const offer = PUBLISHER_MATRIX.find((p) => p.id === next.activePublisherDealId)!;
+    const gross = (sales.totalUnits ?? 0) * (sales.price ?? 9.99);
+    const result = settlePublisherContract({
+      grossRevenue: gross,
+      finalScore: reviews.avg,
+      reqScore: offer.reqScore,
+      advancePay: offer.advancePay,
+      royaltyCut: offer.royaltyCut,
+    });
+    next.cash += result.inflow;
+    next.ledger = applyLedger(next.ledger, {
+      week: next.week,
+      amount: result.inflow,
+      category: result.met ? "sales" : "other",
+      label: result.met
+        ? `Publisher royalties: ${offer.company}`
+        : `Publisher breach: ${offer.company}`,
+      ref: `ops-settle-${offer.id}-w${next.week}`,
+    });
+    next.notifications = pushNote(next, result.note, result.met ? "good" : "bad");
+    next.activePublisherDealId = null;
+  }
+
+
   const released = toReleased(
     scored,
     { scores: reviews.scores, avg: reviews.avg, breakdown: reviews.breakdown },
@@ -1170,6 +1207,16 @@ function releaseProject(next: GameState, project: GameProject): GameState {
       released.usedIllicitAssets = true;
     }
     released.sliderMissAtShip = miss;
+
+  // Module 22 — engine tech debt uses++
+  {
+    const eid = scored.engineId;
+    next.engines = next.engines.map((e) =>
+      e.id === eid
+        ? { ...e, gamesShippedCount: (e.gamesShippedCount ?? 0) + 1 }
+        : e,
+    );
+  }
 
   // Workshop Module B — genre EXP
   next.genreExp = incrementGenreExp(next.genreExp ?? {}, scored.genreId);
@@ -1589,6 +1636,9 @@ interface Actions {
   unlockDrm: (drm: DrmTier) => string | null;
   toggleIllicitAssets: () => string | null;
   runPostMortem: (gameId: string) => string | null;
+  refactorEngine: (engineId?: string) => string | null;
+  sendStaffOnVacation: (staffId: string) => string | null;
+  signOpsPublisher: (publisherId: string) => string | null;
   attachTEngineFramework: (engineId: string) => string | null;
   executeCheatCommand: (raw: string) => string | null;
   startConfiguredConsole: (
@@ -1954,22 +2004,41 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       if (rent > 0) next.cash -= rent;
     }
 
-    // Staff energy — v2.1 + Module 8 crunch drain
+    // Staff energy + Module 20 burnout fatigue
     next.staff = next.staff.map((m) => {
-      if (m.id === "founder" || next.settings.noVacationMode) return { ...m, energy: 100 };
-      const working =
-        !!next.currentProject &&
-        (next.currentProject.devPhase.includes("RUNNING") ||
-          next.currentProject.devPhase === "POLISHING");
-      if (!working) return { ...m, energy: tycoonStaffEnergyTick(m.energy ?? 100, false) };
-      let energy = m.energy ?? 100;
-      if (next.currentProject?.crunchMode) {
-        if (energy > 20) energy = Math.max(0, energy - CRUNCH.energyDrain);
-        else energy = Math.min(100, energy + 25);
-      } else {
-        energy = tycoonStaffEnergyTick(energy, true);
+      if (next.settings.noVacationMode) {
+        return { ...m, energy: 100, fatigue: 0, workStatus: "Active" as const };
       }
-      return { ...m, energy };
+      const crunch = !!next.currentProject?.crunchMode;
+      const working = !!next.currentProject && (m.busy || m.id === "founder");
+      let status = (m.workStatus ?? "Active") as "Active" | "Vacation";
+      let fatigue = m.fatigue ?? Math.max(0, 100 - (m.energy ?? 100));
+      // Map vacation force when not working optional rest
+      if (!working && status === "Active" && fatigue > 60 && !crunch) {
+        // light rest if idle
+        fatigue = Math.max(0, fatigue - 8);
+      }
+      const burn = applyWeeklyFatigue({
+        fatigue,
+        status,
+        crunchActive: crunch && working,
+        name: m.name,
+      });
+      if (burn.note) {
+        next.notifications = pushNote(next, burn.note, "warn");
+      }
+      // keep energy roughly inverse for legacy UI
+      const energy =
+        burn.status === "Vacation"
+          ? Math.min(40, m.energy ?? 40)
+          : Math.max(0, 100 - burn.fatigue);
+      return {
+        ...m,
+        fatigue: burn.fatigue,
+        workStatus: burn.status,
+        energy,
+        busy: burn.status === "Vacation" ? false : m.busy,
+      };
     });
 
     for (const plat of PLATFORMS) {
@@ -2204,6 +2273,35 @@ export const useGame = create<GameState & Actions>((set, get) => ({
             const ge = genreExpMultiplier(next.genreExp?.[next.currentProject.genreId] ?? 0);
             dGain *= ge;
             tGain *= ge;
+          }
+          // Module 22 — tech debt on active engine
+          {
+            const eng =
+              next.engines.find((e) => e.id === next.currentProject!.engineId) ??
+              next.engines[0];
+            if (eng) {
+              const td = techDebtPenaltyMultiplier({
+                gamesShippedCount: eng.gamesShippedCount ?? 0,
+                chronologicalAgeYears: eng.chronologicalAgeYears ?? 0,
+              });
+              dGain *= td;
+              tGain *= td;
+            }
+          }
+          // Module 20 — staff output modifiers
+          {
+            let mod = 0;
+            let n = 0;
+            for (const m of next.staff) {
+              mod += weeklyOutputModifier({
+                status: (m.workStatus ?? "Active") as "Active" | "Vacation",
+                fatigue: m.fatigue ?? 0,
+              });
+              n++;
+            }
+            const avg = n ? mod / n : 1;
+            dGain *= avg;
+            tGain *= avg;
           }
           next.currentProject = {
             ...next.currentProject,
@@ -3868,6 +3966,82 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         speed: 0,
       });
     }
+    return null;
+  },
+
+  refactorEngine: (engineId?: string) => {
+    const state = get();
+    const id = engineId ?? state.engines[0]?.id;
+    const eng = state.engines.find((e) => e.id === id);
+    if (!eng) return "No engine.";
+    if (state.cash < ENGINE_REFACTOR.cash) return `Need ${formatCash(ENGINE_REFACTOR.cash)}.`;
+    if (state.researchPoints < ENGINE_REFACTOR.rp) return `Need ${ENGINE_REFACTOR.rp} RP.`;
+    set({
+      cash: state.cash - ENGINE_REFACTOR.cash,
+      researchPoints: state.researchPoints - ENGINE_REFACTOR.rp,
+      week: state.week, // week cost applied by caller advance optional
+      engines: state.engines.map((e) =>
+        e.id === eng.id
+          ? { ...e, gamesShippedCount: 0, chronologicalAgeYears: 0 }
+          : e,
+      ),
+      dirty: true,
+      notifications: pushNote(
+        state,
+        `Refactored "${eng.name}" — tech debt cleared (−${formatCash(ENGINE_REFACTOR.cash)}, −${ENGINE_REFACTOR.rp} RP).`,
+        "good",
+      ),
+      ledger: applyLedger(state.ledger, {
+        week: state.week,
+        amount: -ENGINE_REFACTOR.cash,
+        category: "research",
+        label: "Engine refactor",
+        ref: `refactor-${eng.id}-${state.week}`,
+      }),
+    });
+    return null;
+  },
+
+  sendStaffOnVacation: (staffId: string) => {
+    const state = get();
+    const m = state.staff.find((x) => x.id === staffId);
+    if (!m) return "Unknown staff.";
+    if (m.workStatus === "Vacation") return "Already on leave.";
+    set({
+      staff: state.staff.map((x) =>
+        x.id === staffId
+          ? { ...x, workStatus: "Vacation" as const, busy: false }
+          : x,
+      ),
+      dirty: true,
+      notifications: pushNote(state, `${m.name} granted rest leave.`, "info"),
+    });
+    return null;
+  },
+
+  signOpsPublisher: (publisherId: string) => {
+    const state = get();
+    const offer = PUBLISHER_MATRIX.find((p) => p.id === publisherId);
+    if (!offer) return "Unknown publisher.";
+    if (state.fans < offer.minFans) return `Need ${offer.minFans.toLocaleString()} fans.`;
+    if (state.activePublisherDealId) return "Already bound to a publisher deal.";
+    set({
+      cash: state.cash + offer.advancePay,
+      activePublisherDealId: offer.id,
+      dirty: true,
+      notifications: pushNote(
+        state,
+        `${offer.company} advance +${formatCash(offer.advancePay)}. Hit ${offer.reqScore}+ or pay 60% breach fine.`,
+        "good",
+      ),
+      ledger: applyLedger(state.ledger, {
+        week: state.week,
+        amount: offer.advancePay,
+        category: "other",
+        label: `Publisher advance: ${offer.company}`,
+        ref: `ops-pub-${offer.id}`,
+      }),
+    });
     return null;
   },
 

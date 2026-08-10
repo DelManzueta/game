@@ -258,6 +258,14 @@ function MainMenu() {
           >
             NEONCORE OS · experimental IDE sim
           </a>
+          <a
+            href="/studio-os-v34.html"
+            target="_blank"
+            rel="noreferrer"
+            className="block w-full rounded-lg border border-border bg-elevated px-3 py-2.5 text-center text-xs font-bold uppercase tracking-wide text-muted transition hover:border-accent hover:text-accent"
+          >
+            Studio OS v3.4 · burnout / deals / tech debt
+          </a>
         </div>
       </div>
     </div>
@@ -1553,6 +1561,7 @@ function ResearchScreen() {
 
 function StaffScreen() {
   const staff = useGame((s) => s.staff);
+  const sendStaffOnVacation = useGame((s) => s.sendStaffOnVacation);
   const office = useGame((s) => s.office);
   const unlocks = useGame((s) => s.unlocks);
   const cash = useGame((s) => s.cash);
@@ -1621,6 +1630,18 @@ function StaffScreen() {
                     {(m.energy ?? 100) <= 20 && (
                       <p className="mt-0.5 text-[10px] text-warn">Resting — too exhausted to contribute</p>
                     )}
+                    <div className="mt-1.5">
+                      <div className="mb-0.5 flex justify-between text-[10px] font-bold uppercase tracking-wide text-muted">
+                        <span>Fatigue</span>
+                        <span className="tabular">{Math.round(m.fatigue ?? 0)}% · {m.workStatus ?? "Active"}</span>
+                      </div>
+                      <div className="h-1.5 overflow-hidden rounded-full bg-panel">
+                        <div
+                          className="h-full rounded-full bg-orange-500 transition-all"
+                          style={{ width: `${Math.min(100, Math.round(m.fatigue ?? 0))}%` }}
+                        />
+                      </div>
+                    </div>
                   </div>
                 )}
                 {m.training && (
@@ -1638,6 +1659,15 @@ function StaffScreen() {
                 )}
               </div>
               <div className="flex flex-wrap gap-1">
+                {m.workStatus !== "Vacation" && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => setMsg(sendStaffOnVacation(m.id) ?? `${m.name} on leave.`)}
+                  >
+                    Rest leave
+                  </Button>
+                )}
                 {trainingOpen && !m.training && m.id !== "founder" && (
                   <Button size="sm" variant="secondary" onClick={() => setTrainFor(trainFor === m.id ? null : m.id)}>
                     Train
@@ -2230,6 +2260,43 @@ function FinancesScreen() {
 }
 
 
+function OpsPublisherDeals() {
+  const fans = useGame((s) => s.fans);
+  const active = useGame((s) => s.activePublisherDealId);
+  const signOpsPublisher = useGame((s) => s.signOpsPublisher);
+  const [msg, setMsg] = useState("");
+  const deals = [
+    { id: "vina_games", name: "Vina Games", min: 0, score: 6.5, advance: 45000, cut: 0.22 },
+    { id: "electronic_arts", name: "Electronic Arts", min: 25000, score: 7.5, advance: 180000, cut: 0.15 },
+    { id: "nintendont", name: "Nintendont", min: 100000, score: 8.5, advance: 600000, cut: 0.08 },
+  ];
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-muted">
+        Corporate deals — advance now; hit score or pay 60% breach fine. Active: {active ?? "none"}
+      </p>
+      {msg && <p className="text-xs text-warn">{msg}</p>}
+      {deals.map((d) => (
+        <div key={d.id} className="flex items-center justify-between gap-2 rounded-lg border border-border bg-elevated px-3 py-2">
+          <div>
+            <div className="text-sm font-bold text-fg">{d.name}</div>
+            <div className="text-[10px] text-muted">
+              ★{d.score}+ · {Math.round(d.cut * 100)}% cut · need {d.min.toLocaleString()} fans
+            </div>
+          </div>
+          <Button
+            size="sm"
+            disabled={fans < d.min || !!active}
+            onClick={() => setMsg(signOpsPublisher(d.id) ?? "Signed.")}
+          >
+            +{formatCash(d.advance)}
+          </Button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function ContractsScreen() {
   const board = useGame((s) => s.publishingBoard);
   const activeId = useGame((s) => s.activePublisherDealId);
@@ -2573,32 +2640,45 @@ function TEngineScreen() {
   const engines = useGame((s) => s.engines);
   const genreExp = useGame((s) => s.genreExp) ?? {};
   const attachTEngineFramework = useGame((s) => s.attachTEngineFramework);
+  const refactorEngine = useGame((s) => s.refactorEngine);
   const [msg, setMsg] = useState("");
   return (
     <div className="space-y-3">
       <div className="game-panel px-4 py-3 text-center">
-        <h2 className="text-xl font-bold text-fg">Engines · T-Framework</h2>
-        <p className="text-xs text-muted">$500k + 150 RP · −50% bugs · +0.5 review w/ 3D</p>
+        <h2 className="text-xl font-bold text-fg">Engines · Tech Debt</h2>
+        <p className="text-xs text-muted">
+          Debt: −6%/ship −8%/year · Refactor $25k + 20 RP clears uses
+        </p>
       </div>
       {msg && <p className="text-center text-sm text-warn">{msg}</p>}
       <ul className="space-y-2">
-        {engines.map((e) => (
-          <li key={e.id} className="flex items-center justify-between gap-2 rounded-xl border border-border bg-paper px-3 py-2">
+        {engines.map((e) => {
+          const uses = e.gamesShippedCount ?? 0;
+          const age = e.chronologicalAgeYears ?? 0;
+          const pen = Math.min(60, Math.round(uses * 6 + age * 8));
+          return (
+          <li key={e.id} className="flex flex-col gap-2 rounded-xl border border-border bg-paper px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <div className="font-bold text-fg">{e.name}</div>
               <div className="text-[11px] text-muted">
                 D+{e.designBonus} T+{e.techBonus}
                 {e.tEngineFramework ? " · T-Engine" : ""}
+                {" · "}uses {uses} · age {age}y · debt −{pen}%
               </div>
             </div>
-            {!e.tEngineFramework && (
-              <Button size="sm" onClick={() => setMsg(attachTEngineFramework(e.id) ?? "Attached.")}>
-                Attach T-Engine
+            <div className="flex flex-wrap gap-2">
+              {!e.tEngineFramework && (
+                <Button size="sm" onClick={() => setMsg(attachTEngineFramework(e.id) ?? "Attached.")}>
+                  T-Engine
+                </Button>
+              )}
+              <Button size="sm" variant="secondary" onClick={() => setMsg(refactorEngine(e.id) ?? "Refactored.")}>
+                Refactor
               </Button>
-            )}
-            {e.tEngineFramework && <span className="text-[10px] font-bold text-good">Installed</span>}
+            </div>
           </li>
-        ))}
+          );
+        })}
       </ul>
       <div className="rounded-xl border border-border bg-elevated p-3">
         <p className="mb-2 text-[10px] font-bold uppercase text-muted">Genre expertise</p>
@@ -2803,7 +2883,7 @@ function SettingsScreen() {
         </Button>
       </div>
       {panel === "unlocks" && <UnlocksScreen embedded />}
-      {panel === "contracts" && <ContractsScreen />}
+      {panel === "contracts" && (<><OpsPublisherDeals /><ContractsScreen /></>)}
       {panel === "hardware" && <HardwareLabScreen />}
       {panel === "engines" && <TEngineScreen />}
       <SaveLoadPanel />

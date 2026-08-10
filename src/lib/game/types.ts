@@ -193,6 +193,10 @@ export interface EngineDef {
   custom?: boolean;
   /** Workshop Module A — T-Engine modular framework */
   tEngineFramework?: boolean;
+  /** Module 22 — titles shipped on this engine config */
+  gamesShippedCount?: number;
+  /** Module 22 — years without new/refactored engine */
+  chronologicalAgeYears?: number;
 }
 
 export interface StaffMember {
@@ -208,6 +212,10 @@ export interface StaffMember {
   fieldExperience?: Partial<Record<DevField, number>>;
   busy: boolean;
   energy: number;
+  /** Module 20 — 0–100 burnout meter */
+  fatigue?: number;
+  /** Module 20 — Active | Vacation */
+  workStatus?: "Active" | "Vacation";
   /** Active training enrollment (in-game weeks). */
   training?: {
     courseId: string;
@@ -626,6 +634,8 @@ export interface GameState {
   genreExp?: Partial<Record<GenreId, number>>;
   /** Workshop Module D — immutable release telemetry */
   gameHistoryLedger?: import("./workshopMods").GameHistoryEntry[];
+  /** Module 22 — last year we aged engines */
+  lastEngineAgeYear?: number;
   /** Known combo labels after post-mortem */
   knownCombos?: Record<string, import("./tycoonRiskAnalytics").MatchLabel>;
   playerConsoles?: import("./tycoonLateMarket").PlayerConsole[];
