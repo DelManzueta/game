@@ -188,6 +188,18 @@ import {
   type PostMortemRecord,
 } from "./tycoonRiskAnalytics";
 import {
+  T_ENGINE,
+  applyTEngineBugMitigation,
+  tEngineReviewBonus,
+  genreExpMultiplier,
+  incrementGenreExp,
+  genreLevel,
+  buildHistoryEntry,
+  formatTelemetryBlock,
+  parseCheatCommand,
+  type GameHistoryEntry,
+} from "./workshopMods";
+import {
   startMarketingCampaign,
   getCampaignSpec,
   emptyMarketingState,
@@ -440,6 +452,8 @@ function initialState(): GameState {
     activePublisherDealId: null,
     unlockedDrm: ["None"],
     postMortems: [],
+    genreExp: { action: 0, adventure: 0, rpg: 0, simulation: 0, strategy: 0, casual: 0 },
+    gameHistoryLedger: [],
     knownCombos: {},
     playerConsoles: [],
     lastAwardsYear: 0,
@@ -851,7 +865,11 @@ function releaseProject(next: GameState, project: GameProject): GameState {
     const classic = classicReviewScore({
       designPoints: scored.designPoints,
       techPoints: scored.techPoints,
-      bugs: scored.bugs + (scored.production ? productionOpenSeverity(scored) : 0),
+      bugs: (() => {
+        const raw = scored.bugs + (scored.production ? productionOpenSeverity(scored) : 0);
+        const eng = next.engines.find((e) => e.id === scored.engineId);
+        return applyTEngineBugMitigation(raw, !!eng?.tEngineFramework);
+      })(),
       targetHighScore: hist,
       comboMult: combo,
       size: scored.size,
@@ -859,7 +877,20 @@ function releaseProject(next: GameState, project: GameProject): GameState {
       expertise: next.office <= 1 ? 0.94 : 1,
       audienceId: scored.audience,
     });
-    hidden = Math.max(1, classic.hidden - (scored.crisisReviewPenalty ?? 0));
+    {
+      const eng = next.engines.find((e) => e.id === scored.engineId);
+      const has3d =
+        next.researched.some((id) => id.includes("3d") || id.includes("graphic")) ||
+        (eng?.features ?? []).some((f) => /3d|graphic/i.test(f));
+      const teBonus = tEngineReviewBonus(!!eng?.tEngineFramework, has3d);
+      hidden = Math.max(
+        1,
+        Math.min(
+          10,
+          classic.hidden - (scored.crisisReviewPenalty ?? 0) + teBonus,
+        ),
+      );
+    }
     productQuality = hidden * 10;
     reviews = {
       scores: classic.scores.map((sc) =>
@@ -1108,6 +1139,40 @@ function releaseProject(next: GameState, project: GameProject): GameState {
       released.usedIllicitAssets = true;
     }
     released.sliderMissAtShip = miss;
+
+  // Workshop Module B — genre EXP
+  next.genreExp = incrementGenreExp(next.genreExp ?? {}, scored.genreId);
+  const gLvl = genreLevel(next.genreExp[scored.genreId] ?? 0);
+  next.notifications = pushNote(
+    next,
+    `${scored.genreId.toUpperCase()} expertise → Lv${gLvl} (${next.genreExp[scored.genreId]} ships).`,
+    "info",
+  );
+
+  // Workshop Module D — history ledger
+  {
+    const press = (next.rivalGenrePressure?.[scored.genreId] ?? 0) > next.week;
+    const entry = buildHistoryEntry({
+      gameId: released.id,
+      title: released.title,
+      week: next.week,
+      year: next.year,
+      genreId: scored.genreId,
+      topicId: scored.topicId,
+      platformId: scored.platformId,
+      avgReview: reviews.avg,
+      designPoints: scored.designPoints,
+      techPoints: scored.techPoints,
+      developmentCost: scored.developmentCost ?? 0,
+      marketingSpend: scored.marketingSpend ?? 0,
+      unitsSold: sales.totalUnits ?? 0,
+      unitPrice: sales.price ?? 9.99,
+      rivalGenrePressure: press,
+    });
+    // classicSales may be block-scoped — use sales object
+    next.gameHistoryLedger = [...(next.gameHistoryLedger ?? []), entry].slice(-80);
+    released.telemetry = entry;
+  }
 
   const v2 = reviews as {
     criticReviews?: { name: string; score: number; comment: string }[];
@@ -1492,6 +1557,8 @@ interface Actions {
   unlockDrm: (drm: DrmTier) => string | null;
   toggleIllicitAssets: () => string | null;
   runPostMortem: (gameId: string) => string | null;
+  attachTEngineFramework: (engineId: string) => string | null;
+  executeCheatCommand: (raw: string) => string | null;
   startConfiguredConsole: (
     media: MediaDriveId,
     gpu: GpuPartId,
@@ -2099,6 +2166,12 @@ export const useGame = create<GameState & Actions>((set, get) => ({
             const im = insightMultiplier(next.postMortems ?? [], next.currentProject.genreId);
             dGain *= im;
             tGain *= im;
+          }
+          // Workshop Module B — genre expertise
+          {
+            const ge = genreExpMultiplier(next.genreExp?.[next.currentProject.genreId] ?? 0);
+            dGain *= ge;
+            tGain *= ge;
           }
           next.currentProject = {
             ...next.currentProject,
@@ -3388,6 +3461,8 @@ export const useGame = create<GameState & Actions>((set, get) => ({
   clearPublisherDeal: () => set({ activePublisherDealId: null,
     unlockedDrm: ["None"],
     postMortems: [],
+    genreExp: { action: 0, adventure: 0, rpg: 0, simulation: 0, strategy: 0, casual: 0 },
+    gameHistoryLedger: [],
     knownCombos: {},
     playerConsoles: [],
     lastAwardsYear: 0,
@@ -3748,6 +3823,69 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         "good",
       ),
     });
+    // Telemetry print
+    const hist = (get().gameHistoryLedger ?? []).find((h) => h.gameId === gameId);
+    if (hist) {
+      set({
+        pendingEvent: {
+          id: `telem_${gameId}`,
+          title: "Post-mortem telemetry",
+          body: formatTelemetryBlock(hist),
+        },
+        modal: "event",
+        speed: 0,
+      });
+    }
+    return null;
+  },
+
+  attachTEngineFramework: (engineId) => {
+    const state = get();
+    const eng = state.engines.find((e) => e.id === engineId);
+    if (!eng) return "Engine not found.";
+    if (eng.tEngineFramework) return "T-Engine already attached.";
+    if (state.cash < T_ENGINE.cashCost) return `Need ${formatCash(T_ENGINE.cashCost)}.`;
+    if (state.researchPoints < T_ENGINE.rpCost) return `Need ${T_ENGINE.rpCost} RP.`;
+    set({
+      cash: state.cash - T_ENGINE.cashCost,
+      researchPoints: state.researchPoints - T_ENGINE.rpCost,
+      engines: state.engines.map((e) =>
+        e.id === engineId
+          ? {
+              ...e,
+              tEngineFramework: true,
+              name: e.name.includes("T-Engine") ? e.name : `${e.name} · T-Engine`,
+              techBonus: e.techBonus + 5,
+            }
+          : e,
+      ),
+      dirty: true,
+      notifications: pushNote(
+        state,
+        `T-Engine Modular Framework on "${eng.name}" (−${formatCash(T_ENGINE.cashCost)}, −${T_ENGINE.rpCost} RP).`,
+        "good",
+      ),
+      ledger: applyLedger(state.ledger, {
+        week: state.week,
+        amount: -T_ENGINE.cashCost,
+        category: "research",
+        label: "T-Engine Modular Framework",
+        ref: `tengine-${engineId}`,
+      }),
+    });
+    return null;
+  },
+
+  executeCheatCommand: (raw) => {
+    const parsed = parseCheatCommand(raw);
+    if (parsed.kind === "unknown") return `Unknown command: ${raw}`;
+    const map: Record<string, string> = {
+      money_boost: "money_boost",
+      rp_max: "rp_max",
+      instafans: "instafans",
+      bug_wipe: "bug_wipe",
+    };
+    get().applyCheat(map[parsed.kind]!);
     return null;
   },
 
@@ -4126,6 +4264,18 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     };
 
     switch (cheat) {
+      case "money_boost":
+        ledgerCash(5_000_000, "EXECUTE_CHEAT /money_boost");
+        break;
+      case "rp_max":
+        next.researchPoints = 999;
+        break;
+      case "instafans":
+        next.fans = Math.max(0, Math.floor(next.fans * 5));
+        break;
+      case "bug_wipe":
+        if (next.currentProject) next.currentProject = { ...next.currentProject, bugs: 0 };
+        break;
       case "cash":
       case "cash_100k":
         ledgerCash(Number(arg) || 100_000, "Cheat +100k");

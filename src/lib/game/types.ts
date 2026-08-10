@@ -191,6 +191,8 @@ export interface EngineDef {
   cost: number;
   weeks: number;
   custom?: boolean;
+  /** Workshop Module A — T-Engine modular framework */
+  tEngineFramework?: boolean;
 }
 
 export interface StaffMember {
@@ -338,6 +340,7 @@ export interface ReleasedGame {
   litigationResolved?: boolean;
   postMortemDone?: boolean;
   sliderMissAtShip?: number;
+  telemetry?: import("./workshopMods").GameHistoryEntry;
   audience: AudienceId;
   size: GameSize;
   engineId: string;
@@ -619,6 +622,10 @@ export interface GameState {
   unlockedDrm?: import("./tycoonPiracy").DrmTier[];
   /** Module 18 post-mortems */
   postMortems?: import("./tycoonRiskAnalytics").PostMortemRecord[];
+  /** Workshop Module B — genre ship counts (level = 1 + floor(n/5)) */
+  genreExp?: Partial<Record<GenreId, number>>;
+  /** Workshop Module D — immutable release telemetry */
+  gameHistoryLedger?: import("./workshopMods").GameHistoryEntry[];
   /** Known combo labels after post-mortem */
   knownCombos?: Record<string, import("./tycoonRiskAnalytics").MatchLabel>;
   playerConsoles?: import("./tycoonLateMarket").PlayerConsole[];

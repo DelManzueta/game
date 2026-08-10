@@ -2560,13 +2560,64 @@ function HardwareLabScreen() {
   );
 }
 
+
+function TEngineScreen() {
+  const engines = useGame((s) => s.engines);
+  const genreExp = useGame((s) => s.genreExp) ?? {};
+  const attachTEngineFramework = useGame((s) => s.attachTEngineFramework);
+  const [msg, setMsg] = useState("");
+  return (
+    <div className="space-y-3">
+      <div className="game-panel px-4 py-3 text-center">
+        <h2 className="text-xl font-bold text-fg">Engines · T-Framework</h2>
+        <p className="text-xs text-muted">$500k + 150 RP · −50% bugs · +0.5 review w/ 3D</p>
+      </div>
+      {msg && <p className="text-center text-sm text-warn">{msg}</p>}
+      <ul className="space-y-2">
+        {engines.map((e) => (
+          <li key={e.id} className="flex items-center justify-between gap-2 rounded-xl border border-border bg-paper px-3 py-2">
+            <div>
+              <div className="font-bold text-fg">{e.name}</div>
+              <div className="text-[11px] text-muted">
+                D+{e.designBonus} T+{e.techBonus}
+                {e.tEngineFramework ? " · T-Engine" : ""}
+              </div>
+            </div>
+            {!e.tEngineFramework && (
+              <Button size="sm" onClick={() => setMsg(attachTEngineFramework(e.id) ?? "Attached.")}>
+                Attach T-Engine
+              </Button>
+            )}
+            {e.tEngineFramework && <span className="text-[10px] font-bold text-good">Installed</span>}
+          </li>
+        ))}
+      </ul>
+      <div className="rounded-xl border border-border bg-elevated p-3">
+        <p className="mb-2 text-[10px] font-bold uppercase text-muted">Genre expertise</p>
+        <div className="flex flex-wrap gap-2">
+          {(["action", "adventure", "rpg", "simulation", "strategy", "casual"] as const).map((g) => {
+            const n = genreExp[g] ?? 0;
+            const lvl = 1 + Math.floor(n / 5);
+            return (
+              <span key={g} className="rounded-full border border-border bg-paper px-2.5 py-1 text-[11px] font-semibold text-fg">
+                {g} Lv{lvl} <span className="text-muted">({n})</span>
+              </span>
+            );
+          })}
+        </div>
+        <p className="mt-2 text-[10px] text-subtle">+5% production points per level · level up every 5 ships</p>
+      </div>
+    </div>
+  );
+}
+
 function SettingsScreen() {
   const saveGame = useGame((s) => s.saveGame);
   const setModal = useGame((s) => s.setModal);
   const returnToMenu = useGame((s) => s.returnToMenu);
   const setScreen = useGame((s) => s.setScreen);
   const exportSaveMatrix = useGame((s) => s.exportSaveMatrix);
-  const [panel, setPanel] = useState<"unlocks" | "contracts" | "hardware" | "none">("unlocks");
+  const [panel, setPanel] = useState<"unlocks" | "contracts" | "hardware" | "engines" | "none">("unlocks");
   const [matrix, setMatrix] = useState("");
   return (
     <div className="mx-auto max-w-lg space-y-3 px-1 pb-4 pt-1">
@@ -2584,6 +2635,9 @@ function SettingsScreen() {
         <Button size="sm" variant={panel === "hardware" ? "primary" : "secondary"} onClick={() => setPanel("hardware")}>
           Hardware
         </Button>
+        <Button size="sm" variant={panel === "engines" ? "primary" : "secondary"} onClick={() => setPanel("engines")}>
+          Engines
+        </Button>
         <Button size="sm" variant="secondary" onClick={() => setScreen("staff")}>
           People
         </Button>
@@ -2597,6 +2651,7 @@ function SettingsScreen() {
       {panel === "unlocks" && <UnlocksScreen embedded />}
       {panel === "contracts" && <ContractsScreen />}
       {panel === "hardware" && <HardwareLabScreen />}
+      {panel === "engines" && <TEngineScreen />}
       <div className="space-y-2">
         <Button className="w-full" variant="secondary" onClick={() => saveGame()}>
           Save campaign
@@ -3257,6 +3312,9 @@ function CheatsModal() {
   const year = useGame((s) => s.year);
   const cheatLog = useGame((s) => s.cheatLog);
   const cheatsEnabled = useGame((s) => s.cheatsEnabled);
+  const executeCheatCommand = useGame((s) => s.executeCheatCommand);
+  const [cheatCmd, setCheatCmd] = useState("");
+  const [cheatCmdMsg, setCheatCmdMsg] = useState("");
   const [tab, setTab] = useState<"main" | "dev" | "modes" | "modding">("main");
   const [cashField, setCashField] = useState("");
   const [fansField, setFansField] = useState("");
@@ -3300,6 +3358,32 @@ function CheatsModal() {
         Inspired by kristof1104's GDT CheatMod — safer than editing saves.
         {cheatsEnabled ? " Campaign marked modified." : ""}
       </p>
+      <div className="mt-2 rounded-lg border border-border bg-elevated p-2">
+        <p className="mb-1 text-[10px] font-bold uppercase text-muted">EXECUTE_CHEAT</p>
+        <div className="flex gap-2">
+          <Input
+            value={cheatCmd}
+            placeholder="/money_boost · /rp_max · /instafans · /bug_wipe"
+            onChange={(e) => setCheatCmd(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                setCheatCmdMsg(executeCheatCommand(cheatCmd) ?? "OK");
+                setCheatCmd("");
+              }
+            }}
+          />
+          <Button
+            size="sm"
+            onClick={() => {
+              setCheatCmdMsg(executeCheatCommand(cheatCmd) ?? "OK");
+              setCheatCmd("");
+            }}
+          >
+            Run
+          </Button>
+        </div>
+        {cheatCmdMsg && <p className="mt-1 text-[11px] text-muted">{cheatCmdMsg}</p>}
+      </div>
       <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted">
         <span className="tabular rounded-md bg-elevated px-2 py-1 font-semibold text-fg">
           {formatCash(cash)}
