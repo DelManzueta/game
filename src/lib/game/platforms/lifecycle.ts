@@ -61,8 +61,8 @@ export function platformSpecFromDef(p: PlatformDef, startYear = START_YEAR): Pla
   const launchDay = yearToLaunchDay(p.year, startYear);
   const peakDay = launchDay + 4 * WEEKS_PER_YEAR * 7;
   const retirementDay = launchDay + 12 * WEEKS_PER_YEAR * 7;
-  const peakBase = Math.round(80_000 + p.marketSize * 220_000);
-  const launchBase = Math.round(peakBase * 0.18);
+  const peakBase = Math.round(120_000 + p.marketSize * 280_000);
+  const launchBase = Math.round(peakBase * 0.28);
   const legacyFloor = Math.round(peakBase * 0.08);
 
   const audienceMultipliers: Record<string, number> = {};

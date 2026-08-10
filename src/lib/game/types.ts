@@ -378,7 +378,7 @@ export interface ReleasedGame {
    * Live weekly sales engine (v3). When set, residual weeks use calculateWeeklySales
    * instead of consuming precomputed weeklySalesLeft.
    */
-  salesEngine?: "plan_v2" | "weekly_v3";
+  salesEngine?: "plan_v2" | "weekly_v3" | "classic_gdt";
   /** Frozen commercial inputs for live weekly sales (set at release). */
   salesSnapshot?: {
     platformInstalledBase: number;

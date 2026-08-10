@@ -87,7 +87,8 @@ export type FounderProfile = {
 export function founderCapability(founder: FounderProfile, discipline: string): number {
   const skill = clamp(founder.skills[discipline] ?? 0, 0, 100);
   const mastery = clamp(founder.mastery[discipline] ?? 0, 0, 100);
-  return clamp(0.7 + 0.2 * (skill / 100) + 0.1 * (mastery / 100), 0.5, 1);
+  // Garage founder is competent, not elite — skill growth matters.
+  return clamp(0.42 + 0.38 * (skill / 100) + 0.2 * (mastery / 100), 0.35, 0.95);
 }
 
 export type ProductionBalance = {

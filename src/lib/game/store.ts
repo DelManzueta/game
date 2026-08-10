@@ -97,6 +97,7 @@ import {
   applyDevWeekExperience,
   INITIAL_TARGET_HIGH_SCORE,
   USE_ALGORITHM_V2,
+  generateWeekPoints,
 } from "./scoring";
 import { normalizeStageAllocations } from "./scoring/algorithmV2";
 import { USE_MARKET_V2 } from "./scoring/marketFlag";
@@ -118,6 +119,12 @@ import {
   initReleasedCommercial,
   tickReleasedSales,
 } from "./commercial/runtime";
+import {
+  classicComboMultiplier,
+  classicReviewScore,
+  classicUnitsSold,
+  sliderDeviation,
+} from "./classicGdt";
 import {
   startMarketingCampaign,
   getCampaignSpec,
@@ -757,130 +764,126 @@ function releaseProject(next: GameState, project: GameProject): GameState {
   let productQuality: number;
   let hidden: number;
 
-  if (scored.production?.candidateBuild || scored.production?.completedStages?.length) {
-    const founder = founderFromStaff(next.staff);
-    const eng = next.engines.find((e) => e.id === scored.engineId);
-    const installed = new Set(eng?.features ?? []);
-    const metrics = metricsFromProduction({
-      completedStages: scored.production.completedStages,
-      founderCapability: (d) => founderCapability(founder, d),
-      engineSupportFor: (d) => {
-        // Research alone does not install — only engine features count
-        if (d === "graphics") {
-          if ([...installed].some((f) => /3d/i.test(f))) return 1;
-          if ([...installed].some((f) => /2d/i.test(f))) return 0.85;
-          return 0.55;
-        }
-        if (d === "sound") {
-          if ([...installed].some((f) => /surround/i.test(f))) return 1;
-          if ([...installed].some((f) => /stereo/i.test(f))) return 0.85;
-          if ([...installed].some((f) => /mono|sound/i.test(f))) return 0.7;
-          return 0.5;
-        }
-        if (d === "ai") {
-          return [...installed].some((f) => /ai/i.test(f)) ? 0.95 : 0.55;
-        }
-        if (d === "engine") return installed.size ? 0.8 + Math.min(0.2, installed.size * 0.02) : 0.55;
-        return 0.7;
-      },
+  // ── Classic GDT spine (always) ──────────────────────────────────────────
+  // Points from weekly develop + combo + slider fit → reviews.
+  // Production sim still tracks bugs/polish, but cannot mint free 10s.
+  {
+    const combo = classicComboMultiplier(scored.topicId, scored.genreId);
+    // Average slider miss across stages (equal default sliders = high miss vs genre ideal)
+    const miss =
+      (sliderDeviation(scored.genreId, 1, scored.sliders) +
+        sliderDeviation(scored.genreId, 2, scored.sliders) +
+        sliderDeviation(scored.genreId, 3, scored.sliders)) /
+      3;
+    const classic = classicReviewScore({
+      designPoints: scored.designPoints,
+      techPoints: scored.techPoints,
+      bugs: scored.bugs + (scored.production ? productionOpenSeverity(scored) : 0),
+      targetHighScore: next.targetHighScore ?? INITIAL_TARGET_HIGH_SCORE,
+      comboMult: combo * (comboMult > 0 ? Math.min(1.15, 0.85 + comboMult * 0.15) : 1),
+      size: scored.size,
+      sliderMiss: miss,
+      expertise: next.office <= 1 ? 0.92 : 1,
     });
-    const unfixed = productionOpenSeverity(scored);
-    const polishRatio =
-      scored.production.polishProgress /
-      Math.max(1, 300);
-    qualityResult = calculateQuality({
-      conceptFit,
-      metrics: metrics.length
-        ? metrics
-        : [
-            {
-              discipline: "gameplay",
-              group: "design",
-              importanceWeight: 1,
-              completedWorkRatio: 0.8,
-              actualFocus: 0.33,
-              targetFocus: 0.33,
-              capability: 0.75,
-              engineSupport: 0.7,
-            },
-          ],
-      unfixedBugSeverity: unfixed,
-      polishRatio,
-    });
-    const releaseDay = weekToCampaignDay(next.week);
-    reviewResult = calculateReviews({
-      campaignSeed: next.campaignSeed,
-      gameId: scored.id,
-      releaseDay,
-      quality: qualityResult,
-    });
-    // Map 0–100 → existing 0–10 review UI
-    const outletEntries = Object.entries(reviewResult.outletScores);
-    const scores = outletEntries.map(([, s]) => Math.round((s / 10) * 10) / 10);
-    const avg = reviewResult.reviewAverage / 10;
-    productQuality = qualityResult.overallQuality;
-    hidden = avg;
+    hidden = classic.hidden;
+    productQuality = classic.hidden * 10;
     reviews = {
-      scores: scores.length ? scores : [avg, avg, avg, avg, avg],
-      avg,
+      scores: classic.scores,
+      avg: classic.avg,
+      quality: classic.basePoints,
       breakdown: {
-        baseScore: qualityResult.overallQuality,
-        techFactor: qualityResult.technologyQuality / 100,
-        designFactor: qualityResult.designQuality / 100,
-        bugRatio: qualityResult.bugPenalty / 30,
+        generatedTech: scored.techPoints,
+        generatedDesign: scored.designPoints,
+        balanceModifier: 1,
+        priorityModifier: 1 - miss,
+        bugRatio: Math.max(0, 1 - scored.bugs / 40),
+        baseScore: classic.basePoints,
+        targetHighScore: next.targetHighScore ?? INITIAL_TARGET_HIGH_SCORE,
+        hiddenFinalScore: classic.hidden,
+        qualityFactor: 1 - miss,
         hypeBonus: 0,
         sequelMod: 1,
         mmoPenalty: 1,
-        trendBonus: 1,
-        qualityFactor: qualityResult.executionQuality / 100,
-        targetHighScore: next.targetHighScore ?? 10,
-        hiddenFinalScore: hidden,
+        trendBonus: combo,
       },
-      nextHighBaseScore: qualityResult.overallQuality,
-      criticReviews: outletEntries.map(([name, s]) => ({
-        name,
-        score: s / 10,
-        comment: `${reviewResult!.label}: ${reviewResult!.reasonCodes.join(", ") || "solid work"}`,
+      nextHighBaseScore: classic.basePoints,
+      criticReviews: classic.scores.map((sc, i) => ({
+        name: ["Pixel Weekly", "Joystick Journal", "Home Computer Monthly", "Arcade Digest"][i]!,
+        score: sc,
+        comment:
+          miss > 0.45
+            ? "Unfocused development — genre priorities ignored."
+            : combo >= 1.1
+              ? "Strong topic/genre match."
+              : combo < 0.75
+                ? "Odd combination for this market."
+                : "Solid garage effort.",
       })),
-      qualityBreakdownV2: {
-        design: qualityResult.designQuality,
-        tech: qualityResult.technologyQuality,
-        execution: qualityResult.executionQuality,
-        concept: qualityResult.conceptFit,
-        overall: qualityResult.overallQuality,
-      },
       productQuality,
-      quality: productQuality,
     } as unknown as ReturnType<typeof computeReviews>;
-  } else {
-    // Legacy path without production sim
-    reviews = computeReviews(scored, {
-      targetHighScore: next.targetHighScore ?? INITIAL_TARGET_HIGH_SCORE,
-      previousHighBaseScore: next.previousHighBaseScore ?? 0,
-      office: next.office,
-      fans: next.fans,
-      graphicsLevel,
-      specialistCount: next.staff.filter((m) => m.specialization || m.level >= 5).length,
-      gameYearIndex: Math.max(0, next.year - START_YEAR),
-      previousGame: prev,
-      engines: next.engines,
-      matchesTrend: false,
-      strangeTrend: false,
-      isMmo: scored.features.some((f) => /mmo/i.test(f)),
-      sequelWeeksSinceOriginal: sequelWeeks,
-      staff: next.staff,
-      platformMarket: platform.marketSize,
-      platformTechCeiling: platform.techCeiling,
-      reputation: Math.min(100, 30 + next.gamesPublished * 3 + next.highScore * 4),
-      previousAvgReview: prev?.avgReview ?? next.highScore,
-      designBoost: boosts.designBoost,
-      techBoost: boosts.techBoost,
-      campaignSeed: next.campaignSeed,
-      week: next.week,
-    });
-    hidden = reviews.breakdown.hiddenFinalScore;
-    productQuality =
-      (reviews as { productQuality?: number }).productQuality ?? hidden * 10;
+
+    // Optional diagnostics from production metrics (UI only; does not override score)
+    if (scored.production?.completedStages?.length) {
+      try {
+        const founder = founderFromStaff(next.staff);
+        const eng = next.engines.find((e) => e.id === scored.engineId);
+        const installed = new Set(eng?.features ?? []);
+        const metrics = metricsFromProduction({
+          completedStages: scored.production.completedStages,
+          founderCapability: (d) => founderCapability(founder, d),
+          engineSupportFor: (d) => {
+            if (d === "graphics") {
+              if ([...installed].some((f) => /3d/i.test(f))) return 1;
+              if ([...installed].some((f) => /2d/i.test(f))) return 0.85;
+              return 0.55;
+            }
+            return 0.65;
+          },
+        });
+        qualityResult = calculateQuality({
+          conceptFit,
+          metrics: metrics.length
+            ? metrics
+            : [
+                {
+                  discipline: "gameplay",
+                  group: "design",
+                  importanceWeight: 1,
+                  completedWorkRatio: 0.8,
+                  actualFocus: 0.33,
+                  targetFocus: 0.33,
+                  capability: 0.55,
+                  engineSupport: 0.65,
+                },
+              ],
+          unfixedBugSeverity: productionOpenSeverity(scored),
+          polishRatio: scored.production.polishProgress / Math.max(1, 300),
+        });
+      } catch {
+        /* diagnostics optional */
+      }
+    }
+  }
+
+  // Size ceiling — small games cannot review as AAA masterpieces
+  {
+    const cap = SIZE_STATS[scored.size]?.maxScore ?? 10;
+    if (reviews.avg > cap) {
+      const scale = cap / Math.max(0.1, reviews.avg);
+      reviews.avg = Math.round(cap * 10) / 10;
+      reviews.scores = reviews.scores.map((x) =>
+        Math.max(1, Math.min(cap, Math.round(x * scale * 10) / 10)),
+      );
+    }
+    // Soft floor: finishing a game with zero investment still shouldn't auto-10
+    // (production path already penalizes flat alloc; this is a belt-and-suspenders)
+    if (!next.settings.forcePerfectScore && reviews.avg >= cap - 0.05) {
+      const allEqual =
+        reviews.scores.length > 1 &&
+        reviews.scores.every((x) => Math.abs(x - reviews.scores[0]!) < 0.15);
+      // leave as-is; size cap handles small
+      void allEqual;
+    }
   }
 
   // QA score force cheats
@@ -919,7 +922,7 @@ function releaseProject(next: GameState, project: GameProject): GameState {
     pMarket.lifecycleFactor * Math.max(0.35, platform.marketSize);
   const platformAgeYears = Math.max(0, (releaseDay - pSpec.launchDay) / (48 * 7));
 
-  const sales = computeSalesCurve(hidden, {
+  let sales = computeSalesCurve(hidden, {
     size: scored.size,
     platformMarket,
     fans: next.fans,
@@ -941,6 +944,30 @@ function releaseProject(next: GameState, project: GameProject): GameState {
     studioReputation: Math.min(100, 30 + next.gamesPublished * 3 + next.highScore * 4),
     launchPrice: project.launchPrice ?? defaultLaunchPrice(scored.size),
   });
+
+  // Classic GDT unit plan — overrides microscopic weekly_v3 plans for shelf totals
+  {
+    const classicSales = classicUnitsSold({
+      designPoints: scored.designPoints,
+      techPoints: scored.techPoints,
+      reviewScore: reviews.avg,
+      size: scored.size,
+      platformMarket: Math.max(0.35, platform.marketSize),
+      comboMult: classicComboMultiplier(scored.topicId, scored.genreId),
+      marketingSpend: scored.marketingSpend,
+      fans: next.fans,
+      hype: scored.hype + next.hype,
+    });
+    sales.totalUnits = classicSales.totalUnits;
+    sales.revenue = classicSales.net;
+    sales.price = classicSales.price;
+    sales.weeks = classicSales.weekly;
+    sales.history = classicSales.weekly.map((units, i) => ({
+      week: i + 1,
+      units,
+      revenue: units * classicSales.price * 0.75,
+    }));
+  }
 
   const released = toReleased(
     scored,
@@ -1790,18 +1817,51 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         startDay: next.currentProject.production?.asOfDay ?? day,
       });
       next.currentProject = adv.project;
-      // Accrue build-side research + field XP while developing
+      // Accrue classic GDT design/tech points + field XP while stages run
       if (adv.ticks.length > 0) {
         const stage =
           typeof next.currentProject.stage === "number" ? next.currentProject.stage : 3;
+        const stageN = (stage === 1 || stage === 2 || stage === 3 ? stage : 3) as 1 | 2 | 3;
+        const isPolish =
+          next.currentProject.devPhase === "POLISHING" ||
+          next.currentProject.production?.phase === "polish" ||
+          next.currentProject.production?.phase === "bug_fixing";
+        if (!isPolish && (stageN === 1 || stageN === 2 || stageN === 3)) {
+          const gen = generateWeekPoints({
+            staff: next.staff,
+            stage: stageN,
+            genreId: next.currentProject.genreId,
+            sliders: next.currentProject.sliders,
+            size: next.currentProject.size,
+            engineFeatures: next.currentProject.features ?? [],
+            designBoost: 0,
+            techBoost: 0,
+            seed: hashSeed(
+              next.campaignSeed,
+              next.currentProject.id,
+              "pts",
+              next.week,
+              stageN,
+            ),
+          });
+          next.currentProject = {
+            ...next.currentProject,
+            designPoints: next.currentProject.designPoints + gen.designGain,
+            techPoints: next.currentProject.techPoints + gen.techGain,
+            researchEarned:
+              (next.currentProject.researchEarned ?? 0) + 0.45 + next.staff.length * 0.12,
+          };
+        } else {
+          next.currentProject = {
+            ...next.currentProject,
+            researchEarned:
+              (next.currentProject.researchEarned ?? 0) + 0.2 + next.staff.length * 0.08,
+          };
+        }
         next.staff = applyDevWeekExperience(next.staff, {
           genreId: next.currentProject.genreId,
-          stage: stage as 1 | 2 | 3,
+          stage: stageN,
         });
-        next.currentProject = {
-          ...next.currentProject,
-          researchEarned: (next.currentProject.researchEarned ?? 0) + 0.45 + next.staff.length * 0.12,
-        };
       }
       if (next.settings.noBugsMode && next.currentProject) {
         next.currentProject = { ...next.currentProject, bugs: 0 };

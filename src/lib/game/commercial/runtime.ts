@@ -69,7 +69,9 @@ export function initReleasedCommercial(opts: {
   } = opts;
 
   const released: ReleasedGame = { ...base };
-  released.salesEngine = "weekly_v3";
+  // classic_gdt uses precomputed weekly plan (GDT-style units).
+  // weekly_v3 kept for snapshot diagnostics but plan drives cash.
+  released.salesEngine = "classic_gdt";
   released.weeklySalesResults = [];
   released.marketDays = 0;
   released.weeksOnMarket = 0;
@@ -118,7 +120,7 @@ export function initReleasedCommercial(opts: {
     platformGenreFit: Math.min(1, Math.max(0.4, comboMult)),
     competitionModifier: 0.95,
     trendModifier: 1,
-    organicAwarenessPoints: 18 + Math.min(20, state.gamesPublished * 2),
+    organicAwarenessPoints: 58 + Math.min(36, state.gamesPublished * 4),
     publisherAwarenessPoints:
       distType === "publisher"
         ? 25 * ((opts.publisherAwarenessMult ?? 1.2) - 0.5)
@@ -127,7 +129,8 @@ export function initReleasedCommercial(opts: {
     referencePrice: REFERENCE_PRICE[released.size] ?? 25,
     platformFeeRate: 0.3,
     publisherCutRate: distType === "publisher" ? Math.max(0, 1 - royalty) : 0,
-    marketCapacityRate: 0.0025,
+    // ~0.55% of addressable base per week at full layers before lifecycle soft — garage hits feel
+    marketCapacityRate: 0.012,
   };
 
   const planTotal = planUnits.reduce((a, b) => a + b, 0);

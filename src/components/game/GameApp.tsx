@@ -55,6 +55,7 @@ import type { AudienceId, DevField, GameSize, GenreId, ScreenId } from "@/lib/ga
 import { Badge, Button, Input, Modal, SearchField, cnJoin } from "@/components/ui/primitives";
 import { GarageLoopFlowchart, ScoringPipelineFlow } from "@/components/game/LoopFlowchart";
 import { MarketScreen } from "@/components/game/MarketScreen";
+import { idealPhaseSliders } from "@/lib/game/classicGdt";
 import {
   FlaskConical,
   Gamepad2,
@@ -391,7 +392,7 @@ function StudioTopBar({ forcePause }: { forcePause: boolean }) {
         >
           <Bell className="h-3.5 w-3.5" />
           {unread > 0 && (
-            <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-[#6affe0] px-0.5 text-[9px] font-bold text-[#061410]">
+            <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-[#e8941a] px-0.5 text-[9px] font-bold text-[#1a1208]">
               {unread > 9 ? "9+" : unread}
             </span>
           )}
@@ -458,7 +459,7 @@ function GarageRoomView({ immersive = false }: { immersive?: boolean }) {
         src={art.room}
         alt=""
         className={immersive ? "se-room-img" : "aspect-[16/10] w-full rounded-xl object-cover"}
-        style={immersive ? undefined : { objectPosition: art.objectPosition }}
+        style={{ objectPosition: art.objectPosition || "center 48%" }}
         draggable={false}
       />
       {immersive && <div className="se-room-vignette" />}
@@ -466,7 +467,7 @@ function GarageRoomView({ immersive = false }: { immersive?: boolean }) {
       {showChrome && immersive && (
         <>
           <div className="se-room-caption pointer-events-none">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#6affe0]/90">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#f0b24a]/95">
               {state.currentProject
                 ? busy
                   ? art.hotspotBusy
@@ -490,7 +491,7 @@ function GarageRoomView({ immersive = false }: { immersive?: boolean }) {
               </div>
               {state.office === 1 && ov.officeGoal && !ov.officeGoal.activeMove && (
                 <p className="max-w-[16rem] text-right text-[12px] leading-snug text-white/50">
-                  <span className="text-[#6affe0]/80">Next · </span>
+                  <span className="text-[#f0b24a]/90">Next · </span>
                   {ov.gamesPublished}/{ov.officeGoal.gamesNeed} games ·{" "}
                   {formatFans(ov.fans)}/{formatFans(ov.officeGoal.fansNeed)} fans · hold{" "}
                   {formatCash(ov.officeGoal.cashNeed)}
@@ -685,7 +686,7 @@ function DevelopOverlay({ sheet = false }: { sheet?: boolean }) {
       <div className="se-desk-sheet" role="dialog" aria-label="Development desk">
         <div className="flex shrink-0 items-center justify-between gap-2 border-b border-white/10 px-3 py-2">
           <div className="min-w-0">
-            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#6affe0]/90">Desk</p>
+            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#f0b24a]/95">Desk</p>
             <p className="truncate text-sm font-bold text-white/90">{project.title}</p>
           </div>
           <button
@@ -765,7 +766,17 @@ function DevelopPanel() {
       {isConfig && (
         <>
           <p className="mt-2 text-center text-xs text-muted">
-            Set time allocation for Stage {stageNum}. OK locks it in and starts work.
+            Set time allocation for Stage {stageNum}. Match the genre focus — flat sliders score worse.
+          </p>
+          <p className="mt-1 text-center text-[11px] text-[#f0b24a]/90">
+            {(() => {
+              const ideal = idealPhaseSliders(project.genreId, stageNum as 1 | 2 | 3);
+              const ranked = Object.entries(ideal)
+                .sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))
+                .slice(0, 2)
+                .map(([k]) => FIELD_LABELS[k as DevField] ?? k);
+              return `Genre focus: push ${ranked.join(" + ")}`;
+            })()}
           </p>
           <div className="mt-5 flex justify-center gap-4 sm:gap-6">
             {fields.map((f, i) => (

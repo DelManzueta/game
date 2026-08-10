@@ -60,13 +60,14 @@ export type QualityBalance = {
 };
 
 export const DEFAULT_QUALITY_BALANCE: QualityBalance = {
-  workWeight: 0.45,
-  focusWeight: 0.2,
-  capabilityWeight: 0.2,
+  // Finishing work alone cannot max score — focus + skill + engine matter.
+  workWeight: 0.32,
+  focusWeight: 0.28,
+  capabilityWeight: 0.25,
   engineWeight: 0.15,
-  bugPenaltyPerSeverity: 2,
-  maximumBugPenalty: 30,
-  maximumPolishBonus: 5,
+  bugPenaltyPerSeverity: 2.5,
+  maximumBugPenalty: 35,
+  maximumPolishBonus: 4,
 };
 
 export type QualityResult = {
@@ -180,14 +181,25 @@ export function calculateQuality(opts: {
   const polishBonus = balance.maximumPolishBonus * clamp(opts.polishRatio, 0, 1);
   executionQuality = clamp(executionQuality - bugPenalty + polishBonus, 0, 100);
 
+  // Flat equal allocation (player never steered focus) cannot perfect — soft penalty.
+  const focuses = opts.metrics.map((m) => m.actualFocus);
+  const fMin = Math.min(...focuses);
+  const fMax = Math.max(...focuses);
+  const flatAllocPenalty = fMax - fMin < 0.08 ? 0.88 : fMax - fMin < 0.15 ? 0.94 : 1;
+
+  const concept = clamp(opts.conceptFit, 0, 100);
   const overallQuality = clamp(
-    designQuality * 0.4 + technologyQuality * 0.3 + executionQuality * 0.3,
+    (designQuality * 0.32 +
+      technologyQuality * 0.24 +
+      executionQuality * 0.28 +
+      concept * 0.16) *
+      flatAllocPenalty,
     0,
     100,
   );
 
   return {
-    conceptFit: clamp(opts.conceptFit, 0, 100),
+    conceptFit: concept,
     fieldScores,
     designQuality,
     technologyQuality,
