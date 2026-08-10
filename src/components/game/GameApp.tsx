@@ -2611,14 +2611,160 @@ function TEngineScreen() {
   );
 }
 
-function SettingsScreen() {
+
+function SaveLoadPanel() {
   const saveGame = useGame((s) => s.saveGame);
+  const loadGame = useGame((s) => s.loadGame);
+  const exportSave = useGame((s) => s.exportSave);
+  const importSave = useGame((s) => s.importSave);
+  const exportSaveMatrix = useGame((s) => s.exportSaveMatrix);
+  const companyName = useGame((s) => s.companyName);
+  const year = useGame((s) => s.year);
+  const week = useGame((s) => s.week);
+  const [browserHasSave, setBrowserHasSave] = useState(() => hasSave());
+  const [paste, setPaste] = useState("");
+  const [msg, setMsg] = useState("");
+  const [preview, setPreview] = useState("");
+
+  const downloadJson = () => {
+    try {
+      const json = exportSave();
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const safe = (companyName || "studio").replace(/[^a-z0-9-_]+/gi, "_").slice(0, 32);
+      a.href = url;
+      a.download = `${safe}_Y${year}_W${week}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setMsg("Downloaded full campaign JSON.");
+      setPreview(json.slice(0, 400) + (json.length > 400 ? "…" : ""));
+    } catch {
+      setMsg("Download failed.");
+    }
+  };
+
+  const copyJson = async () => {
+    try {
+      const json = exportSave();
+      await navigator.clipboard?.writeText(json);
+      setPreview(json.slice(0, 400) + (json.length > 400 ? "…" : ""));
+      setMsg("Full save JSON copied to clipboard.");
+    } catch {
+      setMsg("Clipboard unavailable — use Download instead.");
+    }
+  };
+
+  const doImport = () => {
+    const ok = importSave(paste);
+    setMsg(ok ? "Loaded campaign from pasted JSON." : "Invalid save JSON — nothing changed.");
+    if (ok) setPaste("");
+  };
+
+  const onFile = (file: File | null) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = String(reader.result ?? "");
+      const ok = importSave(text);
+      setBrowserHasSave(hasSave());
+      setMsg(ok ? `Loaded from file: ${file.name}` : "File is not a valid campaign save.");
+    };
+    reader.onerror = () => setMsg("Could not read file.");
+    reader.readAsText(file);
+  };
+
+  return (
+    <div className="space-y-2 rounded-xl border border-border bg-paper p-3">
+      <div>
+        <h3 className="text-sm font-bold text-fg">Save / Load JSON</h3>
+        <p className="text-[11px] text-muted">
+          Browser autosave slot + portable full-campaign JSON files.
+        </p>
+      </div>
+      {msg && (
+        <p className="rounded-lg border border-border bg-elevated px-2 py-1.5 text-xs text-fg">{msg}</p>
+      )}
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <Button
+          className="w-full"
+          onClick={() => {
+            saveGame();
+            setBrowserHasSave(true);
+            setMsg("Saved to browser slot.");
+          }}
+        >
+          Save to browser
+        </Button>
+        <Button
+          className="w-full"
+          variant="secondary"
+          disabled={!browserHasSave}
+          onClick={() => {
+            const ok = loadGame();
+            setBrowserHasSave(hasSave());
+            setMsg(ok ? "Loaded browser slot." : "No browser save found.");
+          }}
+        >
+          Load browser slot
+        </Button>
+        <Button className="w-full" variant="secondary" onClick={downloadJson}>
+          Download .json
+        </Button>
+        <Button className="w-full" variant="secondary" onClick={() => void copyJson()}>
+          Copy full JSON
+        </Button>
+      </div>
+      <label className="block">
+        <span className="mb-1 block text-[10px] font-bold uppercase text-muted">Import file</span>
+        <input
+          type="file"
+          accept="application/json,.json"
+          className="block w-full text-xs text-muted file:mr-2 file:rounded-md file:border-0 file:bg-accent file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-white"
+          onChange={(e) => onFile(e.target.files?.[0] ?? null)}
+        />
+      </label>
+      <label className="block">
+        <span className="mb-1 block text-[10px] font-bold uppercase text-muted">Paste JSON</span>
+        <textarea
+          value={paste}
+          onChange={(e) => setPaste(e.target.value)}
+          rows={4}
+          placeholder='{"version":…,"companyName":…}'
+          className="w-full resize-y rounded-lg border border-border bg-elevated px-2 py-1.5 font-mono text-[10px] text-fg"
+        />
+      </label>
+      <Button className="w-full" variant="secondary" disabled={!paste.trim()} onClick={doImport}>
+        Load pasted JSON
+      </Button>
+      <Button
+        className="w-full"
+        variant="ghost"
+        onClick={() => {
+          const j = exportSaveMatrix();
+          setPreview(j);
+          void navigator.clipboard?.writeText(j);
+          setMsg("Compact save matrix copied (telemetry-style snapshot).");
+        }}
+      >
+        Copy compact matrix
+      </Button>
+      {preview && (
+        <pre className="max-h-28 overflow-auto rounded-lg border border-border bg-panel p-2 text-[10px] text-muted">
+          {preview}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+function SettingsScreen() {
   const setModal = useGame((s) => s.setModal);
   const returnToMenu = useGame((s) => s.returnToMenu);
   const setScreen = useGame((s) => s.setScreen);
-  const exportSaveMatrix = useGame((s) => s.exportSaveMatrix);
   const [panel, setPanel] = useState<"unlocks" | "contracts" | "hardware" | "engines" | "none">("unlocks");
-  const [matrix, setMatrix] = useState("");
   return (
     <div className="mx-auto max-w-lg space-y-3 px-1 pb-4 pt-1">
       <div className="game-panel px-4 py-3 text-center">
@@ -2652,26 +2798,8 @@ function SettingsScreen() {
       {panel === "contracts" && <ContractsScreen />}
       {panel === "hardware" && <HardwareLabScreen />}
       {panel === "engines" && <TEngineScreen />}
+      <SaveLoadPanel />
       <div className="space-y-2">
-        <Button className="w-full" variant="secondary" onClick={() => saveGame()}>
-          Save campaign
-        </Button>
-        <Button
-          className="w-full"
-          variant="secondary"
-          onClick={() => {
-            const j = exportSaveMatrix();
-            setMatrix(j);
-            void navigator.clipboard?.writeText(j);
-          }}
-        >
-          Export save matrix (v2.2)
-        </Button>
-        {matrix && (
-          <pre className="max-h-32 overflow-auto rounded-lg border border-border bg-panel p-2 text-[10px] text-muted">
-            {matrix}
-          </pre>
-        )}
         <Button className="w-full" variant="secondary" onClick={() => setModal("pauseMenu")}>
           Pause menu
         </Button>
@@ -3265,6 +3393,7 @@ function ReportModal() {
 function PauseMenu() {
   const modal = useGame((s) => s.modal);
   const setModal = useGame((s) => s.setModal);
+  const setScreen = useGame((s) => s.setScreen);
   const saveGame = useGame((s) => s.saveGame);
   const returnToMenu = useGame((s) => s.returnToMenu);
   return (
@@ -3272,6 +3401,16 @@ function PauseMenu() {
       <div className="space-y-2">
         <Button className="w-full" onClick={() => { saveGame(); setModal(null); }}>
           Save & resume
+        </Button>
+        <Button
+          className="w-full"
+          variant="secondary"
+          onClick={() => {
+            setModal(null);
+            setScreen("settings");
+          }}
+        >
+          Save / Load JSON…
         </Button>
         <Button className="w-full" variant="secondary" onClick={() => setModal("loopGuide")}>
           How the loop works

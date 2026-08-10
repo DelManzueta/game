@@ -4717,21 +4717,51 @@ export const useGame = create<GameState & Actions>((set, get) => ({
 
   exportSave: () => {
     const state = get();
-    return JSON.stringify({
+    // Full campaign JSON — portable across browsers / devices
+    const payload = {
       ...state,
-      modal: state.pendingEvent ? "event" : null,
-      speed: 0,
       version: SAVE_VERSION,
+      modal: state.pendingEvent != null ? "event" : null,
+      speed: 0 as const,
+      dirty: false,
+      lastSavedWeek: state.week,
       pendingEvent: state.pendingEvent,
-    });
+      eventCooldowns: state.eventCooldowns,
+      recentEventKeys: state.recentEventKeys,
+    };
+    return JSON.stringify(payload, null, 2);
   },
 
   importSave: (raw) => {
     try {
-      const data = parseSaveCandidate(raw);
+      const text = String(raw ?? "").trim();
+      if (!text) return false;
+      const data = parseSaveCandidate(text);
       if (!data) return false;
-      localStorage.setItem(SAVE_KEY, raw);
-      return get().loadGame();
+      // Normalize into our save key format so loadGame can read it
+      const normalized = JSON.stringify({
+        ...(data as object),
+        version: SAVE_VERSION,
+      });
+      localStorage.setItem(SAVE_KEY, normalized);
+      const ok = get().loadGame();
+      if (ok) {
+        const st = get();
+        set({
+          dirty: false,
+          notifications: [
+            {
+              id: uid("note"),
+              text: "Campaign loaded from JSON save.",
+              tone: "good" as const,
+              week: st.week,
+              read: false,
+            },
+            ...st.notifications,
+          ].slice(0, 40),
+        });
+      }
+      return ok;
     } catch {
       return false;
     }

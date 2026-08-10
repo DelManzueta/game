@@ -1276,16 +1276,35 @@ def menu_staff(engine: TycoonEngine) -> None:
 
 
 def menu_save_load(engine: TycoonEngine) -> None:
-    print("\n  [1] Save to JSON file")
+    print("\n  SAVE / LOAD JSON")
+    print("  [1] Save to JSON file")
     print("  [2] Load from JSON file")
     print("  [3] Print save matrix to console")
+    print("  [4] Quick-save  (studio_save.json)")
+    print("  [5] Quick-load  (studio_save.json)")
+    print("  [6] List .json files in current directory")
     sub = prompt("Save/Load: ")
     if sub == "1":
         path = prompt("Path [studio_save.json]: ") or "studio_save.json"
         engine.save_to_file(path)
+        print("### SYSTEM SAVE MATRIX (portable)")
+        print("```json")
+        print(json.dumps(engine.state.to_save_matrix(), indent=2)[:2000])
+        print("```")
     elif sub == "2":
         path = prompt("Path [studio_save.json]: ") or "studio_save.json"
         engine.load_from_file(path)
+    elif sub == "4":
+        engine.save_to_file("studio_save.json")
+    elif sub == "5":
+        engine.load_from_file("studio_save.json")
+    elif sub == "6":
+        import os
+        files = [f for f in os.listdir(".") if f.endswith(".json")]
+        if not files:
+            print("  (no .json files here)")
+        for f in sorted(files):
+            print(f"  - {f}")
     else:
         print(json.dumps(engine.state.to_save_matrix(), indent=2))
 
