@@ -182,7 +182,7 @@ describe("garage content slice", () => {
     assert.equal(GARAGE_GENRE_IDS.length, 6);
     assert.ok(isGarageTopic("space"));
     assert.ok(isGaragePlatform("pc"));
-    assert.ok(isGaragePlatform("itara"));
+    assert.ok(isGaragePlatform("itara_5200"));
     assert.equal(isGarageTopic("mecha"), false);
   });
 

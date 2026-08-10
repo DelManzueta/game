@@ -650,6 +650,9 @@ export interface GameState {
   /** Released titles carrying IP royalty */
   ipRoyaltyGameIds?: string[];
   /** Active MMO server runtimes */
+  hiringBoard?: StaffMember[] | null;
+  hiringBoardRefresh?: number;
+  officeReminderYears?: Record<number, number>; // yearIndex -> reminder count
   marketingOpportunities?: import("./marketingOpportunities").MarketingOpportunityState;
   activeMmos?: import("./hardcoreEngines").MmoRuntime[];
   digitalStorefront?: import("./digitalStorefront").DigitalStorefront;

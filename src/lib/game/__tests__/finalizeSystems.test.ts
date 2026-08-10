@@ -176,6 +176,8 @@ describe("finalize systems — staff & hire budget", () => {
     for (let i = 0; i < 50; i++) {
       const m = generateStaff(1.1 + (i % 5) * 0.05, 1979 + (i % 10), {
         forceStar: i % 9 === 0,
+        candidateIndex: i,
+        seed: 9000 + i,
       });
       names.add(m.name);
       designs.push(m.design);

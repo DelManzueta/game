@@ -1,171 +1,212 @@
 /**
- * Real Garage campaign traces — production algorithm + classic scoring + rent/sales ledger.
+ * Authoritative Garage campaign traces via Zustand store commands only.
  * node --import tsx scripts/foundation-campaign-trace.mjs
  */
-import { classicReviewScore, classicUnitsSold } from "../src/lib/game/classicGdt.ts";
-import { emptyLedger } from "../src/lib/game/finance/ledger.ts";
-import { applyCashTransaction } from "../src/lib/game/finance/transaction.ts";
-import {
-  createProductionState,
-  planStage,
-  advanceDevelopmentDay,
-  advancePolishDay,
-  finalizeBuild,
-  advanceBugFixingDay,
-  founderFromStaff,
-  STAGE_DISCIPLINES,
-  defaultStageDemand,
-  PHASE_POLISH,
-  PHASE_FINALIZE_BUILD,
-  PHASE_BUG_FIXING,
-  PHASE_PLANNING,
-} from "../src/lib/game/production/algorithm.ts";
-import { hashSeed } from "../src/lib/game/scoring/rng.ts";
+import { useGame } from "../src/lib/game/store.ts";
+import { STAGE_FIELDS } from "../src/lib/game/data.ts";
 
-function runCampaign(label, seed, design, tech, level, sliderFlat) {
-  const founder = founderFromStaff([{ design, tech, speed: 50, level, bugFixBonus: 0 }]);
-  let state = createProductionState(`g-${label}`, String(seed), 0, "small");
-  for (const stage of [1, 2, 3]) {
-    state = { ...state, currentStage: stage, phase: PHASE_PLANNING };
-    const discs = STAGE_DISCIPLINES[stage];
-    const raw = Object.fromEntries(
-      discs.map((d, i) => [d, sliderFlat ? 33 : 25 + (hashSeed(seed, stage, i, d) % 50)]),
-    );
-    state = planStage(state, {
-      stage,
-      rawIntent: raw,
-      demand: defaultStageDemand(stage),
-      size: "small",
-    });
+function dismissBlocks() {
+  const s = useGame.getState();
+  if (s.pendingEvent) {
+    // prefer "pass" / cheapest choice when marketing
+    useGame.getState().resolveEvent(0);
+  }
+  if (useGame.getState().modal === "event") {
+    useGame.setState({ modal: null, pendingEvent: null, speed: 1 });
+  }
+}
+
+function advance(n = 1) {
+  for (let i = 0; i < n; i++) {
+    useGame.getState().setSpeed(1);
+    const err = useGame.getState().advanceWeek();
+    dismissBlocks();
+    // polish path
+    const p = useGame.getState().currentProject;
+    if (p?.devPhase === "POLISHING" || p?.production?.phase === "bug_fixing") {
+      useGame.getState().workPolishWeek();
+      dismissBlocks();
+    }
+  }
+}
+
+function setStageSliders(mode) {
+  const p = useGame.getState().currentProject;
+  if (!p) return;
+  const fields = STAGE_FIELDS[p.stage] ?? STAGE_FIELDS[1];
+  for (const f of fields) {
+    const v =
+      mode === "strong" ? (f.includes("game") || f === "engine" || f === "graphics" ? 80 : 40)
+      : mode === "poor" ? 33
+      : 50;
+    useGame.getState().setSlider(f, v);
+  }
+}
+
+function runScenario(label, company, mode) {
+  useGame.getState().newGame(company, false, "standard");
+  // Ensure garage topics usable for scripted campaigns
+  useGame.setState({
+    unlockedTopics: ["space", "fantasy", "racing", "dungeon", "comedy", "military"],
+    unlockedGenres: ["action", "adventure", "rpg", "simulation", "strategy", "casual"],
+    unlockedPlatforms: ["pc", "itara_5200"],
+  });
+  const seed = useGame.getState().campaignSeed;
+  const histBefore = useGame.getState().targetHighScore;
+
+  const startErr = useGame.getState().startProject({
+    title: `${label} Title`,
+    topicId: mode === "poor" ? "comedy" : mode === "average" ? "racing" : "space",
+    genreId: mode === "poor" ? "strategy" : "action",
+    platformId: "pc",
+    size: "small",
+    audience: "everyone",
+  });
+  if (startErr) throw new Error(String(startErr));
+
+  const projectId = useGame.getState().currentProject?.id;
+  const projectSeed = useGame.getState().currentProject?.rngSeed;
+  const cashAfterStart = useGame.getState().cash;
+  const ledgerAfterStart = useGame.getState().ledger?.balance;
+
+  // Stage 1-3
+  for (let stage = 1; stage <= 3; stage++) {
     let guard = 0;
-    while (state.phase === "developing" && guard++ < 8000) {
-      state = advanceDevelopmentDay(state, { day: state.asOfDay + 1, founder }).state;
+    while (guard++ < 80) {
+      const p = useGame.getState().currentProject;
+      if (!p) break;
+      if (p.devPhase?.includes("CONFIG")) {
+        setStageSliders(mode);
+        useGame.getState().confirmStage();
+        dismissBlocks();
+      } else if (
+        p.devPhase === "POLISHING" ||
+        p.production?.phase === "bug_fixing" ||
+        p.production?.phase === "polish" ||
+        p.production?.phase === "finalize_build"
+      ) {
+        break;
+      } else if (p.devPhase === "READY_TO_RELEASE") {
+        break;
+      } else {
+        advance(1);
+      }
+      if (useGame.getState().currentProject?.stage !== stage && stage < 3) {
+        // advanced
+      }
+      const ph = useGame.getState().currentProject?.devPhase;
+      if (ph === "STAGE_2_CONFIG" && stage === 1) break;
+      if (ph === "STAGE_3_CONFIG" && stage === 2) break;
+      if (ph === "POLISHING" || ph === "READY_TO_RELEASE") break;
     }
   }
+
+  // Polish to ready
   let guard = 0;
-  while (state.phase === PHASE_POLISH && guard++ < 3000) {
-    state = advancePolishDay(state, { day: state.asOfDay + 1, founder }).state;
-  }
-  if (state.phase === PHASE_FINALIZE_BUILD) state = finalizeBuild(state);
-  guard = 0;
-  while (state.phase === PHASE_BUG_FIXING && guard++ < 5000) {
-    state = advanceBugFixingDay(state, { day: state.asOfDay + 1, founder }).state;
+  while (guard++ < 40) {
+    const p = useGame.getState().currentProject;
+    if (!p) break;
+    if (p.devPhase === "READY_TO_RELEASE" || p.production?.phase === "release_ready") break;
+    if (p.devPhase === "POLISHING" || p.production?.phase === "bug_fixing" || p.production?.phase === "polish") {
+      useGame.getState().workPolishWeek();
+      dismissBlocks();
+    } else {
+      advance(1);
+    }
   }
 
-  const openBugs = (state.bugs ?? []).filter((b) => (b.remainingWork ?? 0) > 0).length;
-  const weeksProd = Math.ceil(state.asOfDay / 7);
-  const designPts = Math.round(20 + design * 0.55 + (hashSeed(seed, "d") % 15));
-  const techPts = Math.round(18 + tech * 0.55 + (hashSeed(seed, "t") % 12));
-  const combo = label === "strong" ? 1.3 : label === "poor" ? 0.7 : 1.0;
-  const hist0 = 35;
-  const review = classicReviewScore({
-    designPoints: designPts,
-    techPoints: techPts,
-    bugs: openBugs + (label === "poor" ? 12 : label === "average" ? 4 : 1),
-    targetHighScore: hist0,
-    comboMult: combo,
-    size: "small",
-    sliderMiss: sliderFlat ? 0.4 : 0.05,
-  });
-  const sales = classicUnitsSold({
-    designPoints: designPts,
-    techPoints: techPts,
-    reviewScore: review.avg,
-    size: "small",
-    platformMarket: 1,
-    comboMult: combo,
-    hype: label === "strong" ? 40 : label === "poor" ? 0 : 12,
-    fans: 0,
-    marketingSpend: 0,
-  });
+  useGame.getState().enterPreRelease();
+  dismissBlocks();
+  const p = useGame.getState().currentProject;
+  const designPts = p?.designPoints ?? p?.production?.completedStages?.length;
+  const techPts = p?.techPoints;
+  const bugs = p?.bugs ?? 0;
+  const weekBeforeRelease = useGame.getState().week;
+  const cashBeforeRelease = useGame.getState().cash;
 
-  let cash = 75000;
-  let ledger = emptyLedger(75000);
+  const relErr = useGame.getState().releaseGame();
+  dismissBlocks();
+  const afterRel = useGame.getState();
+  const released = afterRel.releasedGames[0];
+  const histAfter = afterRel.targetHighScore;
+  const cashReleaseDay = afterRel.cash;
+  const salesWeek0 = released?.sales ?? 0;
+
+  // Midpoint serialize
+  const mid = JSON.parse(JSON.stringify({
+    week: afterRel.week,
+    cash: afterRel.cash,
+    ledger: afterRel.ledger,
+    releasedGames: afterRel.releasedGames,
+    targetHighScore: afterRel.targetHighScore,
+    fans: afterRel.fans,
+    campaignSeed: afterRel.campaignSeed,
+  }));
+
+  // Shelf weeks
   const weekly = [];
-  let fans = review.avg >= 8.5 ? 25 : review.avg >= 7 ? 10 : review.avg >= 5.5 ? 0 : -5;
-  // Dev period rent
-  for (let w = 1; w <= weeksProd; w++) {
-    if (w % 4 === 0) {
-      const t = applyCashTransaction(cash, ledger, {
-        week: w,
-        amount: -8000,
-        category: "rent",
-        label: "Monthly office rent",
-        ref: `rent-w${w}`,
-      });
-      cash = t.cash;
-      ledger = t.ledger;
-    }
-  }
-  // Market weeks — release at weeksProd, sales start next week
-  const marketWeeks = sales.weekly.length;
-  for (let mi = 0; mi < marketWeeks; mi++) {
-    const w = weeksProd + 1 + mi;
-    if (w % 4 === 0) {
-      const t = applyCashTransaction(cash, ledger, {
-        week: w,
-        amount: -8000,
-        category: "rent",
-        label: "Monthly office rent",
-        ref: `rent-w${w}`,
-      });
-      cash = t.cash;
-      ledger = t.ledger;
-    }
-    const units = sales.weekly[mi] ?? 0;
-    const rev = units * sales.price * 0.85;
-    const t = applyCashTransaction(cash, ledger, {
-      week: w,
-      amount: rev,
-      category: "sales",
-      label: "Weekly sales",
-      ref: `sales-${label}-w${w}`,
+  for (let w = 0; w < 8; w++) {
+    advance(1);
+    const g = useGame.getState().releasedGames.find((x) => x.id === released?.id);
+    const hist = g?.weeklyHistory ?? [];
+    const last = hist[hist.length - 1];
+    weekly.push({
+      week: useGame.getState().week,
+      units: last?.units ?? null,
+      revenue: last?.revenue ?? null,
+      fans: useGame.getState().fans,
+      cash: useGame.getState().cash,
+      ledger: useGame.getState().ledger?.balance,
     });
-    cash = t.cash;
-    ledger = t.ledger;
-    const fanDelta = units * 0.04 * ((review.avg - 5.5) / 4.5);
-    fans = Math.max(0, fans + fanDelta);
-    if (mi < 4) {
-      weekly.push({
-        marketWeek: mi + 1,
-        units,
-        rev: Math.round(rev * 100) / 100,
-        fanDelta: Math.round(fanDelta * 10) / 10,
-        cash: Math.round(cash * 100) / 100,
-        ledger: Math.round(ledger.balance * 100) / 100,
-      });
-    }
   }
+
+  const rentEntries = (useGame.getState().ledger?.entries ?? []).filter((e) => e.category === "rent");
+  const recon = (useGame.getState().ledger?.entries ?? []).filter((e) => e.label === "Balance reconciliation");
 
   return {
     label,
     seed,
-    weeksProd,
+    projectId,
+    projectSeed,
+    weekBeforeRelease,
     designPts,
     techPts,
-    bugs: openBugs + (label === "poor" ? 12 : label === "average" ? 4 : 1),
-    review: review.avg,
-    hist0,
-    hist1: review.nextHistoricalAverage,
-    reviewReactionFans: review.avg >= 8.5 ? 25 : review.avg >= 7 ? 10 : review.avg >= 5.5 ? 0 : -5,
-    totalUnits: sales.totalUnits,
-    weekly,
-    finalFans: Math.round(fans),
-    finalCash: Math.round(cash * 100) / 100,
-    finalLedger: Math.round(ledger.balance * 100) / 100,
-    cashEqualsLedger: Math.abs(cash - ledger.balance) < 0.02,
+    bugs,
+    reviews: released?.reviews?.scores ?? released?.reviewResult,
+    avgReview: released?.avgReview ?? released?.reviews?.avg,
+    histBefore,
+    histAfter,
+    cashAfterStart,
+    ledgerAfterStart,
+    cashBeforeRelease,
+    cashReleaseDay,
+    salesWeek0,
+    weekly: weekly.slice(0, 4),
+    rentCharges: rentEntries.map((e) => ({ week: e.week, amount: e.amount })),
+    finalCash: useGame.getState().cash,
+    finalLedger: useGame.getState().ledger?.balance,
+    cashEqualsLedger: Math.abs(Math.round(useGame.getState().cash*100) - Math.round((useGame.getState().ledger?.balance ?? 0)*100)) <= 1,
+    noReconciliation: recon.length === 0,
+    fansGainedAtRelease: released?.fansGained,
+    midSnapshotOk: mid.campaignSeed === seed,
   };
 }
 
 const scenarios = [
-  ["strong", 1001, 62, 58, 3, false],
-  ["average", 2002, 48, 46, 2, false],
-  ["poor", 3003, 38, 36, 1, true],
+  ["strong", "Strong Studio", "strong"],
+  ["average", "Average Studio", "average"],
+  ["poor", "Poor Studio", "poor"],
 ];
 
-for (const args of scenarios) {
-  const a = runCampaign(...args);
-  const b = runCampaign(...args);
-  const match = JSON.stringify(a) === JSON.stringify(b);
+for (const [label, company, mode] of scenarios) {
+  const a = runScenario(label, company, mode);
+  // Replay from same company name (deterministic seed from name)
+  const b = runScenario(label, company, mode);
+  const match =
+    a.seed === b.seed &&
+    a.avgReview === b.avgReview &&
+    a.finalCash === b.finalCash &&
+    a.histAfter === b.histAfter &&
+    JSON.stringify(a.weekly) === JSON.stringify(b.weekly);
   console.log(JSON.stringify({ ...a, deterministicReplay: match }, null, 2));
 }

@@ -21,12 +21,13 @@ const SIX: GenreId[] = ["action", "adventure", "rpg", "simulation", "strategy", 
 const VALS = new Set([100, 85, 70, 55, 35, 15]);
 
 describe("content catalog validation", () => {
-  it("has unique topics (catalog may grow past 132)", () => {
+  it("has exactly 132 unique topics", () => {
     const ids = TOPICS.map((t) => t.id);
     const names = TOPICS.map((t) => t.name);
-    assert.ok(TOPICS.length >= 132);
-    assert.equal(new Set(ids).size, ids.length);
-    assert.equal(new Set(names).size, names.length);
+    assert.equal(TOPICS.length, 132);
+    assert.equal(TOPIC_COUNT, 132);
+    assert.equal(new Set(ids).size, 132);
+    assert.equal(new Set(names).size, 132);
   });
 
   it("normalizes Motocross, Wizards, Post-Apocalyptic; no duplicate Assassin/Construction/Crime", () => {
@@ -58,12 +59,14 @@ describe("content catalog validation", () => {
     }
   });
 
-  it("fixed platforms include PC, Itara, and Commodore; Custom Console separate", () => {
+  it("50 fixed platforms include PC, Itara, and Commodore; Custom Console separate", () => {
     assert.ok(PLATFORMS.length >= 50);
-    const ids = PLATFORMS.map((p) => p.id);
-    assert.ok(ids.includes("pc"));
-    assert.ok(ids.includes("itara") || ids.includes("Itara") || ids.some(i => i.includes("itara")));
-    assert.ok(ids.includes("commodore") || ids.some(i => i.includes("commodore")));
+    const ids = new Set(PLATFORMS.map((p) => p.id));
+    assert.ok(ids.has("pc"));
+    assert.ok(ids.has("itara_5200") || [...ids].some((id) => id.includes("itara")));
+    assert.ok(ids.has("commodore"));
+    assert.ok(CUSTOM_CONSOLE);
+    assert.ok(!ids.has("custom_console"));
   });
 
   it("27 engine components: 1 starting Basic 2D V1 + 26 researchable", () => {

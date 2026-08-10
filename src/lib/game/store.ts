@@ -202,6 +202,7 @@ import {
 import {
   emptyMarketingOpportunityState,
   ensureYearOpportunities,
+  resolveMarketingOpportunity,
 } from "./marketingOpportunities";
 import { applyCashTransaction, moneyRound } from "./finance/transaction";
 import {
@@ -591,6 +592,9 @@ function initialState(): GameState {
     genreExp: { action: 0, adventure: 0, rpg: 0, simulation: 0, strategy: 0, casual: 0 },
     gameHistoryLedger: [],
     hardwareProducts: [],
+    hiringBoard: null,
+    hiringBoardRefresh: 0,
+    officeReminderYears: {},
     officeEnteredYear: START_YEAR,
     officeEnteredMonth: 1,
     officeSubTier: 2.0,
@@ -825,10 +829,58 @@ function applyEventChoice(state: GameState, choiceIndex: number): GameState {
   const pe = state.pendingEvent;
   if (!pe) return state;
 
+  // Marketing opportunity events: map choiceIndex → low/mid/high
+  const mktId = (pe as { marketingOpportunityId?: string }).marketingOpportunityId;
+  if (mktId && state.marketingOpportunities) {
+    const due = state.marketingOpportunities.opportunities.find((o) => o.id === mktId);
+    const choice = due?.choices[choiceIndex] ?? due?.choices[0];
+    if (due && choice && due.status === "offered") {
+      const res = resolveMarketingOpportunity(state.marketingOpportunities, mktId, choice.id);
+      if ("error" in res) {
+        return { ...state, pendingEvent: null, modal: null, speed: 1 };
+      }
+      if (state.cash < res.choice.cost) {
+        return {
+          ...state,
+          pendingEvent: null,
+          modal: null,
+          speed: 1,
+          notifications: pushNote(state, `Need $${res.choice.cost.toLocaleString()} for ${res.choice.label}.`, "warn"),
+        };
+      }
+      const txn = applyCashTransaction(state.cash, state.ledger, {
+        week: state.week,
+        amount: -res.choice.cost,
+        category: "marketing",
+        label: res.choice.label,
+        ref: `mkt-opp-${mktId}-${choice.id}`,
+      });
+      if (!txn.applied) {
+        return { ...state, pendingEvent: null, modal: null, speed: 1 };
+      }
+      return {
+        ...state,
+        cash: txn.cash,
+        ledger: txn.ledger,
+        hype: Math.min(150, state.hype + res.choice.hypeGain),
+        marketingOpportunities: res.state,
+        pendingEvent: null,
+        modal: null,
+        dirty: true,
+        speed: 1,
+        notifications: pushNote(
+          state,
+          `${res.choice.label}: +${res.choice.hypeGain} hype, +${res.choice.marketingPoints} marketing points.`,
+          "good",
+        ),
+      };
+    }
+  }
+
   // Part 2 decision catalog
   if (pe.decisionChoices && pe.decisionChoices.length) {
     const choice = pe.decisionChoices[choiceIndex] ?? pe.decisionChoices[0];
-    const next: GameState = {
+    let next: GameState = {
       ...state,
       pendingEvent: null,
       modal: null,
@@ -839,8 +891,7 @@ function applyEventChoice(state: GameState, choiceIndex: number): GameState {
     if (choice) {
       const e = choice.effects;
       if (e.cash) {
-        next.cash += e.cash;
-        next.ledger = applyLedger(next.ledger, {
+        next = commitTxn(next, {
           week: next.week,
           amount: e.cash,
           category: "other",
@@ -870,7 +921,7 @@ function applyEventChoice(state: GameState, choiceIndex: number): GameState {
 
   const def = EVENT_POOL.find((e) => e.key === pe.id);
   const choice = def?.choices[choiceIndex] ?? def?.choices[0];
-  const next: GameState = {
+  let next: GameState = {
     ...state,
     pendingEvent: null,
     modal: null,
@@ -879,7 +930,20 @@ function applyEventChoice(state: GameState, choiceIndex: number): GameState {
     flags: { ...state.flags },
   };
   if (choice) {
+    const cashBefore = next.cash;
     choice.apply(next);
+    const delta = moneyRound(next.cash - cashBefore);
+    // Revert raw cash mutate; re-apply atomically with ledger
+    next.cash = cashBefore;
+    if (Math.abs(delta) > 0.001) {
+      next = commitTxn(next, {
+        week: next.week,
+        amount: delta,
+        category: "other",
+        label: `${pe.title}: ${choice.label}`,
+        ref: `evt-pool-${pe.id}-${choiceIndex}-w${next.week}`,
+      });
+    }
     next.notifications = pushNote(
       next,
       `${pe.title} — ${choice.label}`,
@@ -1341,29 +1405,40 @@ function releaseProject(next: GameState, project: GameProject): GameState {
     }));
   }
 
-  // Module 21 — ops publisher matrix settlement (Vina / EA / Nintendont)
+  // Module 21 — Ops publisher: freeze terms + review obligation only.
+  // NO projected lifetime royalties at release. Weekly share applies later.
   if (next.activePublisherDealId && PUBLISHER_MATRIX.some((p) => p.id === next.activePublisherDealId)) {
     const offer = PUBLISHER_MATRIX.find((p) => p.id === next.activePublisherDealId)!;
-    const gross = (sales.totalUnits ?? 0) * (sales.price ?? 9.99);
-    const result = settlePublisherContract({
-      grossRevenue: gross,
-      finalScore: reviews.avg,
-      reqScore: offer.reqScore,
-      advancePay: offer.advancePay,
+    const met = reviews.avg + 1e-6 >= offer.reqScore;
+    if (!met) {
+      const penalty = Math.round(offer.advancePay * 0.6);
+      next = commitTxn(next, {
+        week: next.week,
+        amount: -penalty,
+        category: "publisher",
+        label: `Publisher breach: ${offer.company}`,
+        ref: `ops-breach-${offer.id}-${scored.id}`,
+      });
+      next.notifications = pushNote(
+        next,
+        `${offer.company}: missed ${offer.reqScore}+ (got ${reviews.avg.toFixed(1)}). Fine ${penalty}.`,
+        "bad",
+      );
+    } else {
+      next.notifications = pushNote(
+        next,
+        `${offer.company}: score met. Weekly revenue share ${Math.round(offer.royaltyCut * 100)}% applies on sales.`,
+        "good",
+      );
+    }
+    // Freeze deal onto scored for commercial snapshot; do not clear until freeze applied below
+    (scored as { publisherContractSnapshot?: object }).publisherContractSnapshot = {
+      source: "ops_matrix",
+      id: offer.id,
+      company: offer.company,
       royaltyCut: offer.royaltyCut,
-    });
-    next.cash += result.inflow;
-    next.ledger = applyLedger(next.ledger, {
-      week: next.week,
-      amount: result.inflow,
-      category: result.met ? "sales" : "other",
-      label: result.met
-        ? `Publisher royalties: ${offer.company}`
-        : `Publisher breach: ${offer.company}`,
-      ref: `ops-settle-${offer.id}-w${next.week}`,
-    });
-    next.notifications = pushNote(next, result.note, result.met ? "good" : "bad");
-    next.activePublisherDealId = null;
+      reqScore: offer.reqScore,
+    };
   }
 
 
@@ -1374,6 +1449,16 @@ function releaseProject(next: GameState, project: GameProject): GameState {
     next.week,
     next.year,
   );
+  // Freeze ops publisher distribution before any clear of active deal id
+  const snap = (scored as { publisherContractSnapshot?: { source: string; id: string; company: string; royaltyCut: number } }).publisherContractSnapshot;
+  if (snap) {
+    released.distributionType = "publisher";
+    released.publisherId = snap.id;
+    released.publisherRoyalty = 1 - snap.royaltyCut; // studio keep rate
+    (released as { publisherContractSnapshot?: object }).publisherContractSnapshot = snap;
+    next.activePublisherDealId = null;
+  }
+
     if (scored.usedIllicitAssets) {
       released.litigationDueWeek = next.week + 2;
       released.usedIllicitAssets = true;
@@ -1766,7 +1851,6 @@ next.gamesPublished += 1;
   return next;
 }
 
-let candidatesCache: StaffMember[] = [];
 let lastSaveAt = 0;
 
 interface Actions {
@@ -1855,6 +1939,7 @@ interface Actions {
   selectGame: (id: string | null) => void;
   completeReport: (id: string) => void;
   startTitleCampaign: (gameId: string, campaignId: string) => string | null;
+  resolveMarketingChoice: (opportunityId: string, choiceId: string) => string | null;
   runStudioMarketing: (campaignId: string) => string | null;
   toggleCrunchMode: () => string | null;
   setSecondaryPlatforms: (ids: string[]) => string | null;
@@ -2235,6 +2320,20 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         next.campaignSeed,
       );
       next.marketingOpportunities = mkt;
+      const due = mkt.opportunities.find((o) => o.status === "offered");
+      if (due && !next.pendingEvent && next.modal !== "event") {
+        next.pendingEvent = {
+          id: due.id,
+          title: "Marketing opportunity",
+          body: `Choose a campaign for year ${due.yearIndex + 1}:\n` +
+            due.choices.map((c) => `• ${c.label} — $${c.cost.toLocaleString()} (+${c.hypeGain} hype, +${c.marketingPoints} mkt pts)`).join("\n"),
+          // choices resolved via resolveMarketingChoice action / event choice mapping
+        };
+        // stash choice ids in event for resolveEvent mapping
+        (next.pendingEvent as { marketingOpportunityId?: string }).marketingOpportunityId = due.id;
+        next.modal = "event";
+        next.speed = 0;
+      }
     }
 
     // Progression tenure + office offers + move completion (CP1)
@@ -2256,6 +2355,45 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       ) {
         next.modal = "officeOffer";
         next.speed = 0;
+      }
+      // Deferred FO reminders: exactly 2 windows per campaign year until accepted
+      if (
+        fo &&
+        (fo.state === "deferred" || fo.state === "offered") &&
+        prog.studioTier === 1 &&
+        !next.pendingEvent &&
+        next.modal !== "event" &&
+        next.modal !== "reviews" &&
+        next.modal !== "officeOffer"
+      ) {
+        const y = Math.floor(next.week / 48);
+        const yearStart = y * 48;
+        const windows = [yearStart + 16, yearStart + 40];
+        const reminders = fo.reminderWeeks ?? [];
+        const yearReminders = reminders.filter((w) => Math.floor(w / 48) === y);
+        if (
+          yearReminders.length < 2 &&
+          windows.includes(next.week) &&
+          !reminders.includes(next.week)
+        ) {
+          next.progression = {
+            ...prog,
+            offers: {
+              ...prog.offers,
+              first_office: {
+                ...fo,
+                reminderWeeks: [...reminders, next.week],
+              },
+            },
+          };
+          next.modal = "officeOffer";
+          next.speed = 0;
+          next.notifications = pushNote(
+            next,
+            "Reminder: First Office offer still available (terms unchanged).",
+            "info",
+          );
+        }
       }
     }
 
@@ -2609,8 +2747,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         next.currentProject = { ...next.currentProject, bugs: 0 };
       }
       if (adv.cashCost > 0) {
-        next.cash -= adv.cashCost;
-        next.ledger = applyLedger(next.ledger, {
+        const t = applyCashTransaction(next.cash, next.ledger, {
           week: next.week,
           amount: -adv.cashCost,
           category: "development",
@@ -2618,11 +2755,14 @@ export const useGame = create<GameState & Actions>((set, get) => ({
           gameId: adv.project.id,
           ref: `dev-${adv.project.id}-w${next.week}`,
         });
+        if (t.applied) {
+          next = { ...next, cash: t.cash, ledger: t.ledger };
+        }
       }
       next.staff = next.staff.map((m) =>
         m.id === "founder" ? { ...m, energy: 100 } : m,
       );
-      if (adv.stageJustFinished) {
+      if (adv.stageJustFinished && next.currentProject) {
         next.speed = 0;
         const ph = next.currentProject.devPhase;
         if (ph === "STAGE_2_CONFIG" || ph === "STAGE_3_CONFIG") {
@@ -2643,7 +2783,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
           );
         }
       }
-      if (next.currentProject.devPhase === "READY_TO_RELEASE") {
+      if (next.currentProject?.devPhase === "READY_TO_RELEASE") {
         next.speed = 0;
         next.notifications = pushNote(
           next,
@@ -2862,7 +3002,10 @@ export const useGame = create<GameState & Actions>((set, get) => ({
 
     next = tryFireEvent(next);
     // Netflix Edition — streamer hype decays faster
-    if ((next.streamerHypeWeeksLeft ?? 0) > 0) {
+    if (
+      lateSystemAllowed(next, "streamerMarketing") &&
+      (next.streamerHypeWeeksLeft ?? 0) > 0
+    ) {
       next.hype = streamerHypeDecay(next.hype, next.streamerHypeWeeksLeft ?? 0);
       next.streamerHypeWeeksLeft = Math.max(0, (next.streamerHypeWeeksLeft ?? 0) - 1);
     } else {
@@ -2972,7 +3115,10 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       next.releasedGames = games;
       next.activeSales = sales;
     // Module 23 — physical merch weekly shelves
-    if ((next.hardwareProducts ?? []).length) {
+    if (
+      lateSystemAllowed(next, "hardwareMerch") &&
+      (next.hardwareProducts ?? []).length
+    ) {
       const hw = processHardwareWeek(next.hardwareProducts ?? []);
       next.hardwareProducts = hw.products;
       if (hw.cashDelta !== 0) {
@@ -3128,25 +3274,6 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     // Module 15 — bankruptcy halt (no further auto-advance)
     next.cash = moneyRound(next.cash);
     next.fans = intFans(next.fans);
-    // Foundation Lock: cash and ledger must agree after settlement
-    if (next.ledger) {
-      if (Math.abs(next.cash - next.ledger.balance) > 0.02) {
-        // Prefer ledger when txn path used; if cash moved without ledger, append reconciling entry
-        const drift = moneyRound(next.cash - next.ledger.balance);
-        if (Math.abs(drift) > 0.02) {
-          next.ledger = applyLedger(next.ledger, {
-            week: next.week,
-            amount: drift,
-            category: "other",
-            label: "Balance reconciliation",
-            ref: `recon-w${next.week}-${next.ledger.entries.length}`,
-          });
-          next.cash = moneyRound(next.ledger.balance);
-        }
-      } else {
-        next.cash = moneyRound(next.ledger.balance);
-      }
-    }
 
     if (isBankrupt(next.cash, !!next.settings.disableBankruptcy)) {
       next.speed = 0;
@@ -3779,26 +3906,44 @@ export const useGame = create<GameState & Actions>((set, get) => ({
   refreshCandidates: () => {
     const state = get();
     const y = state.year;
+    const refresh = (state.hiringBoardRefresh ?? 0) + 1;
     const bias = 1 + Math.min(1.2, (y - 1979) * 0.015);
-    candidatesCache = Array.from({ length: 5 }, (_, i) =>
-      generateStaff(bias + (hashSeed(state.campaignSeed, "hire-bias", i, state.week) / 4294967296) * 0.35, y, {
-        forceStar: i === 0 && hashSeed(state.campaignSeed, "hire-star", state.week) / 4294967296 < 0.2,
-        seed: hashSeed(state.campaignSeed, "hire", state.week, i),
+    const board = Array.from({ length: 5 }, (_, i) =>
+      generateStaff(
+        bias + (hashSeed(state.campaignSeed, "hire-bias", refresh, i) / 4294967296) * 0.35,
+        y,
+        {
+          forceStar: i === 0 && hashSeed(state.campaignSeed, "hire-star", refresh) / 4294967296 < 0.2,
+          seed: hashSeed(state.campaignSeed, "hire", refresh, i),
+          candidateIndex: i,
+        },
+      ),
+    );
+    // Guarantee at least one above-average candidate (still pure via seed)
+    if (!board.some((c) => c.level >= 3)) {
+      board[0] = generateStaff(bias + 0.5, y, {
+        forceStar: true,
+        seed: hashSeed(state.campaignSeed, "hire-star-force", refresh),
+        candidateIndex: 0,
+      });
+    }
+    set({ hiringBoard: board, hiringBoardRefresh: refresh, dirty: true });
+    return board;
+  },
+  getCandidates: () => {
+    const state = get();
+    if (state.hiringBoard?.length) return state.hiringBoard;
+    // First view generates refresh 1 without mutating if empty path — generate & persist
+    const y = state.year;
+    const refresh = 1;
+    const board = Array.from({ length: 5 }, (_, i) =>
+      generateStaff(1.1, y, {
+        seed: hashSeed(state.campaignSeed, "hire", refresh, i),
         candidateIndex: i,
       }),
     );
-    // Guarantee at least one above-average candidate
-    if (!candidatesCache.some((c) => c.level >= 3)) {
-      candidatesCache[0] = generateStaff(bias + 0.5, y, { forceStar: true });
-    }
-    return candidatesCache;
-  },
-  getCandidates: () => {
-    if (!candidatesCache.length) {
-      const y = get().year;
-      candidatesCache = Array.from({ length: 5 }, () => generateStaff(1.1, y));
-    }
-    return candidatesCache;
+    set({ hiringBoard: board, hiringBoardRefresh: refresh });
+    return board;
   },
 
   getTrainingCourses: () => TRAINING_COURSES,
@@ -4898,6 +5043,9 @@ export const useGame = create<GameState & Actions>((set, get) => ({
 
   launchAccessory: (categoryId, name, retailPrice) => {
     const state = get();
+    if (!lateSystemAllowed(state, "hardwareMerch")) {
+      return "Hardware accessories locked during Garage Phase One.";
+    }
     if (!(categoryId in ACCESSORY_CATEGORIES)) return "Unknown accessory category.";
     if (!Number.isFinite(retailPrice) || retailPrice <= 0) return "Retail price must be > 0.";
     const err = setupCostCheck(categoryId, state.cash, state.researchPoints);
@@ -5085,6 +5233,37 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       null,
       2,
     );
+  },
+
+  resolveMarketingChoice: (opportunityId, choiceId) => {
+    const state = get();
+    const mkt0 = state.marketingOpportunities ?? emptyMarketingOpportunityState();
+    const res = resolveMarketingOpportunity(mkt0, opportunityId, choiceId);
+    if ("error" in res) return res.error;
+    if (state.cash < res.choice.cost) return `Need $${res.choice.cost.toLocaleString()}.`;
+    const txn = applyCashTransaction(state.cash, state.ledger, {
+      week: state.week,
+      amount: -res.choice.cost,
+      category: "marketing",
+      label: res.choice.label,
+      ref: `mkt-opp-${opportunityId}-${choiceId}`,
+    });
+    if (!txn.applied) return "Already resolved.";
+    set({
+      cash: txn.cash,
+      ledger: txn.ledger,
+      hype: Math.min(150, state.hype + res.choice.hypeGain),
+      marketingOpportunities: res.state,
+      pendingEvent: null,
+      modal: null,
+      dirty: true,
+      notifications: pushNote(
+        state,
+        `${res.choice.label}: +${res.choice.hypeGain} hype, +${res.choice.marketingPoints} marketing points.`,
+        "good",
+      ),
+    });
+    return null;
   },
 
   runStudioMarketing: (campaignId) => {

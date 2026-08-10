@@ -34,26 +34,31 @@ import type {
   StaffMember,
 } from "./types";
 
-let _uidSeq = 0;
-/** Stable id from optional parts; monotonic fallback (no Math.random). */
+/**
+ * Deterministic id from explicit identity parts only.
+ * Callers MUST pass campaignSeed + entity/event keys — no process counters.
+ */
 export function uid(prefix = "id", ...parts: Array<string | number | boolean | null | undefined>) {
-  _uidSeq += 1;
-  const h = hashSeed(prefix, _uidSeq, ...parts);
-  return `${prefix}_${h.toString(16)}`;
+  if (parts.length === 0) {
+    // Non-causal fallback: still pure for empty call within same process not required —
+    // prefer always passing parts. Use fixed salt so empty calls don't depend on order.
+    return `${prefix}_${hashSeed(prefix, "empty").toString(16)}`;
+  }
+  return `${prefix}_${hashSeed(prefix, ...parts).toString(16)}`;
 }
 
 export function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
-/** @deprecated Prefer SeededRng / hashSeed for causal sim. */
-export function rand(min: number, max: number) {
-  return min + (hashSeed("legacy-rand", min, max, _uidSeq) / 4294967296) * (max - min);
+/** @deprecated Prefer SeededRng — pure only when seedParts provided. */
+export function rand(min: number, max: number, ...seedParts: Array<string | number>) {
+  return min + (hashSeed("legacy-rand", min, max, ...seedParts) / 4294967296) * (max - min);
 }
 
 /** @deprecated Prefer seeded pick. */
-export function pick<T>(arr: T[]): T {
-  return arr[Math.floor((hashSeed("legacy-pick", _uidSeq, arr.length) / 4294967296) * arr.length)]!;
+export function pick<T>(arr: T[], ...seedParts: Array<string | number>): T {
+  return arr[Math.floor((hashSeed("legacy-pick", arr.length, ...seedParts) / 4294967296) * arr.length)]!;
 }
 
 export function formatCash(n: number): string {
@@ -624,8 +629,6 @@ export function generateGameTitle(topic: string, genre: string): string {
 }
 
 /** Recent candidate names — avoid repetitive shortlists. */
-const RECENT_CANDIDATE_NAMES: string[] = [];
-let _staffGenSeq = 0;
 
 const STAFF_FIRST = [
   "Alex", "Sam", "Jordan", "Riley", "Casey", "Morgan", "Quinn", "Avery",
@@ -657,15 +660,14 @@ export function generateStaff(
 ): StaffMember {
   const eraBoost = 1 + Math.max(0, year - 1979) * 0.008;
   const idx = opts?.candidateIndex ?? 0;
-  _staffGenSeq += 1;
+  // Pure: seed + index only. Same inputs → same candidate always.
   const rng = new SeededRng(
     opts?.seed ??
       hashSeed(
-        "staff-v3",
+        "staff-v4",
         year,
         Math.round(levelBias * 1000),
         idx,
-        _staffGenSeq,
         opts?.forceStar ? 1 : 0,
       ),
   );
@@ -700,21 +702,15 @@ export function generateStaff(
   if (isStar) salary = Math.round(salary * 1.35);
   salary = Math.min(salary, 1_800_000);
 
-  const pickSeeded = <T,>(arr: T[], salt: number) =>
-    arr[Math.floor((hashSeed("name", salt, _staffGenSeq, idx) / 4294967296) * arr.length) % arr.length]!;
-  let name = `${pickSeeded(STAFF_FIRST, 1)} ${pickSeeded(STAFF_LAST, 2)}`;
-  let guard = 0;
-  while (RECENT_CANDIDATE_NAMES.includes(name) && guard < 40) {
-    guard++;
-    name = `${pickSeeded(STAFF_FIRST, 3 + guard)} ${pickSeeded(STAFF_LAST, 9 + guard)}`;
-  }
-  RECENT_CANDIDATE_NAMES.push(name);
-  if (RECENT_CANDIDATE_NAMES.length > 24) RECENT_CANDIDATE_NAMES.shift();
+  // Names pure from seed + index (no global recent list).
+  const fi = rng.int(0, STAFF_FIRST.length - 1);
+  const li = rng.int(0, STAFF_LAST.length - 1);
+  const name = `${STAFF_FIRST[fi]} ${STAFF_LAST[li]}`;
 
   const specialization = isStar || isSolid ? pick(SPECS.filter(Boolean) as import("./types").DevField[]) : pick(SPECS);
 
   return {
-    id: uid("staff"),
+    id: uid("staff", opts?.seed ?? hashSeed("staff-id", year, idx), idx, name),
     energy: 100,
     name,
     design,
@@ -730,7 +726,11 @@ export function generateStaff(
   };
 }
 
-export function generateContracts(count: number, year: number): import("./types").ContractOffer[] {
+export function generateContracts(
+  count: number,
+  year: number,
+  opts?: { campaignSeed?: number; week?: number },
+): import("./types").ContractOffer[] {
   const list: import("./types").ContractOffer[] = [];
   const titles = [
     "Port classic title",
@@ -749,17 +749,21 @@ export function generateContracts(count: number, year: number): import("./types"
     "Festival booth game",
   ];
   const n = Math.max(count, 1);
+  const seed = opts?.campaignSeed ?? 1;
+  const week = opts?.week ?? 0;
   for (let i = 0; i < n; i++) {
+    const rng = new SeededRng(hashSeed(seed, "contract", year, week, i));
     const hard = 0.8 + (year - 1982) * 0.02;
-    const designReq = Math.round(rand(18, 48) * hard);
-    const techReq = Math.round(rand(18, 48) * hard);
+    const designReq = Math.round(rng.range(18, 48) * hard);
+    const techReq = Math.round(rng.range(18, 48) * hard);
+    const title = titles[rng.int(0, titles.length - 1)]!;
     list.push({
-      id: uid("contract"),
-      title: pick(titles),
+      id: uid("contract", seed, year, week, i, title),
+      title,
       description: `Client wants D${designReq}+ / T${techReq}+. Finish within the deadline for cash and RP.`,
-      reward: Math.round(rand(9000, 32000) * hard),
-      researchReward: Math.round(rand(10, 30)),
-      weeks: Math.round(rand(4, 10)),
+      reward: Math.round(rng.range(9000, 32000) * hard),
+      researchReward: Math.round(rng.range(10, 30)),
+      weeks: Math.round(rng.range(4, 10)),
       progress: 0,
       designReq,
       techReq,
