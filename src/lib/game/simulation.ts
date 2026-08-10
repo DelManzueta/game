@@ -760,6 +760,7 @@ export function toReleased(
     genreId: project.genreId,
     genre2Id: project.genre2Id,
     platformId: project.platformId,
+    secondaryPlatformIds: project.secondaryPlatformIds,
     audience: project.audience,
     size: project.size,
     engineId: project.engineId,

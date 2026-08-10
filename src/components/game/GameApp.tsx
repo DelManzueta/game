@@ -707,6 +707,78 @@ function TechReadinessPanel({
 
 /* ═══════════════════════════ Desk overlay (stage + polish) ═══════════════════════════ */
 
+
+function ProjectModsBar() {
+  const project = useGame((s) => s.currentProject);
+  const unlocked = useGame((s) => s.unlockedPlatforms);
+  const toggleCrunchMode = useGame((s) => s.toggleCrunchMode);
+  const setSecondaryPlatforms = useGame((s) => s.setSecondaryPlatforms);
+  const [msg, setMsg] = useState("");
+  if (!project) return null;
+  const secs = project.secondaryPlatformIds ?? [];
+  const candidates = unlocked.filter((id) => id !== project.platformId).slice(0, 8);
+
+  return (
+    <div className="mt-2 space-y-2 rounded-xl border border-white/10 bg-black/30 p-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-[10px] font-bold uppercase tracking-wide text-white/50">
+          Production mods · v2.2
+        </span>
+        {msg && <span className="text-[10px] text-amber-200/90">{msg}</span>}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          variant={project.crunchMode ? "danger" : "secondary"}
+          onClick={() => setMsg(toggleCrunchMode() ?? (project.crunchMode ? "Crunch off" : "Crunch on"))}
+        >
+          {project.crunchMode ? "Crunch ON · 1.45×" : "Crunch OFF"}
+        </Button>
+        {(project.crisisReviewPenalty ?? 0) > 0 && (
+          <span className="rounded-full border border-red-400/40 px-2 py-1 text-[10px] font-bold text-red-300">
+            Review pen −{project.crisisReviewPenalty}
+          </span>
+        )}
+        {(project.fluWeeksLeft ?? 0) > 0 && (
+          <span className="rounded-full border border-amber-400/40 px-2 py-1 text-[10px] font-bold text-amber-200">
+            Flu {project.fluWeeksLeft}w
+          </span>
+        )}
+      </div>
+      {candidates.length > 0 && (
+        <div>
+          <p className="mb-1 text-[10px] font-bold uppercase text-white/45">
+            Secondary platforms (ports · max 2)
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {candidates.map((id) => {
+              const on = secs.includes(id);
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  className={cnJoin(
+                    "rounded-full border px-2.5 py-1 text-[11px] font-semibold",
+                    on
+                      ? "border-accent bg-accent/20 text-accent"
+                      : "border-white/15 bg-white/5 text-white/70",
+                  )}
+                  onClick={() => {
+                    const next = on ? secs.filter((x) => x !== id) : [...secs, id].slice(0, 2);
+                    setMsg(setSecondaryPlatforms(next) ?? (on ? "Removed" : "Added port"));
+                  }}
+                >
+                  {getPlatform(id)?.short ?? id}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DevelopOverlay({ sheet = false }: { sheet?: boolean }) {
   const screen = useGame((s) => s.screen);
   const project = useGame((s) => s.currentProject);
@@ -731,6 +803,9 @@ function DevelopOverlay({ sheet = false }: { sheet?: boolean }) {
           >
             Close
           </button>
+        </div>
+        <div className="shrink-0 px-3 pt-2">
+          <ProjectModsBar />
         </div>
         <div className="relative h-20 shrink-0 overflow-hidden sm:h-24">
           <img src={deskArt} alt="" className="h-full w-full object-cover object-center" draggable={false} />
@@ -1108,7 +1183,7 @@ function MarketingPanel() {
           <h3 className="text-sm font-bold text-fg">Marketing campaigns</h3>
           <p className="text-xs text-muted">
             Studio hype <span className="font-bold tabular text-accent">{Math.round(hype)}</span>
-            {" · "}decays ~12%/week · burns at launch
+            {" · "}decays ~12%/week · burns at launch · rivals every 6 weeks
           </p>
         </div>
         {project && (
@@ -2202,7 +2277,9 @@ function SettingsScreen() {
   const setModal = useGame((s) => s.setModal);
   const returnToMenu = useGame((s) => s.returnToMenu);
   const setScreen = useGame((s) => s.setScreen);
+  const exportSaveMatrix = useGame((s) => s.exportSaveMatrix);
   const [panel, setPanel] = useState<"unlocks" | "contracts" | "none">("unlocks");
+  const [matrix, setMatrix] = useState("");
   return (
     <div className="mx-auto max-w-lg space-y-3 px-1 pb-4 pt-1">
       <div className="game-panel px-4 py-3 text-center">
@@ -2232,6 +2309,22 @@ function SettingsScreen() {
         <Button className="w-full" variant="secondary" onClick={() => saveGame()}>
           Save campaign
         </Button>
+        <Button
+          className="w-full"
+          variant="secondary"
+          onClick={() => {
+            const j = exportSaveMatrix();
+            setMatrix(j);
+            void navigator.clipboard?.writeText(j);
+          }}
+        >
+          Export save matrix (v2.2)
+        </Button>
+        {matrix && (
+          <pre className="max-h-32 overflow-auto rounded-lg border border-border bg-panel p-2 text-[10px] text-muted">
+            {matrix}
+          </pre>
+        )}
         <Button className="w-full" variant="secondary" onClick={() => setModal("pauseMenu")}>
           Pause menu
         </Button>

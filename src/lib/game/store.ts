@@ -137,6 +137,16 @@ import {
 } from "./classicGdt";
 import { tycoonHypeDecay, tycoonStaffEnergyTick, TYCOON_DEFAULTS } from "./tycoonEngine";
 import {
+  competitorRelease,
+  rollDevelopmentCrisis,
+  combinedMarketShare,
+  multiPlatformTimePenaltyWeeks,
+  CRUNCH,
+  RIVAL_GENRE_SATURATION,
+  buildSaveMatrix,
+  TYCOON_EXTENDED_VERSION,
+} from "./tycoonExtended";
+import {
   startMarketingCampaign,
   getCampaignSpec,
   emptyMarketingState,
@@ -387,6 +397,9 @@ function initialState(): GameState {
     garageSlice: true,
     publishingBoard: null,
     activePublisherDealId: null,
+    lastRivalReleaseWeek: 0,
+    rivalRotateIndex: 0,
+    rivalGenrePressure: {},
     researchPointsFrac: 0,
     seriesRecords: {},
     ledger: emptyLedger(TYCOON_DEFAULTS.cash),
@@ -800,11 +813,13 @@ function releaseProject(next: GameState, project: GameProject): GameState {
       expertise: next.office <= 1 ? 0.94 : 1,
       audienceId: scored.audience,
     });
-    hidden = classic.hidden;
-    productQuality = classic.hidden * 10;
+    hidden = Math.max(1, classic.hidden - (scored.crisisReviewPenalty ?? 0));
+    productQuality = hidden * 10;
     reviews = {
-      scores: classic.scores,
-      avg: classic.avg,
+      scores: classic.scores.map((sc) =>
+        Math.max(1, Math.round((sc - (scored.crisisReviewPenalty ?? 0)) * 10) / 10),
+      ),
+      avg: Math.max(1, Math.round((classic.avg - (scored.crisisReviewPenalty ?? 0)) * 10) / 10),
       quality: classic.basePoints,
       breakdown: {
         generatedTech: scored.techPoints,
@@ -954,18 +969,40 @@ function releaseProject(next: GameState, project: GameProject): GameState {
 
   // Classic GDT unit plan — overrides microscopic weekly_v3 plans for shelf totals
   {
-    const classicSales = classicUnitsSold({
+    // Module 9 — multi-platform combined share
+    const secIds = scored.secondaryPlatformIds ?? [];
+    const secShares = secIds.map((id) => {
+      try {
+        const sp = getPlatformSpec(id);
+        const sm = platformMarketState(sp, { day: releaseDay, audienceId: scored.audience });
+        return sm.lifecycleFactor * Math.max(0.35, getPlatform(id)?.marketSize ?? 0.5);
+      } catch {
+        return 0.3;
+      }
+    });
+    const multiShare = combinedMarketShare(Math.max(0.15, platformMarket), secShares);
+    let classicSales = classicUnitsSold({
       designPoints: scored.designPoints,
       techPoints: scored.techPoints,
-      reviewScore: reviews.avg,
+      reviewScore: Math.max(1, reviews.avg - (scored.crisisReviewPenalty ?? 0)),
       size: scored.size,
-      // Lifecycle-adjusted share (retired / late platforms hurt)
-      platformMarket: Math.max(0.15, platformMarket),
+      platformMarket: multiShare,
       comboMult: classicComboMultiplier(scored.topicId, scored.genreId),
       marketingSpend: scored.marketingSpend,
       fans: next.fans,
       hype: scored.hype + next.hype,
     });
+    // Module 7 — if rival pressure on this genre, cut shelf 22%
+    const pressUntil = next.rivalGenrePressure?.[scored.genreId] ?? 0;
+    if (pressUntil > next.week) {
+      classicSales = {
+        ...classicSales,
+        totalUnits: Math.floor(classicSales.totalUnits * RIVAL_GENRE_SATURATION),
+        weekly: classicSales.weekly.map((u) => Math.floor(u * RIVAL_GENRE_SATURATION)),
+        net: classicSales.net * RIVAL_GENRE_SATURATION,
+        gross: classicSales.gross * RIVAL_GENRE_SATURATION,
+      };
+    }
     sales.totalUnits = classicSales.totalUnits;
     sales.revenue = classicSales.net;
     sales.price = classicSales.price;
@@ -1357,6 +1394,9 @@ interface Actions {
   completeReport: (id: string) => void;
   startTitleCampaign: (gameId: string, campaignId: string) => string | null;
   runStudioMarketing: (campaignId: string) => string | null;
+  toggleCrunchMode: () => string | null;
+  setSecondaryPlatforms: (ids: string[]) => string | null;
+  exportSaveMatrix: () => string;
   applyCheat: (cheat: string, arg?: string | number) => void;
   resolveEvent: (choiceIndex: number) => void;
   exportSave: () => string;
@@ -1709,14 +1749,22 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       if (rent > 0) next.cash -= rent;
     }
 
-    // Staff energy — TYCOON-ENGINE v2.1 Module 4 step 3
+    // Staff energy — v2.1 + Module 8 crunch drain
     next.staff = next.staff.map((m) => {
       if (m.id === "founder" || next.settings.noVacationMode) return { ...m, energy: 100 };
       const working =
         !!next.currentProject &&
         (next.currentProject.devPhase.includes("RUNNING") ||
           next.currentProject.devPhase === "POLISHING");
-      return { ...m, energy: tycoonStaffEnergyTick(m.energy ?? 100, working) };
+      if (!working) return { ...m, energy: tycoonStaffEnergyTick(m.energy ?? 100, false) };
+      let energy = m.energy ?? 100;
+      if (next.currentProject?.crunchMode) {
+        if (energy > 20) energy = Math.max(0, energy - CRUNCH.energyDrain);
+        else energy = Math.min(100, energy + 25);
+      } else {
+        energy = tycoonStaffEnergyTick(energy, true);
+      }
+      return { ...m, energy };
     });
 
     for (const plat of PLATFORMS) {
@@ -1916,12 +1964,22 @@ export const useGame = create<GameState & Actions>((set, get) => ({
               stageN,
             ),
           });
+          let dGain = gen.designGain;
+          let tGain = gen.techGain;
+          if (next.currentProject.crunchMode) {
+            dGain *= CRUNCH.pointsMult;
+            tGain *= CRUNCH.pointsMult;
+          }
+          if ((next.currentProject.fluWeeksLeft ?? 0) > 0) {
+            dGain *= 0.5;
+          }
           next.currentProject = {
             ...next.currentProject,
-            designPoints: next.currentProject.designPoints + gen.designGain,
-            techPoints: next.currentProject.techPoints + gen.techGain,
+            designPoints: next.currentProject.designPoints + dGain,
+            techPoints: next.currentProject.techPoints + tGain,
             researchEarned:
               (next.currentProject.researchEarned ?? 0) + 0.45 + next.staff.length * 0.12,
+            fluWeeksLeft: Math.max(0, (next.currentProject.fluWeeksLeft ?? 0) - 1),
           };
         } else {
           next.currentProject = {
@@ -1999,6 +2057,136 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       next.market = tick.market;
       for (const note of tick.notifications) {
         next.notifications = pushNote(next, note, "info");
+      }
+    }
+
+    // Module 8 — crisis every 2 weeks while developing
+    if (
+      next.currentProject &&
+      next.currentProject.devPhase.includes("RUNNING") &&
+      next.week % 2 === 0 &&
+      next.currentProject.lastCrisisWeek !== next.week
+    ) {
+      const crisis = rollDevelopmentCrisis({
+        campaignSeed: next.campaignSeed,
+        week: next.week,
+        projectId: next.currentProject.id,
+        crunch: !!next.currentProject.crunchMode,
+      });
+      let p = {
+        ...next.currentProject,
+        lastCrisisWeek: next.week,
+        bugs: next.currentProject.bugs + crisis.bugsDelta,
+        crisisReviewPenalty:
+          (next.currentProject.crisisReviewPenalty ?? 0) + crisis.reviewPenalty,
+        fluWeeksLeft: Math.max(
+          next.currentProject.fluWeeksLeft ?? 0,
+          crisis.designGenMultWeeks,
+        ),
+      };
+      if (crisis.extraWeeks > 0) {
+        p = {
+          ...p,
+          weeksDev: (p.weeksDev ?? 0) - crisis.extraWeeks, // effectively need more calendar time
+          production: p.production
+            ? {
+                ...p.production,
+                polishRequired: (p.production.polishRequired ?? 0) + crisis.extraWeeks * 80,
+              }
+            : p.production,
+        };
+      }
+      next.currentProject = p;
+      if (crisis.rpDelta) {
+        next.researchPoints = Math.max(0, next.researchPoints + crisis.rpDelta);
+      }
+      if (crisis.hypeDelta) {
+        next.hype = Math.max(0, next.hype + crisis.hypeDelta);
+      }
+      if (crisis.chargeRentNow) {
+        const rent = OFFICE_INFO[next.office].rent;
+        if (rent > 0) {
+          next.cash -= rent;
+          next.ledger = applyLedger(next.ledger, {
+            week: next.week,
+            amount: -rent,
+            category: "rent",
+            label: "Over-scope overhead (crisis)",
+            ref: `crisis-rent-w${next.week}`,
+          });
+        }
+      }
+      if (crisis.code !== "CRISIS_05") {
+        next.notifications = pushNote(next, crisis.note, "warn");
+        next.pendingEvent = {
+          id: `crisis_${crisis.code}_${next.week}`,
+          title: crisis.name,
+          body: crisis.note,
+        };
+        next.modal = "event";
+        next.speed = 0;
+      }
+    }
+
+    // Module 7 — rival release every 6 weeks
+    {
+      const last = next.lastRivalReleaseWeek ?? 0;
+      if (next.week - last >= 6 && next.week > 0) {
+        const idx = next.rivalRotateIndex ?? 0;
+        const rel = competitorRelease({
+          campaignSeed: next.campaignSeed,
+          week: next.week,
+          year: next.year,
+          historicalAverage: next.targetHighScore ?? 35,
+          rivalIndex: idx,
+        });
+        next.targetHighScore = rel.nextHistorical;
+        next.lastRivalReleaseWeek = next.week;
+        next.rivalRotateIndex = (idx + 1) % 3;
+        // Genre saturation 8 weeks
+        next.rivalGenrePressure = {
+          ...(next.rivalGenrePressure ?? {}),
+          [rel.genreId]: next.week + 8,
+        };
+        next.notifications = pushNote(next, rel.note, "info");
+        if (next.market) {
+          next.market = {
+            ...next.market,
+            news: [
+              {
+                id: `rival_${rel.rivalId}_${next.week}`,
+                week: next.week,
+                category: "rival",
+                headline: `${rel.rivalName} ships "${rel.title}"`,
+                body: rel.note,
+                causeEntityIds: [rel.rivalId],
+              },
+              ...(next.market.news ?? []),
+            ].slice(0, 40),
+            calendar: [
+              {
+                id: `cal_rival_${next.week}`,
+                week: next.week,
+                kind: "rival_release" as const,
+                title: rel.title,
+                detail: rel.note,
+                entityId: rel.rivalId,
+                public: true,
+              },
+              ...(next.market.calendar ?? []),
+            ].slice(0, 80),
+          };
+        }
+      }
+      // Expire genre pressure
+      if (next.rivalGenrePressure) {
+        const press = { ...next.rivalGenrePressure };
+        for (const g of Object.keys(press)) {
+          if ((press as Record<string, number>)[g]! <= next.week) {
+            delete (press as Record<string, number>)[g];
+          }
+        }
+        next.rivalGenrePressure = press;
       }
     }
 
@@ -2907,7 +3095,10 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     return null;
   },
 
-  clearPublisherDeal: () => set({ activePublisherDealId: null, dirty: true }),
+  clearPublisherDeal: () => set({ activePublisherDealId: null,
+    lastRivalReleaseWeek: 0,
+    rivalRotateIndex: 0,
+    rivalGenrePressure: {}, dirty: true }),
 
   takeContract: (id) => {
     const state = get();
@@ -2974,6 +3165,105 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     });
   },
 
+
+
+  toggleCrunchMode: () => {
+    const state = get();
+    const p = state.currentProject;
+    if (!p) return "No active project.";
+    if (!p.devPhase.includes("RUNNING") && !p.devPhase.includes("CONFIG") && p.devPhase !== "POLISHING") {
+      return "Crunch only during development.";
+    }
+    const on = !p.crunchMode;
+    set({
+      currentProject: { ...p, crunchMode: on },
+      dirty: true,
+      notifications: pushNote(
+        state,
+        on
+          ? "Crunch ON — +45% points, −18 energy/wk, crisis risk up."
+          : "Crunch OFF — sustainable pace.",
+        on ? "warn" : "info",
+      ),
+    });
+    return null;
+  },
+
+  setSecondaryPlatforms: (ids) => {
+    const state = get();
+    const p = state.currentProject;
+    if (!p) return "No active project.";
+    const uniq = [...new Set(ids.filter((id) => id && id !== p.platformId))].slice(0, 2);
+    for (const id of uniq) {
+      if (!state.unlockedPlatforms.includes(id)) {
+        return `License ${id} first under Systems.`;
+      }
+    }
+    // Dev kit fee for new secondary (60% of license) — charge delta
+    let fee = 0;
+    const prev = new Set(p.secondaryPlatformIds ?? []);
+    for (const id of uniq) {
+      if (prev.has(id)) continue;
+      const plat = getPlatform(id);
+      if (plat) fee += plat.licenseCost * 0.6;
+    }
+    if (fee > 0 && state.cash < fee) return `Need ${formatCash(fee)} multi-platform kits.`;
+    const weeksExtra = multiPlatformTimePenaltyWeeks(uniq.length);
+    let nextP: typeof p = { ...p, secondaryPlatformIds: uniq };
+    if (weeksExtra > 0 && nextP.production) {
+      nextP = {
+        ...nextP,
+        production: {
+          ...nextP.production,
+          polishRequired: (nextP.production.polishRequired ?? 0) + weeksExtra * 70,
+        },
+      };
+    }
+    set({
+      cash: state.cash - fee,
+      currentProject: nextP,
+      dirty: true,
+      notifications: pushNote(
+        state,
+        uniq.length
+          ? `Multi-platform: ${uniq.join(", ")} (+${weeksExtra}w${fee ? `, −${formatCash(fee)}` : ""}).`
+          : "Secondary platforms cleared.",
+        "info",
+      ),
+      ledger:
+        fee > 0
+          ? applyLedger(state.ledger, {
+              week: state.week,
+              amount: -fee,
+              category: "other",
+              label: "Multi-platform kits",
+              ref: `mp-kit-${p.id}`,
+            })
+          : state.ledger,
+    });
+    return null;
+  },
+
+  exportSaveMatrix: () => {
+    const state = get();
+    return JSON.stringify(
+      buildSaveMatrix({
+        year: state.year,
+        month: state.month,
+        week: state.week,
+        cash: state.cash,
+        fans: state.fans,
+        researchPoints: state.researchPoints,
+        targetHighScore: state.targetHighScore,
+        hype: state.hype,
+        unlockedPlatforms: state.unlockedPlatforms,
+        engines: state.engines,
+        staff: state.staff,
+      }),
+      null,
+      2,
+    );
+  },
 
   runStudioMarketing: (campaignId) => {
     const state = get();

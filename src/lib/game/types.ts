@@ -290,6 +290,16 @@ export interface GameProject {
   techSpec?: import("./optimization/types").ProjectTechSpec | null;
   /** Part 2: effective field importance snapshot at project start. */
   fieldImportance?: Partial<Record<DevField, number>> | null;
+  /** Module 8 — crunch mode (1.45× points, −18 energy, more crises). */
+  crunchMode?: boolean;
+  /** Module 9 — up to 2 secondary platforms. */
+  secondaryPlatformIds?: string[];
+  /** Module 8 — flat review penalty from crises (e.g. bug fest −1.5). */
+  crisisReviewPenalty?: number;
+  /** Module 8 — flu: design gen multiplier weeks remaining. */
+  fluWeeksLeft?: number;
+  /** Module 8 — last crisis roll week (anti-spam). */
+  lastCrisisWeek?: number;
 }
 
 export interface WeeklySalePoint {
@@ -311,6 +321,8 @@ export interface ReleasedGame {
   genreId: GenreId;
   genre2Id?: GenreId | null;
   platformId: string;
+  /** Module 9 ports */
+  secondaryPlatformIds?: string[];
   audience: AudienceId;
   size: GameSize;
   engineId: string;
@@ -587,6 +599,12 @@ export interface GameState {
   researchPipeline?: import("./research/types").ResearchPipelineState;
   /** Part 2: campaign difficulty (economy/uncertainty only). */
   difficulty?: import("./research/types").DifficultyConfig;
+  /** Module 7 — last week a tycoon rival released (every 6w). */
+  lastRivalReleaseWeek?: number;
+  /** Module 7 — rotating rival index 0..2. */
+  rivalRotateIndex?: number;
+  /** Module 7 — genres currently saturated by rival releases. */
+  rivalGenrePressure?: Partial<Record<GenreId, number>>; // week until pressure ends
   /** Part 2: proprietary hardware projects (bottlenecked axes). */
   hardwareProjects?: import("./hardware/types").HardwareProject[];
   /** Series franchise reputation map. */
