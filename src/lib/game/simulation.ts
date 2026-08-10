@@ -761,6 +761,8 @@ export function toReleased(
     genre2Id: project.genre2Id,
     platformId: project.platformId,
     secondaryPlatformIds: project.secondaryPlatformIds,
+    usedIllicitAssets: project.usedIllicitAssets,
+    litigationDueWeek: project.litigationDueWeek ?? (project as { litigationDueWeek?: number }).litigationDueWeek,
     audience: project.audience,
     size: project.size,
     engineId: project.engineId,

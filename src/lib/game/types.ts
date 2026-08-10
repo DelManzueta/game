@@ -297,6 +297,10 @@ export interface GameProject {
   /** Module 8 — flat review penalty from crises (e.g. bug fest −1.5). */
   /** Module 16 DRM for this title */
   drmTier?: import("./tycoonPiracy").DrmTier;
+  /** Module 17 — stolen assets (+30% tech, litigation risk) */
+  usedIllicitAssets?: boolean;
+  /** Module 17 — week to roll litigation (release+2) */
+  litigationDueWeek?: number;
   crisisReviewPenalty?: number;
   /** Module 8 — flu: design gen multiplier weeks remaining. */
   fluWeeksLeft?: number;
@@ -329,6 +333,11 @@ export interface ReleasedGame {
   patchSalesBoost?: number;
   hasDlc?: boolean;
   dlcRevenue?: number;
+  usedIllicitAssets?: boolean;
+  litigationDueWeek?: number;
+  litigationResolved?: boolean;
+  postMortemDone?: boolean;
+  sliderMissAtShip?: number;
   audience: AudienceId;
   size: GameSize;
   engineId: string;
@@ -608,6 +617,10 @@ export interface GameState {
   /** Module 13 — proprietary consoles */
   /** Module 16 unlocked DRM tiers */
   unlockedDrm?: import("./tycoonPiracy").DrmTier[];
+  /** Module 18 post-mortems */
+  postMortems?: import("./tycoonRiskAnalytics").PostMortemRecord[];
+  /** Known combo labels after post-mortem */
+  knownCombos?: Record<string, import("./tycoonRiskAnalytics").MatchLabel>;
   playerConsoles?: import("./tycoonLateMarket").PlayerConsole[];
   /** Module 11 — last awards year resolved */
   lastAwardsYear?: number;

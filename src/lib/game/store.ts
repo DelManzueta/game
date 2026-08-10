@@ -175,6 +175,19 @@ import {
   HISTORICAL_AVERAGE_FLOOR,
 } from "./tycoonPiracy";
 import {
+  rollLitigation,
+  ILLICIT_TECH_BOOST,
+  buildPostMortem,
+  insightMultiplier,
+  POST_MORTEM,
+  consoleRdCost,
+  MEDIA_DRIVES,
+  GPU_PARTS,
+  type MediaDriveId,
+  type GpuPartId,
+  type PostMortemRecord,
+} from "./tycoonRiskAnalytics";
+import {
   startMarketingCampaign,
   getCampaignSpec,
   emptyMarketingState,
@@ -426,6 +439,8 @@ function initialState(): GameState {
     publishingBoard: null,
     activePublisherDealId: null,
     unlockedDrm: ["None"],
+    postMortems: [],
+    knownCombos: {},
     playerConsoles: [],
     lastAwardsYear: 0,
     lastRivalReleaseWeek: 0,
@@ -818,17 +833,17 @@ function releaseProject(next: GameState, project: GameProject): GameState {
   let reviews: ReturnType<typeof computeReviews>;
   let productQuality: number;
   let hidden: number;
+  const miss =
+    (sliderDeviation(scored.genreId, 1, scored.sliders) +
+      sliderDeviation(scored.genreId, 2, scored.sliders) +
+      sliderDeviation(scored.genreId, 3, scored.sliders)) /
+    3;
 
   // ── Classic GDT spine (Python blueprint math) ───────────────────────────
   // score = (points / historical) * combo * 7.5 * sliderFit * bugFit
   // historical := hist*0.7 + points*0.3 after each release
   {
     const combo = classicComboMultiplier(scored.topicId, scored.genreId);
-    const miss =
-      (sliderDeviation(scored.genreId, 1, scored.sliders) +
-        sliderDeviation(scored.genreId, 2, scored.sliders) +
-        sliderDeviation(scored.genreId, 3, scored.sliders)) /
-      3;
     const hist =
       next.targetHighScore && next.targetHighScore > 5
         ? next.targetHighScore
@@ -1064,6 +1079,12 @@ function releaseProject(next: GameState, project: GameProject): GameState {
         next.fans = intFans(next.fans - pir.fanBacklash);
       }
     }
+    // Module 17 — schedule IP check 2 weeks post-launch if illicit assets
+    if (scored.usedIllicitAssets) {
+      // stamped on released via toReleased fields - set on scored for toReleased
+      (scored as { litigationDueWeek?: number }).litigationDueWeek = next.week + 2;
+    }
+
     sales.totalUnits = classicSales.totalUnits;
     sales.revenue = classicSales.net;
     sales.price = classicSales.price;
@@ -1082,6 +1103,11 @@ function releaseProject(next: GameState, project: GameProject): GameState {
     next.week,
     next.year,
   );
+    if (scored.usedIllicitAssets) {
+      released.litigationDueWeek = next.week + 2;
+      released.usedIllicitAssets = true;
+    }
+    released.sliderMissAtShip = miss;
 
   const v2 = reviews as {
     criticReviews?: { name: string; score: number; comment: string }[];
@@ -1464,6 +1490,14 @@ interface Actions {
   setConsolePricing: (id: string, retailPrice: number, royaltyRate: number) => string | null;
   setProjectDrm: (drm: DrmTier) => string | null;
   unlockDrm: (drm: DrmTier) => string | null;
+  toggleIllicitAssets: () => string | null;
+  runPostMortem: (gameId: string) => string | null;
+  startConfiguredConsole: (
+    media: MediaDriveId,
+    gpu: GpuPartId,
+    name?: string,
+    retailPrice?: number,
+  ) => string | null;
   applyCheat: (cheat: string, arg?: string | number) => void;
   resolveEvent: (choiceIndex: number) => void;
   exportSave: () => string;
@@ -2057,6 +2091,15 @@ export const useGame = create<GameState & Actions>((set, get) => ({
           if ((next.currentProject.fluWeeksLeft ?? 0) > 0) {
             dGain *= 0.5;
           }
+          if (next.currentProject.usedIllicitAssets) {
+            tGain *= ILLICIT_TECH_BOOST;
+          }
+          // Module 18 insight by genre post-mortems
+          {
+            const im = insightMultiplier(next.postMortems ?? [], next.currentProject.genreId);
+            dGain *= im;
+            tGain *= im;
+          }
           next.currentProject = {
             ...next.currentProject,
             designPoints: next.currentProject.designPoints + dGain,
@@ -2330,6 +2373,60 @@ export const useGame = create<GameState & Actions>((set, get) => ({
 
     next = tryFireEvent(next);
     next.hype = tycoonHypeDecay(next.hype); // v2.1 Module 4: MAX(1, INT(hype*0.12))
+
+
+    // Module 17 — IP litigation 2 weeks post-launch
+    {
+      let sales = [...next.activeSales];
+      let games = [...next.releasedGames];
+      for (const g of games) {
+        if (
+          g.usedIllicitAssets &&
+          !g.litigationResolved &&
+          g.litigationDueWeek != null &&
+          next.week >= g.litigationDueWeek
+        ) {
+          const lit = rollLitigation({
+            campaignSeed: next.campaignSeed,
+            week: next.week,
+            gameId: g.id,
+            usedIllicitAssets: true,
+          });
+          const patched = {
+            ...g,
+            litigationResolved: true,
+            onSale: lit.salesHalted ? false : g.onSale,
+            dormant: lit.salesHalted ? true : g.dormant,
+            weeklySalesLeft: lit.salesHalted ? [] : g.weeklySalesLeft,
+          };
+          games = games.map((x) => (x.id === g.id ? patched : x));
+          sales = sales
+            .map((x) => (x.id === g.id ? patched : x))
+            .filter((x) => x.onSale && !x.dormant);
+          if (lit.penaltyCash > 0) {
+            next.cash -= lit.penaltyCash;
+            next.ledger = applyLedger(next.ledger, {
+              week: next.week,
+              amount: -lit.penaltyCash,
+              category: "other",
+              label: `Litigation: ${g.title}`,
+              gameId: g.id,
+              ref: `lit-${g.id}`,
+            });
+          }
+          next.notifications = pushNote(next, lit.note, lit.salesHalted ? "bad" : "warn");
+          next.pendingEvent = {
+            id: `lit_${g.id}`,
+            title: "IP Litigation",
+            body: `"${g.title}" — ${lit.note}`,
+          };
+          next.modal = "event";
+          next.speed = 0;
+        }
+      }
+      next.releasedGames = games;
+      next.activeSales = sales;
+    }
 
     // Module 11 — Annual G3 Awards (Dec week 4)
     {
@@ -3290,6 +3387,8 @@ export const useGame = create<GameState & Actions>((set, get) => ({
 
   clearPublisherDeal: () => set({ activePublisherDealId: null,
     unlockedDrm: ["None"],
+    postMortems: [],
+    knownCombos: {},
     playerConsoles: [],
     lastAwardsYear: 0,
     lastRivalReleaseWeek: 0,
@@ -3593,6 +3692,116 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       currentProject: { ...p, drmTier: drm },
       dirty: true,
       notifications: pushNote(state, `DRM set: ${drm}`, "info"),
+    });
+    return null;
+  },
+
+
+  toggleIllicitAssets: () => {
+    const state = get();
+    const p = state.currentProject;
+    if (!p) return "No active project.";
+    const on = !p.usedIllicitAssets;
+    set({
+      currentProject: { ...p, usedIllicitAssets: on },
+      dirty: true,
+      notifications: pushNote(
+        state,
+        on
+          ? "Illicit assets ON — +30% tech, $0 kits, litigation risk after launch."
+          : "Illicit assets OFF — clean pipeline.",
+        on ? "warn" : "info",
+      ),
+    });
+    return null;
+  },
+
+  runPostMortem: (gameId) => {
+    const state = get();
+    const g = state.releasedGames.find((x) => x.id === gameId);
+    if (!g) return "Game not found.";
+    if (g.onSale && (g.weeklySalesLeft?.length ?? 0) > 0) {
+      return "Wait until the title leaves shelves (or shelf empties).";
+    }
+    if (g.postMortemDone) return "Post-mortem already filed.";
+    if (state.researchPoints < POST_MORTEM.rpCost) return `Need ${POST_MORTEM.rpCost} RP.`;
+    const pm = buildPostMortem({
+      gameId: g.id,
+      title: g.title,
+      topicId: g.topicId,
+      genreId: g.genreId,
+      sliderMiss: g.sliderMissAtShip ?? 0.25,
+      week: state.week,
+    });
+    const key = `${g.topicId}:${g.genreId}`;
+    set({
+      researchPoints: state.researchPoints - POST_MORTEM.rpCost,
+      postMortems: [...(state.postMortems ?? []), pm],
+      knownCombos: { ...(state.knownCombos ?? {}), [key]: pm.matchLabel },
+      releasedGames: state.releasedGames.map((x) =>
+        x.id === gameId ? { ...x, postMortemDone: true } : x,
+      ),
+      dirty: true,
+      notifications: pushNote(
+        state,
+        `Post-mortem "${g.title}": ${pm.matchLabel} (${pm.comboMult}x) · sliders ${pm.sliderVerdict}.`,
+        "good",
+      ),
+    });
+    return null;
+  },
+
+  startConfiguredConsole: (media, gpu, name, retailPrice) => {
+    const state = get();
+    if (!hardwareUnlocked(state.office, state.cash, state.flags.hardwareLab)) {
+      return "Hardware lab locked — need larger office / capital.";
+    }
+    const rd = consoleRdCost(media, gpu);
+    if (state.cash < rd.cash) return `Need ${formatCash(rd.cash)} R&D.`;
+    if (state.researchPoints < rd.rp) return `Need ${rd.rp} RP.`;
+    if ((state.playerConsoles ?? []).some((c) => c.status === "developing")) {
+      return "Already developing a console.";
+    }
+    const seed = hashSeed(state.campaignSeed, "cfg-console", state.week, media, gpu);
+    const id = `console_cfg_${seed.toString(16).slice(0, 6)}`;
+    const mfg = rd.unitCost;
+    const price = Math.max(199, Math.min(599, retailPrice ?? Math.ceil(mfg * 1.4)));
+    const console = {
+      id,
+      tier: "tier_1" as const,
+      name: name?.trim() || `${MEDIA_DRIVES[media].name} / ${GPU_PARTS[gpu].name}`,
+      retailPrice: price,
+      royaltyRate: 0.2,
+      marketShare: 0.15 * rd.shareMod,
+      launchedWeek: -1,
+      unitsSold: 0,
+      status: "developing" as const,
+      weeksLeft: 28 + Math.floor(rd.shareMod * 8),
+      unitMfgCost: mfg,
+      mediaDrive: media,
+      gpuPart: gpu,
+    };
+    set({
+      cash: state.cash - rd.cash,
+      researchPoints: state.researchPoints - rd.rp,
+      playerConsoles: [...(state.playerConsoles ?? []), console],
+      unlockedPlatforms: state.unlockedPlatforms.includes(id)
+        ? state.unlockedPlatforms
+        : [...state.unlockedPlatforms, id],
+      flags: { ...state.flags, hardwareLab: true },
+      dirty: true,
+      notifications: pushNote(
+        state,
+        `Console R&D: ${console.name} · unit cost $${mfg.toFixed(2)} · ${console.weeksLeft}w · −${formatCash(rd.cash)}.`,
+        "info",
+      ),
+      ledger: applyLedger(state.ledger, {
+        week: state.week,
+        amount: -rd.cash,
+        category: "other",
+        label: `Console components: ${console.name}`,
+        ref: `cfg-${id}`,
+      }),
     });
     return null;
   },

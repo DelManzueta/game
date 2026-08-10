@@ -210,6 +210,10 @@ export type PlayerConsole = {
   unitsSold: number;
   status: "developing" | "shipping";
   weeksLeft: number;
+  /** Module 19 manufacturing unit cost */
+  unitMfgCost?: number;
+  mediaDrive?: string;
+  gpuPart?: string;
 };
 
 export function hardwareUnlocked(office: number, cash: number, flag?: boolean): boolean {
@@ -266,13 +270,14 @@ export function tickPlayerConsole(
     return { console: { ...c, weeksLeft: left }, cashDelta: 0 };
   }
 
-  const mfg = HARDWARE_TIERS[c.tier].mfgCost;
+  const mfg = c.unitMfgCost ?? HARDWARE_TIERS[c.tier].mfgCost;
   const lossLeader = c.retailPrice < mfg;
   const shareGrowth = lossLeader ? 1.5 : 1.0;
   const baseUnits = Math.floor(
     800 * c.marketShare * (1 + (hashSeed(week, c.id) % 40) / 100) * shareGrowth,
   );
   const margin = c.retailPrice - mfg;
+  // Module 19: loss per unit hits bank when retail < mfg
   const cashDelta = baseUnits * margin;
   const nextShare = Math.min(
     HARDWARE_TIERS[c.tier].base_market_share * 1.2,

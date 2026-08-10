@@ -59,6 +59,13 @@ import { SalesChart, salesPointsFromGame } from "@/components/game/SalesChart";
 import { CAMPAIGN_CATALOG } from "@/lib/game/commercial/marketing";
 import { HARDWARE_TIERS, type HardwareTierId } from "@/lib/game/tycoonLateMarket";
 import { DRM_TIERS, type DrmTier } from "@/lib/game/tycoonPiracy";
+import {
+  MEDIA_DRIVES,
+  GPU_PARTS,
+  consoleRdCost,
+  type MediaDriveId,
+  type GpuPartId,
+} from "@/lib/game/tycoonRiskAnalytics";
 import { getPlatformSpec, platformMarketState, weekToCampaignDay } from "@/lib/game/platforms/lifecycle";
 import { SYSTEM_UNLOCKS, describeUnlockRequirements } from "@/lib/game/progression/unlockRegistry";
 import { idealPhaseSliders } from "@/lib/game/classicGdt";
@@ -718,6 +725,8 @@ function ProjectModsBar() {
   const setSecondaryPlatforms = useGame((s) => s.setSecondaryPlatforms);
   const setProjectDrm = useGame((s) => s.setProjectDrm);
   const unlockDrm = useGame((s) => s.unlockDrm);
+  const toggleIllicitAssets = useGame((s) => s.toggleIllicitAssets);
+  const knownCombos = useGame((s) => s.knownCombos) ?? {};
   const rp = useGame((s) => s.researchPoints);
   const [msg, setMsg] = useState("");
   if (!project) return null;
@@ -740,6 +749,13 @@ function ProjectModsBar() {
         >
           {project.crunchMode ? "Crunch ON · 1.45×" : "Crunch OFF"}
         </Button>
+        <Button
+          size="sm"
+          variant={project.usedIllicitAssets ? "danger" : "secondary"}
+          onClick={() => setMsg(toggleIllicitAssets() ?? "Toggled")}
+        >
+          {project.usedIllicitAssets ? "Illicit assets ON" : "Clean assets"}
+        </Button>
         {(project.crisisReviewPenalty ?? 0) > 0 && (
           <span className="rounded-full border border-red-400/40 px-2 py-1 text-[10px] font-bold text-red-300">
             Review pen −{project.crisisReviewPenalty}
@@ -751,6 +767,11 @@ function ProjectModsBar() {
           </span>
         )}
       </div>
+      {knownCombos[`${project.topicId}:${project.genreId}`] && (
+        <p className="text-[11px] font-semibold text-accent">
+          Known combo: {knownCombos[`${project.topicId}:${project.genreId}`]}
+        </p>
+      )}
       <div>
         <p className="mb-1 text-[10px] font-bold uppercase text-white/45">
           DRM / copy protection
@@ -2318,8 +2339,10 @@ function ContractsScreen() {
 function PatchDlcButtons({ gameId, onMsg }: { gameId: string; onMsg: (s: string) => void }) {
   const issuePatch = useGame((s) => s.issuePatch);
   const buildDlc = useGame((s) => s.buildDlc);
+  const runPostMortem = useGame((s) => s.runPostMortem);
   const g = useGame((s) => s.releasedGames.find((x) => x.id === gameId));
   if (!g) return null;
+  const offShelf = !g.onSale || !(g.weeklySalesLeft?.length);
   return (
     <>
       {(g.bugs ?? 0) > 0 && (
@@ -2335,7 +2358,102 @@ function PatchDlcButtons({ gameId, onMsg }: { gameId: string; onMsg: (s: string)
       {g.hasDlc && (
         <span className="text-[10px] font-bold text-good">DLC live · {formatCash(g.dlcRevenue ?? 0)}</span>
       )}
+      {offShelf && !g.postMortemDone && (
+        <Button size="sm" variant="secondary" onClick={() => onMsg(runPostMortem(gameId) ?? "Done.")}>
+          Post-mortem (−5 RP)
+        </Button>
+      )}
+      {g.postMortemDone && (
+        <span className="text-[10px] font-bold text-muted">Post-mortem filed</span>
+      )}
     </>
+  );
+}
+
+
+function ConsoleConfigurator({
+  name,
+  setName,
+  onMsg,
+}: {
+  name: string;
+  setName: (s: string) => void;
+  onMsg: (s: string) => void;
+}) {
+  const startConfiguredConsole = useGame((s) => s.startConfiguredConsole);
+  const [media, setMedia] = useState<MediaDriveId>("High_Speed_CD");
+  const [gpu, setGpu] = useState<GpuPartId>("16_Bit_Copper");
+  const [price, setPrice] = useState(299);
+  const rd = consoleRdCost(media, gpu);
+  return (
+    <div className="rounded-xl border border-accent/30 bg-paper p-3">
+      <p className="text-sm font-bold text-fg">Component configurator</p>
+      <p className="mb-2 text-[11px] text-muted">Pick media + GPU · unit mfg = media + GPU + $15 assembly</p>
+      <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Console name" />
+      <label className="mt-2 block text-[10px] font-bold uppercase text-muted">Media drive</label>
+      <div className="flex flex-wrap gap-1.5">
+        {(Object.keys(MEDIA_DRIVES) as MediaDriveId[]).map((id) => (
+          <button
+            key={id}
+            type="button"
+            className={cnJoin(
+              "rounded-full border px-2 py-1 text-[10px] font-semibold",
+              media === id ? "border-accent bg-accent/20 text-accent" : "border-border text-muted",
+            )}
+            onClick={() => setMedia(id)}
+          >
+            {MEDIA_DRIVES[id].name} (${MEDIA_DRIVES[id].unit_cost})
+          </button>
+        ))}
+      </div>
+      <label className="mt-2 block text-[10px] font-bold uppercase text-muted">Graphics</label>
+      <div className="flex flex-wrap gap-1.5">
+        {(Object.keys(GPU_PARTS) as GpuPartId[]).map((id) => (
+          <button
+            key={id}
+            type="button"
+            className={cnJoin(
+              "rounded-full border px-2 py-1 text-[10px] font-semibold",
+              gpu === id ? "border-accent bg-accent/20 text-accent" : "border-border text-muted",
+            )}
+            onClick={() => setGpu(id)}
+          >
+            {GPU_PARTS[id].name} (${GPU_PARTS[id].unit_cost})
+          </button>
+        ))}
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-fg">
+        <span>
+          Unit cost <strong className="tabular">${rd.unitCost.toFixed(2)}</strong>
+        </span>
+        <span>
+          R&D <strong className="tabular text-accent">{formatCash(rd.cash)}</strong> · {rd.rp} RP
+        </span>
+        <span>
+          Share mod <strong>{rd.shareMod.toFixed(2)}×</strong>
+        </span>
+        <label className="flex items-center gap-1">
+          Retail
+          <input
+            type="number"
+            className="w-20 rounded border border-border bg-elevated px-1 py-0.5 tabular"
+            min={199}
+            max={599}
+            value={price}
+            onChange={(e) => setPrice(Number(e.target.value))}
+          />
+        </label>
+        {price < rd.unitCost && (
+          <span className="text-warn">Loss leader −${(rd.unitCost - price).toFixed(2)}/unit</span>
+        )}
+      </div>
+      <Button
+        className="mt-2 w-full"
+        onClick={() => onMsg(startConfiguredConsole(media, gpu, name, price) ?? "Building.")}
+      >
+        Fund component build
+      </Button>
+    </div>
   );
 }
 
@@ -2372,6 +2490,11 @@ function HardwareLabScreen() {
               {c.status === "developing"
                 ? `Developing · ${c.weeksLeft}w left`
                 : `Shipping · share ${c.marketShare.toFixed(2)} · ${c.unitsSold.toLocaleString()} boxes`}
+              {c.unitMfgCost != null && (
+                <span className="block text-[10px] text-subtle">
+                  Mfg ${c.unitMfgCost.toFixed(2)} · retail ${c.retailPrice}
+                </span>
+              )}
             </p>
             {c.status === "shipping" && (
               <div className="mt-2 flex flex-wrap gap-2 text-xs">
@@ -2410,9 +2533,12 @@ function HardwareLabScreen() {
         ))}
       </ul>
       {unlocked && (
+        <ConsoleConfigurator name={name} setName={setName} onMsg={setMsg} />
+      )}
+      {unlocked && (
         <div className="rounded-xl border border-border bg-elevated p-3">
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Console name" />
-          <div className="mt-2 space-y-2">
+          <p className="mb-2 text-[10px] font-bold uppercase text-muted">Quick tiers (legacy)</p>
+          <div className="space-y-2">
             {(Object.keys(HARDWARE_TIERS) as HardwareTierId[]).map((tier) => {
               const def = HARDWARE_TIERS[tier];
               return (
@@ -2422,18 +2548,12 @@ function HardwareLabScreen() {
                   className="flex w-full items-center justify-between rounded-lg border border-border bg-paper px-3 py-2 text-left text-sm"
                   onClick={() => setMsg(startPlayerConsole(tier, name) ?? "Program started.")}
                 >
-                  <span>
-                    <span className="font-bold text-fg">{def.name}</span>
-                    <span className="block text-[11px] text-muted">
-                      Share base {def.base_market_share} · {def.rp_cost} RP
-                    </span>
-                  </span>
+                  <span className="font-bold text-fg">{def.name}</span>
                   <span className="tabular font-bold text-accent">{formatCash(def.dev_cost)}</span>
                 </button>
               );
             })}
           </div>
-          <p className="mt-2 text-[10px] text-subtle">RP {Math.floor(rp)} · first-party games free license + 1.15× points</p>
         </div>
       )}
     </div>
