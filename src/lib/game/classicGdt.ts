@@ -1,20 +1,22 @@
 /**
- * Classic Game Dev Tycoon core loop (legible, deterministic).
+ * Classic GDT spine — aligned to the modular text-engine blueprint:
  *
- * Review ≈ (design+tech) / targetHighScore × combo × sizeCap
- * Units  ≈ (design+tech) × review² × k × size × platform
+ *   score_ratio = total_points / historical_average
+ *   raw_score   = score_ratio * combo * 7.5 * sliderFit * bugFit
+ *   final       = clamp(1..sizeMax)
+ *   historical  = historical * 0.7 + total_points * 0.3
+ *   units       = (T+D) * review^2.2 * 12 * size * platform
+ *   net         = units * price * 0.85   (15% platform tax)
  *
- * Source inspiration: classic GDT phase sliders + topic/genre combos.
- * This is the simple spine — layered systems must not replace it with
- * free 10s or dozen-unit sales.
+ * Deterministic (no Math.random). Browser Studio Empire uses this at release.
  */
 
-import { SIZE_STATS, getGenre, STAGE_FIELDS } from "./data";
+import { SIZE_STATS, getGenre, STAGE_FIELDS, REVIEWER_NAMES } from "./data";
 import { topicGenreCompatibility } from "./content/genreFit";
 import type { DevField, GameSize, GenreId } from "./types";
 import { clamp } from "./scoring/qualityEngine";
 
-/** Genre tech/design bias (Action tech-heavy, RPG design-heavy). */
+/** Genre tech/design bias — blueprint Part 1 weights. */
 export const GENRE_WEIGHTS: Record<
   GenreId,
   { techWeight: number; designWeight: number }
@@ -22,14 +24,24 @@ export const GENRE_WEIGHTS: Record<
   action: { techWeight: 0.7, designWeight: 0.3 },
   adventure: { techWeight: 0.35, designWeight: 0.65 },
   rpg: { techWeight: 0.4, designWeight: 0.6 },
-  simulation: { techWeight: 0.55, designWeight: 0.45 },
+  simulation: { techWeight: 0.5, designWeight: 0.5 },
   strategy: { techWeight: 0.6, designWeight: 0.4 },
-  casual: { techWeight: 0.35, designWeight: 0.65 },
+  casual: { techWeight: 0.1, designWeight: 0.9 },
+};
+
+/** Blueprint-style good topic lists (also backed by full topic×genre matrix). */
+export const GENRE_BEST_TOPICS: Record<GenreId, string[]> = {
+  action: ["space", "military", "cyberpunk", "zombie", "racing", "martial_arts"],
+  adventure: ["fantasy", "mystery", "detective", "pirate", "time_travel"],
+  rpg: ["fantasy", "medieval", "vampire", "cyberpunk", "dungeon"],
+  simulation: ["city", "farming", "airplane", "hospital", "gamedev", "economy"],
+  strategy: ["military", "medieval", "space", "politics", "warfare"],
+  casual: ["sports", "music", "party", "puzzle", "school"],
 };
 
 /**
  * Ideal relative slider emphasis per phase field (0–1 within phase).
- * Action P1: Engine high, Story low — matching classic GDT guides.
+ * Action P1: Engine high, Story low — matching classic GDT + blueprint.
  */
 export function idealPhaseSliders(
   genreId: GenreId,
@@ -43,22 +55,27 @@ export function idealPhaseSliders(
   for (const f of fields) {
     if (avoid.has(f)) out[f] = 0.02;
     else if (focus.has(f)) out[f] = 1.0;
-    else out[f] = 0.12; // non-focus fields should be de-emphasized
+    else out[f] = 0.12;
   }
-  // Normalize to sum ~1 for display
   const sum = Object.values(out).reduce((a, b) => a + (b ?? 0), 0) || 1;
   for (const f of fields) out[f] = (out[f] ?? 0) / sum;
   return out;
 }
 
-/** Topic×genre → sales/review combo multiplier (~0.55–1.25). */
+/** Topic×genre combo: blueprint 1.3 / 0.7 with soft matrix blend. */
 export function classicComboMultiplier(topicId: string, genreId: GenreId): number {
   const compat = topicGenreCompatibility(topicId, genreId); // 0–100
-  // 100 → 1.22, 85 → 1.12, 70 → 1.0, 55 → 0.88, 35 → 0.72, 15 → 0.55
-  return clamp(0.45 + (compat / 100) * 0.8, 0.5, 1.25);
+  // Map: 100→1.30, 70→1.0, 40→0.75, 15→0.55
+  const soft = clamp(0.4 + (compat / 100) * 0.9, 0.5, 1.3);
+  const best = GENRE_BEST_TOPICS[genreId] ?? [];
+  const id = topicId.toLowerCase().replace(/\s+/g, "_");
+  if (best.some((b) => id.includes(b) || b.includes(id))) {
+    return Math.max(soft, 1.25);
+  }
+  return soft;
 }
 
-/** Deviation of player sliders from genre ideal (0 = perfect, 1 = all wrong). */
+/** 0 = perfect genre focus, 1 = completely flat/wrong. */
 export function sliderDeviation(
   genreId: GenreId,
   stage: 1 | 2 | 3,
@@ -75,65 +92,162 @@ export function sliderDeviation(
     const target = ideal[f] ?? 1 / fields.length;
     dev += Math.abs(actual - target);
   }
-  return clamp(dev / 2, 0, 1); // max ~1 when completely inverted
+  return clamp(dev / 2, 0, 1);
+}
+
+/** Blueprint Part 3 — score-banded critic quotes. */
+export const REVIEWER_QUOTES: {
+  min: number;
+  max: number;
+  lines: string[];
+}[] = [
+  {
+    min: 9.0,
+    max: 10,
+    lines: [
+      "An absolute masterpiece. We will be playing this for years.",
+      "A brilliant subversion of the genre. Instant classic.",
+      "Every system sings. This is why we cover games.",
+      "Sets a new bar for the category — essential.",
+    ],
+  },
+  {
+    min: 7.5,
+    max: 8.9,
+    lines: [
+      "Strong craft with only a few rough edges.",
+      "Confident design — nearly great.",
+      "Players will remember this one fondly.",
+    ],
+  },
+  {
+    min: 6.0,
+    max: 7.4,
+    lines: [
+      "Good mechanics, but it feels like it lacks that final polish.",
+      "A solid weekend choice. Fun, but ultimately safe.",
+      "Competent work that never quite soars.",
+    ],
+  },
+  {
+    min: 4.0,
+    max: 5.9,
+    lines: [
+      "Ideas fight each other more than they cooperate.",
+      "A rocky ride — flashes of fun buried under friction.",
+      "Needs another development cycle.",
+    ],
+  },
+  {
+    min: 1.0,
+    max: 3.9,
+    lines: [
+      "A disaster of mismatched design decisions. Pass on this.",
+      "I found more entertainment counting the bugs than playing.",
+      "Hard to recommend even at a discount.",
+    ],
+  },
+];
+
+export function quoteForScore(score: number, salt: number): string {
+  const band =
+    REVIEWER_QUOTES.find((b) => score >= b.min && score <= b.max) ??
+    REVIEWER_QUOTES[REVIEWER_QUOTES.length - 1]!;
+  return band.lines[Math.abs(salt) % band.lines.length]!;
+}
+
+export function criticReviewsForScores(
+  scores: number[],
+  seed: number,
+): { name: string; score: number; comment: string }[] {
+  const names = REVIEWER_NAMES.length
+    ? REVIEWER_NAMES
+    : ["All-Games Beta", "Game Hero", "Informer", "Star Games", "BitCritic"];
+  return scores.map((sc, i) => ({
+    name: names[i % names.length]!,
+    score: sc,
+    comment: quoteForScore(sc, seed + i * 17 + Math.floor(sc * 10)),
+  }));
 }
 
 /**
- * Classic review from accumulated points.
- * Score = (points / target) * combo * (1 - bugHit) * (1 - flatSliderHit), clamped to size max.
+ * Blueprint review math:
+ *   score_ratio = total_points / historical_average
+ *   raw = score_ratio * combo * 7.5 * sliderFit * bugFit * expertise
  */
 export function classicReviewScore(opts: {
   designPoints: number;
   techPoints: number;
   bugs: number;
+  /** Moving market bar — blueprint historical_average (points scale). */
   targetHighScore: number;
   comboMult: number;
   size: GameSize;
-  /** 0–1: how much player ignored ideal sliders across development */
   sliderMiss?: number;
-  /** Solo garage first games: soft expertise dampener 0.85–1 */
   expertise?: number;
-}): { avg: number; scores: number[]; basePoints: number; hidden: number } {
+}): {
+  avg: number;
+  scores: number[];
+  basePoints: number;
+  hidden: number;
+  /** Next historical average after this release. */
+  nextHistoricalAverage: number;
+  criticReviews: { name: string; score: number; comment: string }[];
+} {
   const design = Math.max(0, opts.designPoints);
   const tech = Math.max(0, opts.techPoints);
-  const points = design + tech;
-  // GDT size divisor (same spine as qualityEngine)
-  const sizeDiv =
-    opts.size === "aaa" ? 1.8 : opts.size === "large" ? 1.4 : opts.size === "medium" ? 1.2 : 1.0;
-  const bugRatio = clamp(1 - opts.bugs / 50, 0.4, 1);
-  // Flat equal sliders (never steered) hurt priority — matches GDT "important fields"
-  const priority = clamp(1.05 - (opts.sliderMiss ?? 0) * 0.95, 0.48, 1.15);
-  const qualityFactor = priority * bugRatio;
-  // baseScore = ((T+D)/(2*sizeDiv)) * quality * combo
-  const baseScore =
-    ((tech + design) / (2 * sizeDiv)) * qualityFactor * opts.comboMult;
-  const target = Math.max(1, opts.targetHighScore);
+  const totalPoints = design + tech;
+  const historical = Math.max(12, opts.targetHighScore || 30);
+
+  // Slider fit: flat equal sliders → ~0.55–0.7; focused → ~0.95–1.1
+  const sliderFit = clamp(1.12 - (opts.sliderMiss ?? 0) * 0.85, 0.5, 1.15);
+  const bugFit = clamp(1 - opts.bugs / 55, 0.45, 1);
   const expertise = opts.expertise ?? 1;
+
+  const scoreRatio = totalPoints / historical;
+  let raw =
+    scoreRatio * opts.comboMult * 7.5 * sliderFit * bugFit * expertise;
+
+  // Mild size pressure (small games still cap via maxScore)
+  if (opts.size === "medium") raw *= 0.98;
+  if (opts.size === "large") raw *= 0.95;
+  if (opts.size === "aaa") raw *= 0.92;
+
   const maxScore = SIZE_STATS[opts.size]?.maxScore ?? 10;
-  // Score = 10 * (baseScore / market target) — classic moving-target GDT
-  let hidden = clamp(10 * (baseScore / target), 1, 10) * expertise;
-  hidden = clamp(hidden, 1, maxScore);
-  const seed = Math.floor(points * 17 + opts.bugs * 3 + baseScore * 10) % 1000;
+  const hidden = clamp(Math.round(raw * 10) / 10, 1, maxScore);
+
+  const seed = Math.floor(totalPoints * 17 + opts.bugs * 3 + historical * 5);
   const scores = [0, 1, 2, 3].map((i) => {
-    const j = (((seed + i * 37) % 100) / 100 - 0.5) * 1.1;
+    const j = (((seed + i * 41) % 100) / 100 - 0.5) * 1.0;
     return Math.round(clamp(hidden + j, 1, maxScore) * 10) / 10;
   });
   const avg =
     Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10;
-  return { avg, scores, basePoints: baseScore, hidden };
+
+  // Blueprint: historical_average = hist * 0.7 + total_points * 0.3
+  const nextHistoricalAverage = historical * 0.7 + totalPoints * 0.3;
+
+  return {
+    avg,
+    scores,
+    basePoints: totalPoints,
+    hidden,
+    nextHistoricalAverage,
+    criticReviews: criticReviewsForScores(scores, seed),
+  };
 }
 
 /**
- * Classic unit sales (Google guide spine):
- * BaseUnits = (Tech + Design) × Review² × 15 × size × platform × combo
- * Gross = units × price; platform tax ~15–30%.
+ * Blueprint sales:
+ *   units = (T+D) * review^2.2 * 12 * sizeMult * platform * combo * soft boosts
+ *   tax = 15% (blueprint) — we keep 15% for classic spine net
  */
 export function classicUnitsSold(opts: {
   designPoints: number;
   techPoints: number;
-  reviewScore: number; // 1–10
+  reviewScore: number;
   size: GameSize;
-  platformMarket: number; // ~0.5–1.5
+  platformMarket: number;
   comboMult: number;
   marketingSpend?: number;
   fans?: number;
@@ -142,32 +256,86 @@ export function classicUnitsSold(opts: {
   const points = Math.max(1, opts.designPoints + opts.techPoints);
   const review = clamp(opts.reviewScore, 1, 10);
   const size = SIZE_STATS[opts.size];
-  const fanBoost = 1 + Math.min(1.5, (opts.fans ?? 0) / 50_000);
-  const hypeBoost = 1 + Math.min(0.8, (opts.hype ?? 0) / 120);
-  const mktBoost = 1 + Math.min(0.6, (opts.marketingSpend ?? 0) / 80_000);
+  const fanBoost = 1 + Math.min(1.2, (opts.fans ?? 0) / 60_000);
+  const hypeBoost = 1 + Math.min(0.6, (opts.hype ?? 0) / 140);
+  const mktBoost = 1 + Math.min(0.5, (opts.marketingSpend ?? 0) / 100_000);
+
   const base =
     points *
-    Math.pow(review, 2) *
-    9 *
+    Math.pow(review, 2.2) *
+    12 *
     size.salesMult *
-    Math.max(0.35, opts.platformMarket) *
+    Math.max(0.4, opts.platformMarket) *
     opts.comboMult *
     fanBoost *
     hypeBoost *
     mktBoost;
+
   const totalUnits = Math.max(0, Math.floor(base));
-  // 12-week curve: front-loaded classic shelf
   const weights = [0.22, 0.16, 0.12, 0.1, 0.08, 0.07, 0.06, 0.05, 0.04, 0.04, 0.03, 0.03];
   const weekly = weights.map((w) => Math.floor(totalUnits * w));
-  // fix rounding residual on week 1
   const sum = weekly.reduce((a, b) => a + b, 0);
   if (weekly[0] != null) weekly[0] += Math.max(0, totalUnits - sum);
+
   const price =
-    opts.size === "small" ? 9.99 : opts.size === "medium" ? 19.99 : opts.size === "large" ? 39.99 : 59.99;
+    opts.size === "small"
+      ? 9.99
+      : opts.size === "medium"
+        ? 19.99
+        : opts.size === "large"
+          ? 39.99
+          : 59.99;
   const gross = totalUnits * price;
-  const net = gross * 0.75; // ~25% platform tax (guide used 15%; modern stores ~30%)
+  const net = gross * 0.85; // 15% platform tax per blueprint
   return { totalUnits, weekly, price, gross, net };
 }
 
-/** Expected points band for a garage small game (solo, ~8 weeks). */
-export const GARAGE_SMALL_POINT_BAND = { weak: 35, ok: 70, strong: 110 };
+/** Fans gained from a release (blueprint: units * 0.05 * score/10). */
+export function classicFansFromRelease(units: number, reviewScore: number): number {
+  return Math.max(0, Math.floor(units * 0.05 * (clamp(reviewScore, 1, 10) / 10)));
+}
+
+/** Initial historical average for first game (blueprint: 30). */
+export const CLASSIC_INITIAL_HISTORICAL = 30;
+
+/** Expected points band for garage small (solo). */
+export const GARAGE_SMALL_POINT_BAND = { weak: 20, ok: 40, strong: 70 };
+
+/**
+ * Office ladder (blueprint Part 2) — mapped to our office tiers.
+ * Rent charged monthly when office >= 2 (garage free for learnability).
+ */
+export const OFFICE_BLUEPRINT = [
+  {
+    stage: 1,
+    name: "The Garage",
+    unlockCost: 0,
+    monthlyRent: 0,
+    maxStaff: 1,
+    sizes: ["small"] as GameSize[],
+  },
+  {
+    stage: 2,
+    name: "Tech Park Office",
+    unlockCost: 120_000,
+    monthlyRent: 8_000,
+    maxStaff: 5,
+    sizes: ["small", "medium"] as GameSize[],
+  },
+  {
+    stage: 3,
+    name: "Industry Complex",
+    unlockCost: 850_000,
+    monthlyRent: 25_000,
+    maxStaff: 7,
+    sizes: ["small", "medium", "large"] as GameSize[],
+  },
+  {
+    stage: 4,
+    name: "Mega Campus",
+    unlockCost: 8_000_000,
+    monthlyRent: 80_000,
+    maxStaff: 12,
+    sizes: ["small", "medium", "large", "aaa"] as GameSize[],
+  },
+] as const;

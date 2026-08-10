@@ -123,7 +123,9 @@ import {
   classicComboMultiplier,
   classicReviewScore,
   classicUnitsSold,
+  classicFansFromRelease,
   sliderDeviation,
+  CLASSIC_INITIAL_HISTORICAL,
 } from "./classicGdt";
 import {
   startMarketingCampaign,
@@ -345,7 +347,7 @@ function initialState(): GameState {
     recentEventKeys: [],
     eventCooldowns: {},
     highScore: 0,
-    targetHighScore: INITIAL_TARGET_HIGH_SCORE,
+    targetHighScore: CLASSIC_INITIAL_HISTORICAL,
     previousHighBaseScore: 0,
     lastScoreBreakdown: null,
     totalRevenue: 0,
@@ -764,26 +766,29 @@ function releaseProject(next: GameState, project: GameProject): GameState {
   let productQuality: number;
   let hidden: number;
 
-  // ── Classic GDT spine (always) ──────────────────────────────────────────
-  // Points from weekly develop + combo + slider fit → reviews.
-  // Production sim still tracks bugs/polish, but cannot mint free 10s.
+  // ── Classic GDT spine (Python blueprint math) ───────────────────────────
+  // score = (points / historical) * combo * 7.5 * sliderFit * bugFit
+  // historical := hist*0.7 + points*0.3 after each release
   {
     const combo = classicComboMultiplier(scored.topicId, scored.genreId);
-    // Average slider miss across stages (equal default sliders = high miss vs genre ideal)
     const miss =
       (sliderDeviation(scored.genreId, 1, scored.sliders) +
         sliderDeviation(scored.genreId, 2, scored.sliders) +
         sliderDeviation(scored.genreId, 3, scored.sliders)) /
       3;
+    const hist =
+      next.targetHighScore && next.targetHighScore > 5
+        ? next.targetHighScore
+        : CLASSIC_INITIAL_HISTORICAL;
     const classic = classicReviewScore({
       designPoints: scored.designPoints,
       techPoints: scored.techPoints,
       bugs: scored.bugs + (scored.production ? productionOpenSeverity(scored) : 0),
-      targetHighScore: next.targetHighScore ?? INITIAL_TARGET_HIGH_SCORE,
-      comboMult: combo * (comboMult > 0 ? Math.min(1.15, 0.85 + comboMult * 0.15) : 1),
+      targetHighScore: hist,
+      comboMult: combo,
       size: scored.size,
       sliderMiss: miss,
-      expertise: next.office <= 1 ? 0.92 : 1,
+      expertise: next.office <= 1 ? 0.94 : 1,
     });
     hidden = classic.hidden;
     productQuality = classic.hidden * 10;
@@ -798,27 +803,19 @@ function releaseProject(next: GameState, project: GameProject): GameState {
         priorityModifier: 1 - miss,
         bugRatio: Math.max(0, 1 - scored.bugs / 40),
         baseScore: classic.basePoints,
-        targetHighScore: next.targetHighScore ?? INITIAL_TARGET_HIGH_SCORE,
+        targetHighScore: hist,
         hiddenFinalScore: classic.hidden,
         qualityFactor: 1 - miss,
         hypeBonus: 0,
         sequelMod: 1,
         mmoPenalty: 1,
         trendBonus: combo,
+        nextTargetHighScore: classic.nextHistoricalAverage,
+        nextHighBaseScore: classic.basePoints,
       },
       nextHighBaseScore: classic.basePoints,
-      criticReviews: classic.scores.map((sc, i) => ({
-        name: ["Pixel Weekly", "Joystick Journal", "Home Computer Monthly", "Arcade Digest"][i]!,
-        score: sc,
-        comment:
-          miss > 0.45
-            ? "Unfocused development — genre priorities ignored."
-            : combo >= 1.1
-              ? "Strong topic/genre match."
-              : combo < 0.75
-                ? "Odd combination for this market."
-                : "Solid garage effort.",
-      })),
+      nextTargetHighScore: classic.nextHistoricalAverage,
+      criticReviews: classic.criticReviews,
       productQuality,
     } as unknown as ReturnType<typeof computeReviews>;
 
@@ -1078,7 +1075,15 @@ function releaseProject(next: GameState, project: GameProject): GameState {
       audienceDemand: platformSnap.audienceDemand,
     };
   }
-  next.fans = Math.max(0, next.fans + commercial.fansDelta);
+  {
+    const classicFans = classicFansFromRelease(
+      sales.totalUnits ?? 0,
+      reviews.avg,
+    );
+    // Prefer blueprint fan curve when commercial delta is tiny
+    const fanGain = Math.max(commercial.fansDelta, classicFans);
+    next.fans = Math.max(0, next.fans + fanGain);
+  }
   if (commercial.notification) {
     next.notifications = pushNote(
       next,
@@ -1169,8 +1174,21 @@ function releaseProject(next: GameState, project: GameProject): GameState {
   }
 
   next.highScore = Math.max(next.highScore, reviews.avg);
-  next.targetHighScore = reviews.breakdown.nextTargetHighScore;
-  next.previousHighBaseScore = reviews.breakdown.nextHighBaseScore;
+  {
+    const br = reviews.breakdown as {
+      nextTargetHighScore?: number;
+      nextHighBaseScore?: number;
+    };
+    const nextHist =
+      (reviews as { nextTargetHighScore?: number }).nextTargetHighScore ??
+      br.nextTargetHighScore ??
+      next.targetHighScore;
+    next.targetHighScore = nextHist;
+    next.previousHighBaseScore =
+      br.nextHighBaseScore ??
+      (reviews as { nextHighBaseScore?: number }).nextHighBaseScore ??
+      scored.designPoints + scored.techPoints;
+  }
   next.lastScoreBreakdown = {
     baseScore: reviews.breakdown.baseScore,
     hiddenFinalScore: reviews.breakdown.hiddenFinalScore,

@@ -302,18 +302,18 @@ export const OFFICE_INFO = {
   },
   2: {
     name: "First Office",
-    rent: 2_000,
-    capacity: 4, // founder + 3
-    upgradeCost: 500_000,
+    rent: 8_000,
+    capacity: 5, // founder + 4 (blueprint tech park)
+    upgradeCost: 120_000,
     fanRequirement: 0,
     gamesRequirement: 0,
     cashRequirement: 0,
   },
   3: {
     name: "Upgraded Office",
-    rent: 5_000,
-    capacity: 5, // founder + 4
-    upgradeCost: 8_000_000,
+    rent: 25_000,
+    capacity: 7,
+    upgradeCost: 850_000,
     fanRequirement: 0,
     gamesRequirement: 0,
     cashRequirement: 0,
