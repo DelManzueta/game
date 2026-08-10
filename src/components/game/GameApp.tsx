@@ -282,6 +282,14 @@ function MainMenu() {
           >
             Studio OS v3.7 · High-Density workbench
           </a>
+          <a
+            href="/studio-os-v38.html"
+            target="_blank"
+            rel="noreferrer"
+            className="block w-full rounded-lg border border-border bg-elevated px-3 py-2.5 text-center text-xs font-bold uppercase tracking-wide text-muted transition hover:border-accent hover:text-accent"
+          >
+            Studio OS v3.8 · Netflix IDE
+          </a>
         </div>
       </div>
     </div>
@@ -2872,6 +2880,113 @@ function AccessoryFactoryPanel({ onMsg }: { onMsg: (m: string) => void }) {
 }
 
 
+
+function NetflixEditionScreen() {
+  const cash = useGame((s) => s.cash);
+  const fans = useGame((s) => s.fans);
+  const hype = useGame((s) => s.hype);
+  const office = useGame((s) => s.office);
+  const activeIp = useGame((s) => s.activeIpLicense);
+  const licenseFranchise = useGame((s) => s.licenseFranchise);
+  const runStreamerCampaign = useGame((s) => s.runStreamerCampaign);
+  const hostStudioConvention = useGame((s) => s.hostStudioConvention);
+  const [msg, setMsg] = useState("");
+  const [ticket, setTicket] = useState(49);
+  const [conFocus, setConFocus] = useState<"showcase" | "hands_on" | "influencer_night" | "hardware">("showcase");
+  const licenses = [
+    { id: "echo_chamber", name: "Echo Chamber", cost: 50000, fit: "Sci-Fi / Action" },
+    { id: "nightshade_prep", name: "Nightshade Prep", cost: 35000, fit: "City / Adventure" },
+    { id: "orbital_heist", name: "Orbital Heist", cost: 75000, fit: "Sci-Fi / Simulation" },
+    { id: "clear", name: "Clear license", cost: 0, fit: "—" },
+  ];
+  const canCon = office >= 3 || fans >= 100_000;
+  return (
+    <div className="space-y-3">
+      <div className="game-panel px-4 py-3 text-center">
+        <h2 className="text-xl font-bold text-fg">Netflix Edition</h2>
+        <p className="text-xs text-muted">
+          Fiction IP licenses · streamer hype · studio conventions · 15% royalty when licensed
+        </p>
+      </div>
+      {msg && <p className="text-center text-sm text-warn">{msg}</p>}
+      <div className="rounded-xl border border-border bg-elevated p-3">
+        <p className="text-[10px] font-bold uppercase text-muted">Active IP</p>
+        <p className="text-sm font-bold text-fg">{activeIp?.name ?? "None"}</p>
+        <p className="text-[11px] text-muted">
+          Match theme → 1.4× hype & +1.5 score · mismatch hurts · 15% net royalty
+        </p>
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          {licenses.map((l) => (
+            <button
+              key={l.id}
+              type="button"
+              className="rounded-lg border border-border bg-paper px-3 py-2 text-left text-xs"
+              onClick={() => setMsg(licenseFranchise(l.id) ?? "License updated.")}
+            >
+              <div className="font-bold text-fg">{l.name}</div>
+              <div className="text-muted">
+                {l.cost ? formatCash(l.cost) : "Free"} · {l.fit}
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="rounded-xl border border-border bg-elevated p-3 space-y-2">
+        <p className="text-[10px] font-bold uppercase text-muted">Streamer marketing</p>
+        <p className="text-[11px] text-muted">
+          Explosive hype scales with √fans · decays faster for a few weeks. Cash {formatCash(cash)} · hype{" "}
+          {Math.round(hype)}
+        </p>
+        <Button size="sm" className="w-full" onClick={() => setMsg(runStreamerCampaign("indie") ?? "Live.")}>
+          Indie streamer · $8k
+        </Button>
+        <Button size="sm" className="w-full" onClick={() => setMsg(runStreamerCampaign("mega") ?? "Viral.")}>
+          Mega streamer · $45k
+        </Button>
+      </div>
+      <div className="rounded-xl border border-border bg-elevated p-3 space-y-2">
+        <p className="text-[10px] font-bold uppercase text-muted">Studio convention</p>
+        <p className="text-[11px] text-muted">
+          {canCon
+            ? "Host your own show — ticket price + presentation focus."
+            : "Unlock at Level 3 office or 100,000 fans."}
+        </p>
+        {canCon && (
+          <>
+            <label className="flex items-center justify-between text-xs text-muted">
+              Ticket $
+              <input
+                type="number"
+                className="w-24 rounded border border-border bg-paper px-2 py-1 tabular text-fg"
+                value={ticket}
+                min={5}
+                max={299}
+                onChange={(e) => setTicket(Number(e.target.value))}
+              />
+            </label>
+            <select
+              className="w-full rounded border border-border bg-paper px-2 py-2 text-xs text-fg"
+              value={conFocus}
+              onChange={(e) => setConFocus(e.target.value as typeof conFocus)}
+            >
+              <option value="showcase">Main Stage Showcase</option>
+              <option value="hands_on">Hands-On Floor</option>
+              <option value="influencer_night">Creator Night</option>
+              <option value="hardware">Hardware Pavilion</option>
+            </select>
+            <Button
+              className="w-full"
+              onClick={() => setMsg(hostStudioConvention(ticket, conFocus) ?? "Convention done.")}
+            >
+              Host convention (~$85k base)
+            </Button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function TEngineScreen() {
   const engines = useGame((s) => s.engines);
   const genreExp = useGame((s) => s.genreExp) ?? {};
@@ -3088,7 +3203,8 @@ function SettingsScreen() {
   const setModal = useGame((s) => s.setModal);
   const returnToMenu = useGame((s) => s.returnToMenu);
   const setScreen = useGame((s) => s.setScreen);
-  const [panel, setPanel] = useState<"unlocks" | "contracts" | "hardware" | "engines" | "none">("unlocks");
+  const [panel, setPanel] = useState<"unlocks" | "contracts" | "hardware"
+  | "netflix" | "engines" | "none">("unlocks");
   return (
     <div className="mx-auto max-w-lg space-y-3 px-1 pb-4 pt-1">
       <div className="game-panel px-4 py-3 text-center">
@@ -3104,6 +3220,9 @@ function SettingsScreen() {
         </Button>
         <Button size="sm" variant={panel === "hardware" ? "primary" : "secondary"} onClick={() => setPanel("hardware")}>
           Hardware
+        </Button>
+        <Button size="sm" variant={panel === "netflix" ? "primary" : "secondary"} onClick={() => setPanel("netflix")}>
+          Netflix
         </Button>
         <Button size="sm" variant={panel === "engines" ? "primary" : "secondary"} onClick={() => setPanel("engines")}>
           Engines
@@ -3121,6 +3240,7 @@ function SettingsScreen() {
       {panel === "unlocks" && <UnlocksScreen embedded />}
       {panel === "contracts" && (<><OpsPublisherDeals /><ContractsScreen /></>)}
       {panel === "hardware" && <HardwareLabScreen />}
+      {panel === "netflix" && <NetflixEditionScreen />}
       {panel === "engines" && <TEngineScreen />}
       <SaveLoadPanel />
       <div className="space-y-2">

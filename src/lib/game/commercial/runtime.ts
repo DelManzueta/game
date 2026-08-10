@@ -5,6 +5,7 @@
 import type { GameState, ReleasedGame } from "../types";
 import { defaultLaunchPrice } from "../contracts";
 import { applyLedger } from "../finance/ledger";
+import { applyIpRoyalty } from "../netflixEdition";
 import {
   calculateWeeklySales,
   reviewToHundred,
@@ -362,12 +363,29 @@ export function tickReleasedSales(
       fanHistory,
     };
 
-    next.cash += rev;
-    next.totalRevenue += rev;
-    if (rev !== 0) {
+    // Netflix Edition — 15% ongoing royalty on licensed titles
+    const royaltyRate =
+      (g as { ipRoyaltyRate?: number }).ipRoyaltyRate ??
+      ((next.ipRoyaltyGameIds ?? []).includes(g.id) ? 0.15 : 0);
+    let netRev = rev;
+    if (royaltyRate > 0 && rev > 0) {
+      netRev = applyIpRoyalty(rev, royaltyRate);
+      const cut = rev - netRev;
       next.ledger = applyLedger(next.ledger, {
         week: next.week,
-        amount: rev,
+        amount: -cut,
+        category: "other",
+        label: `IP royalty (${Math.round(royaltyRate * 100)}%): ${g.title}`,
+        gameId: g.id,
+        ref: `ip-royalty-${g.id}-w${g.weeksOnMarket}`,
+      });
+    }
+    next.cash += netRev;
+    next.totalRevenue += netRev;
+    if (netRev !== 0) {
+      next.ledger = applyLedger(next.ledger, {
+        week: next.week,
+        amount: netRev,
         category: "sales",
         label: `Sales: ${g.title}`,
         gameId: g.id,

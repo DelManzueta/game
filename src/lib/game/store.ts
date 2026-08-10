@@ -155,10 +155,25 @@ import {
   ACCESSORY_CATEGORIES,
   createHardwareProduct,
   processHardwareWeek,
+  processHardwareWeekWithFab,
+  createWorkbenchProduct,
   setupCostCheck,
   type AccessoryCategoryId,
   type HardwareProduct,
 } from "./hardwareMerch";
+import {
+  FRANCHISE_LICENSES,
+  STREAMER_TIERS,
+  purchaseLicense,
+  streamerHypeGain,
+  canHostConvention,
+  conventionOutcome,
+  ipShipModifiers,
+  applyIpRoyalty,
+  streamerHypeDecay,
+  emptyIp,
+  type ConventionFocus,
+} from "./netflixEdition";
 import {
   canAdvanceOffice,
   normalizeOfficeLevel,
@@ -176,7 +191,7 @@ import {
   BENCH_CATEGORIES,
   type BenchCategoryId,
 } from "./officeWorkbench";
-import { createWorkbenchProduct, processHardwareWeekWithFab } from "./hardwareMerch";
+
 import { tycoonHypeDecay, tycoonStaffEnergyTick, TYCOON_DEFAULTS } from "./tycoonEngine";
 import {
   competitorRelease,
@@ -508,6 +523,9 @@ function initialState(): GameState {
     officeEnteredYear: START_YEAR,
     officeEnteredMonth: 1,
     officeSubTier: 2.0,
+    activeIpLicense: emptyIp(),
+    streamerHypeWeeksLeft: 0,
+    ipRoyaltyGameIds: [],
     knownCombos: {},
     playerConsoles: [],
     lastAwardsYear: 0,
@@ -1001,6 +1019,48 @@ function releaseProject(next: GameState, project: GameProject): GameState {
       productQuality,
     } as unknown as ReturnType<typeof computeReviews>;
 
+    // Netflix Edition — franchise IP match on ship
+    {
+      const ipm = ipShipModifiers({
+        active: next.activeIpLicense,
+        topicId: scored.topicId,
+        genreId: scored.genreId,
+      });
+      if (ipm.licensed) {
+        const boosted = Math.max(
+          1,
+          Math.min(10, Math.round((reviews.avg + ipm.reviewBoost) * 10) / 10),
+        );
+        const scale = reviews.avg > 0 ? boosted / reviews.avg : 1;
+        reviews.avg = boosted;
+        reviews.scores = reviews.scores.map((x) =>
+          Math.max(1, Math.min(10, Math.round(x * scale * 10) / 10)),
+        );
+        hidden = Math.max(1, Math.min(10, hidden + ipm.reviewBoost * 0.85));
+        productQuality = hidden * 10;
+        (scored as { ipLicensed?: boolean; ipMatched?: boolean; ipRoyaltyRate?: number; ipHypeMult?: number }).ipLicensed =
+          true;
+        (scored as { ipMatched?: boolean }).ipMatched = ipm.matched;
+        (scored as { ipRoyaltyRate?: number }).ipRoyaltyRate = ipm.royaltyRate;
+        (scored as { ipHypeMult?: number }).ipHypeMult = ipm.hypeMult;
+        // Hype mult applied into launch hype burn path via next.hype scale
+        if (ipm.matched) {
+          next.hype = Math.round(next.hype * ipm.hypeMult);
+          next.notifications = pushNote(
+            next,
+            `Franchise synergy: ${next.activeIpLicense?.name} — +${ipm.reviewBoost} score · ${ipm.hypeMult}× hype.`,
+            "good",
+          );
+        } else {
+          next.notifications = pushNote(
+            next,
+            `Franchise mismatch vs ${next.activeIpLicense?.name} — theme penalty.`,
+            "warn",
+          );
+        }
+      }
+    }
+
     // Optional diagnostics from production metrics (UI only; does not override score)
     if (scored.production?.completedStages?.length) {
       try {
@@ -1149,7 +1209,8 @@ function releaseProject(next: GameState, project: GameProject): GameState {
       reviewScore: Math.max(1, reviews.avg - (scored.crisisReviewPenalty ?? 0)),
       size: scored.size,
       platformMarket: multiShare,
-      comboMult: classicComboMultiplier(scored.topicId, scored.genreId),
+      comboMult: classicComboMultiplier(scored.topicId, scored.genreId) *
+        ((scored as { ipHypeMult?: number }).ipHypeMult ?? 1),
       marketingSpend: scored.marketingSpend,
       fans: next.fans,
       hype: scored.hype + next.hype,
@@ -1412,6 +1473,16 @@ function releaseProject(next: GameState, project: GameProject): GameState {
   // No cash from sales at release — reviews first; sales start next week tick
   next.releasedGames = [released, ...next.releasedGames];
   next.activeSales = [released, ...next.activeSales.filter((g) => g.onSale)];
+  if ((scored as { ipRoyaltyRate?: number }).ipRoyaltyRate) {
+    next.ipRoyaltyGameIds = [
+      released.id,
+      ...(next.ipRoyaltyGameIds ?? []).filter((id) => id !== released.id),
+    ];
+    (released as { ipRoyaltyRate?: number }).ipRoyaltyRate = (
+      scored as { ipRoyaltyRate?: number }
+    ).ipRoyaltyRate;
+    (released as { ipLicensed?: boolean }).ipLicensed = true;
+  }
   
   // Publisher deal settlement (advance already paid on accept)
   if (next.activePublisherDealId && next.publishingBoard) {
@@ -1684,6 +1755,12 @@ interface Actions {
     retailPrice: number,
   ) => string | null;
   runRecruitCampaign: (tier: "local" | "headhunter") => string | null;
+  licenseFranchise: (licenseId: string) => string | null;
+  runStreamerCampaign: (tierId: string) => string | null;
+  hostStudioConvention: (
+    ticketPrice: number,
+    focus: ConventionFocus,
+  ) => string | null;
   launchAccessory: (
     categoryId: AccessoryCategoryId,
     name: string,
@@ -2634,7 +2711,13 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     }
 
     next = tryFireEvent(next);
-    next.hype = tycoonHypeDecay(next.hype); // v2.1 Module 4: MAX(1, INT(hype*0.12))
+    // Netflix Edition — streamer hype decays faster
+    if ((next.streamerHypeWeeksLeft ?? 0) > 0) {
+      next.hype = streamerHypeDecay(next.hype, next.streamerHypeWeeksLeft ?? 0);
+      next.streamerHypeWeeksLeft = Math.max(0, (next.streamerHypeWeeksLeft ?? 0) - 1);
+    } else {
+      next.hype = tycoonHypeDecay(next.hype); // v2.1 Module 4
+    }
 
 
     // Module 17 — IP litigation 2 weeks post-launch
@@ -4172,6 +4255,109 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         ref: `hd-reno-w${state.week}`,
       }),
       unlocks: { ...state.unlocks, hiring: "owned" },
+    });
+    return null;
+  },
+
+  licenseFranchise: (licenseId) => {
+    const state = get();
+    const res = purchaseLicense(licenseId, state.cash);
+    if (!res.ok) return res.error;
+    set({
+      cash: state.cash - res.cost,
+      activeIpLicense: res.state,
+      dirty: true,
+      notifications: pushNote(
+        state,
+        res.state.licenseId === "clear"
+          ? "Franchise license cleared — no royalty obligations."
+          : `IP rights locked: ${res.state.name} (−${formatCash(res.cost)}). Match theme for 1.4× hype & +1.5 score; 15% royalty.`,
+        res.state.licenseId === "clear" ? "info" : "good",
+      ),
+      ledger:
+        res.cost > 0
+          ? applyLedger(state.ledger, {
+              week: state.week,
+              amount: -res.cost,
+              category: "marketing",
+              label: `IP license: ${res.state.name}`,
+              ref: `ip-${res.state.licenseId}-w${state.week}`,
+            })
+          : state.ledger,
+    });
+    return null;
+  },
+
+  runStreamerCampaign: (tierId) => {
+    const state = get();
+    const tier = STREAMER_TIERS.find((t) => t.id === tierId);
+    if (!tier) return "Unknown streamer tier.";
+    if (state.cash < tier.cost) return `Need ${formatCash(tier.cost)}.`;
+    const rng = () => Math.random();
+    const gain = streamerHypeGain(tier, state.fans, rng);
+    set({
+      cash: state.cash - tier.cost,
+      hype: state.hype + gain,
+      streamerHypeWeeksLeft: Math.max(state.streamerHypeWeeksLeft ?? 0, tier.id === "mega" ? 6 : 4),
+      dirty: true,
+      notifications: pushNote(
+        state,
+        `${tier.name}: +${gain} hype (fan-scaled). Fast decay window open.`,
+        "good",
+      ),
+      ledger: applyLedger(state.ledger, {
+        week: state.week,
+        amount: -tier.cost,
+        category: "marketing",
+        label: tier.name,
+        ref: `stream-${tier.id}-w${state.week}`,
+      }),
+    });
+    return null;
+  },
+
+  hostStudioConvention: (ticketPrice, focus) => {
+    const state = get();
+    if (!canHostConvention({ office: state.office, fans: state.fans })) {
+      return "Need Level 3 office or 100,000 fans to host a studio convention.";
+    }
+    if (!Number.isFinite(ticketPrice) || ticketPrice < 5) return "Ticket price must be ≥ $5.";
+    const rng = () => Math.random();
+    const out = conventionOutcome({
+      ticketPrice,
+      focus,
+      fans: state.fans,
+      hype: state.hype,
+      rng,
+    });
+    if (state.cash < out.cost) return `Need ${formatCash(out.cost)} to host.`;
+    const net = out.ticketRevenue - out.cost;
+    set({
+      cash: state.cash + net,
+      fans: state.fans + out.fansGained,
+      hype: state.hype + out.hypeGained,
+      dirty: true,
+      notifications: pushNote(
+        state,
+        `Studio Con: ${out.attendance.toLocaleString()} guests · net ${formatCash(net)} · +${out.fansGained.toLocaleString()} fans · +${out.hypeGained} hype.`,
+        "good",
+      ),
+      ledger: applyLedger(
+        applyLedger(state.ledger, {
+          week: state.week,
+          amount: -out.cost,
+          category: "marketing",
+          label: "Studio convention ops",
+          ref: `con-cost-w${state.week}`,
+        }),
+        {
+          week: state.week,
+          amount: out.ticketRevenue,
+          category: "sales",
+          label: "Convention tickets",
+          ref: `con-tix-w${state.week}`,
+        },
+      ),
     });
     return null;
   },

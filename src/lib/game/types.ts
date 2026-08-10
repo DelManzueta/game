@@ -643,6 +643,12 @@ export interface GameState {
   officeEnteredMonth?: number;
   /** 2.0 base Tech Park · 2.5 High-Density Bay (Module 23.5) */
   officeSubTier?: number;
+  /** Netflix Edition active franchise license */
+  activeIpLicense?: import("./netflixEdition").ActiveIpState;
+  /** Weeks of accelerated streamer hype decay left */
+  streamerHypeWeeksLeft?: number;
+  /** Released titles carrying IP royalty */
+  ipRoyaltyGameIds?: string[];
   /** Known combo labels after post-mortem */
   knownCombos?: Record<string, import("./tycoonRiskAnalytics").MatchLabel>;
   playerConsoles?: import("./tycoonLateMarket").PlayerConsole[];
