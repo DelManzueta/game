@@ -1,0 +1,1150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>NEONCORE Engine // OS Suite v3.0.0</title>
+<style>
+:root {
+  --bg-main: #06060a;
+  --panel-bg: rgba(13, 13, 23, 0.92);
+  --box-bg: #11111f;
+  --box-bg-active: #18182c;
+  --console-bg: #030305;
+  --text-main: #f1f1f7;
+  --text-muted: #5f5f7a;
+  --neon-blue: #00e5ff;
+  --neon-purple: #9d00ff;
+  --neon-green: #39ff14;
+  --neon-pink: #ff007f;
+  --neon-amber: #ffaa00;
+  --border-standard: #1f1f33;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background:
+    radial-gradient(1200px 600px at 10% -10%, rgba(157,0,255,0.18), transparent 50%),
+    radial-gradient(900px 500px at 100% 0%, rgba(0,229,255,0.12), transparent 45%),
+    linear-gradient(135deg, #0f0b20 0%, var(--bg-main) 50%, #050811 100%);
+  color: var(--text-main);
+  margin: 0;
+  padding: 16px;
+  overflow-x: hidden;
+}
+h1,h2,h3,h4 { margin-top: 0; text-transform: uppercase; letter-spacing: 1.5px; font-weight: 800; }
+h1 {
+  font-size: clamp(0.95rem, 2.5vw, 1.35rem);
+  color: #fff;
+  text-shadow: 0 0 20px rgba(0,229,255,0.3);
+  border-bottom: 1px solid var(--border-standard);
+  padding-bottom: 12px;
+  margin-bottom: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.master-grid {
+  display: grid;
+  grid-template-columns: minmax(300px, 400px) 1fr;
+  gap: 16px;
+  max-width: 1600px;
+  margin: 0 auto;
+  min-height: calc(100vh - 100px);
+}
+@media (max-width: 960px) {
+  .master-grid { grid-template-columns: 1fr; }
+}
+.glass-card {
+  background: var(--panel-bg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  padding: 18px;
+  border-radius: 12px;
+  border: 1px solid var(--border-standard);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.7);
+  min-height: 0;
+}
+.workspace-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  background: rgba(0,0,0,0.4);
+  padding: 4px;
+  border-radius: 8px;
+  border: 1px solid var(--border-standard);
+  margin-bottom: 16px;
+}
+.tab-btn {
+  flex: 1 1 auto;
+  min-width: 5.5rem;
+  background: transparent;
+  color: var(--text-muted);
+  border: none;
+  padding: 10px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  transition: 0.15s ease;
+}
+.tab-btn.active {
+  background: var(--box-bg-active);
+  color: var(--neon-blue);
+  border: 1px solid rgba(0,229,255,0.25);
+  text-shadow: 0 0 8px rgba(0,229,255,0.5);
+}
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+.grid-hud {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.hud-box {
+  background: var(--box-bg);
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-standard);
+  border-left: 4px solid var(--neon-purple);
+}
+.hud-box.blue { border-left-color: var(--neon-blue); }
+.hud-box.green { border-left-color: var(--neon-green); }
+.hud-box.pink { border-left-color: var(--neon-pink); }
+.hud-box.amber { border-left-color: var(--neon-amber); }
+.hud-label {
+  font-size: 0.62rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.hud-val {
+  font-size: 1.15rem;
+  font-weight: 900;
+  font-family: ui-monospace, Consolas, monospace;
+  color: #fff;
+}
+.exp-block {
+  background: var(--box-bg);
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-standard);
+  margin-bottom: 14px;
+}
+.exp-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  margin-bottom: 3px;
+}
+.prog-bar-bg {
+  background: #0d0d14;
+  height: 6px;
+  border-radius: 3px;
+  width: 100%;
+  overflow: hidden;
+  margin: 0 0 10px;
+  border: 1px solid #1a1a26;
+}
+.prog-bar-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--neon-purple), var(--neon-blue));
+  transition: width 0.12s linear;
+}
+.prog-bar-fill.green { background: linear-gradient(90deg, #0a6, var(--neon-green)); }
+.prog-bar-fill.pink { background: linear-gradient(90deg, #a06, var(--neon-pink)); }
+.prog-bar-fill.amber { background: linear-gradient(90deg, #a60, var(--neon-amber)); }
+label {
+  display: block;
+  margin: 12px 0 5px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+select, input[type="text"], input[type="range"], input[type="number"] {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--box-bg);
+  color: #fff;
+  border: 1px solid var(--border-standard);
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+select:focus, input:focus {
+  outline: none;
+  border-color: var(--neon-blue);
+}
+.slider-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+.slider-row span {
+  font-family: monospace;
+  font-size: 0.8rem;
+  color: var(--neon-blue);
+  min-width: 2.5rem;
+  text-align: right;
+}
+button.matrix-btn {
+  width: 100%;
+  padding: 12px;
+  margin-top: 10px;
+  background: linear-gradient(135deg, #0051ff, #00c6ff);
+  color: #fff;
+  font-weight: 800;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0,198,255,0.28);
+  transition: 0.15s ease;
+}
+button.matrix-btn:hover { filter: brightness(1.15); transform: translateY(-1px); }
+button.matrix-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; filter: none; }
+button.matrix-btn.purple { background: linear-gradient(135deg, var(--neon-purple), #5a00cc); }
+button.matrix-btn.green { background: linear-gradient(135deg, #0a8f2a, #39ff14); color: #041; }
+button.matrix-btn.ghost {
+  background: transparent;
+  border: 1px solid var(--border-standard);
+  color: var(--text-muted);
+  box-shadow: none;
+}
+.monitor-panel {
+  background: #000;
+  border: 1px solid var(--border-standard);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 12px;
+}
+.prog-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+  font-size: 0.78rem;
+}
+.spec-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.spec-card {
+  background: var(--box-bg);
+  border: 1px solid var(--border-standard);
+  border-radius: 6px;
+  padding: 12px 8px;
+  cursor: pointer;
+  text-align: center;
+  transition: 0.15s ease;
+  user-select: none;
+}
+.spec-card:hover { border-color: var(--neon-purple); }
+.spec-card.selected {
+  background: var(--box-bg-active);
+  border-color: var(--neon-blue);
+  box-shadow: 0 0 12px rgba(0,229,255,0.2);
+}
+.spec-card h4 { font-size: 0.72rem; margin: 0 0 6px; color: #fff; }
+.spec-card p { margin: 0; font-size: 0.65rem; color: var(--text-muted); line-height: 1.35; }
+.spec-card .live { margin-top: 6px; font-size: 0.68rem; color: var(--neon-blue); font-family: monospace; }
+.hw-live {
+  background: var(--box-bg);
+  border: 1px solid var(--border-standard);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+  font-family: monospace;
+  font-size: 0.78rem;
+}
+.hw-live strong { color: var(--neon-blue); }
+.market-shelf-container {
+  display: grid;
+  gap: 10px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+.shelf-item {
+  background: linear-gradient(90deg, var(--box-bg) 0%, rgba(20,20,35,0.4) 100%);
+  border: 1px solid var(--border-standard);
+  border-radius: 8px;
+  padding: 12px;
+  display: grid;
+  grid-template-columns: 2fr 0.7fr 1fr 0.8fr;
+  align-items: center;
+  gap: 10px;
+}
+@media (max-width: 640px) {
+  .shelf-item { grid-template-columns: 1fr 1fr; }
+}
+.ide-stream {
+  height: 220px;
+  overflow-y: auto;
+  background: var(--console-bg);
+  border: 1px solid var(--border-standard);
+  border-radius: 8px;
+  padding: 12px;
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 0.75rem;
+  line-height: 1.55;
+  margin-top: 12px;
+}
+.stream-row { margin-bottom: 4px; word-break: break-word; }
+.c-ok { color: var(--neon-green); }
+.c-err { color: var(--neon-pink); }
+.c-info { color: var(--neon-blue); }
+.c-warn { color: var(--neon-amber); }
+.chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chip {
+  font-size: 0.65rem;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-standard);
+  color: var(--text-muted);
+  font-family: monospace;
+}
+.chip.on { border-color: rgba(0,229,255,0.4); color: var(--neon-blue); }
+.footer-bar {
+  max-width: 1600px;
+  margin: 12px auto 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+.cheat-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 8px; }
+</style>
+</head>
+<body>
+  <h1>
+    <span>NEONCORE OS // ARCHITECTURE INTERFACE</span>
+    <span id="ui-clock" style="font-family:monospace;color:var(--text-muted);font-size:0.95rem;">CYCLE: Y1 M1 W1</span>
+  </h1>
+
+  <div class="master-grid">
+    <!-- LEFT: telemetry -->
+    <div class="glass-card">
+      <h3 style="font-size:0.9rem;color:var(--neon-blue);">Financial Telemetry</h3>
+      <div class="grid-hud">
+        <div class="hud-box green"><div class="hud-label">Liquid Capital</div><div class="hud-val" id="hud-cash">$75,000</div></div>
+        <div class="hud-box"><div class="hud-label">Research Units</div><div class="hud-val" id="hud-rp">40</div></div>
+        <div class="hud-box blue"><div class="hud-label">User Database</div><div class="hud-val" id="hud-fans">0</div></div>
+        <div class="hud-box pink"><div class="hud-label">Hype Matrix</div><div class="hud-val" id="hud-hype">0</div></div>
+      </div>
+
+      <h3 style="font-size:0.85rem;color:var(--neon-purple);">Studio Expertise</h3>
+      <div class="exp-block">
+        <div class="exp-row"><span>Action Frameworks</span><span id="lbl-g-action">Lvl 1 (0/5)</span></div>
+        <div class="prog-bar-bg"><div class="prog-bar-fill" id="bar-g-action"></div></div>
+        <div class="exp-row"><span>RPG Narrative Engines</span><span id="lbl-g-rpg">Lvl 1 (0/5)</span></div>
+        <div class="prog-bar-bg"><div class="prog-bar-fill pink" id="bar-g-rpg"></div></div>
+        <div class="exp-row"><span>Simulation State Machines</span><span id="lbl-g-simulation">Lvl 1 (0/5)</span></div>
+        <div class="prog-bar-bg"><div class="prog-bar-fill green" id="bar-g-simulation"></div></div>
+        <div class="exp-row"><span>Casual Loops</span><span id="lbl-g-casual">Lvl 1 (0/5)</span></div>
+        <div class="prog-bar-bg"><div class="prog-bar-fill amber" id="bar-g-casual"></div></div>
+      </div>
+
+      <h3 style="font-size:0.85rem;">Active Engine</h3>
+      <div class="hw-live" id="engine-status">Default Text Core · T×1.00 D×1.00 · T-Engine OFF</div>
+
+      <h3 style="font-size:0.85rem;">System Overrides</h3>
+      <div class="cheat-row">
+        <input type="text" id="cheat-entry" placeholder="/money_boost · /rp_max · /instafans · /bug_wipe" />
+        <button class="matrix-btn ghost" style="margin:0;width:auto;padding:10px 14px;" onclick="executeSystemOverride()">Inject</button>
+      </div>
+      <div class="chip-row" id="license-chips"></div>
+
+      <div class="ide-stream" id="ide-console-target"></div>
+    </div>
+
+    <!-- RIGHT: workspaces -->
+    <div class="glass-card">
+      <div class="workspace-tabs" role="tablist">
+        <button class="tab-btn active" data-tab="ws-sandbox" onclick="shiftWorkspace('ws-sandbox', this)">Project Sandbox</button>
+        <button class="tab-btn" data-tab="ws-engine" onclick="shiftWorkspace('ws-engine', this)">Engine Lab</button>
+        <button class="tab-btn" data-tab="ws-campaign" onclick="shiftWorkspace('ws-campaign', this)">Campaigns</button>
+        <button class="tab-btn" data-tab="ws-hardware" onclick="shiftWorkspace('ws-hardware', this)">Hardware Specs</button>
+        <button class="tab-btn" data-tab="ws-store" onclick="shiftWorkspace('ws-store', this)">Live Storefront</button>
+        <button class="tab-btn" data-tab="ws-save" onclick="shiftWorkspace('ws-save', this)">Save JSON</button>
+      </div>
+
+      <!-- SANDBOX -->
+      <div id="ws-sandbox" class="tab-content active">
+        <div id="pipeline-config-form">
+          <h3 style="font-size:0.95rem;color:var(--neon-blue);">Compiler Pipeline</h3>
+          <label>Project Codename</label>
+          <input type="text" id="dev-title" value="Project Alpha" maxlength="48" />
+          <label>Topic Domain</label>
+          <select id="dev-topic">
+            <option>Sci-Fi</option><option>Fantasy</option><option>City</option>
+            <option>Casual</option><option>Space</option><option>Medieval</option>
+          </select>
+          <label>Genre Architecture</label>
+          <select id="dev-genre">
+            <option>Action</option><option>RPG</option><option>Simulation</option><option>Casual</option>
+          </select>
+          <label>Target Platform SDK</label>
+          <select id="dev-platform"></select>
+
+          <label>Phase 1 — Engine / Systems weight</label>
+          <div class="slider-row">
+            <input type="range" id="slider-p1" min="0" max="100" value="70" oninput="document.getElementById('v-p1').textContent=this.value" />
+            <span id="v-p1">70</span>
+          </div>
+          <label>Phase 2 — Design / Content weight</label>
+          <div class="slider-row">
+            <input type="range" id="slider-p2" min="0" max="100" value="50" oninput="document.getElementById('v-p2').textContent=this.value" />
+            <span id="v-p2">50</span>
+          </div>
+          <label>Phase 3 — Polish weight</label>
+          <div class="slider-row">
+            <input type="range" id="slider-p3" min="0" max="100" value="40" oninput="document.getElementById('v-p3').textContent=this.value" />
+            <span id="v-p3">40</span>
+          </div>
+
+          <button class="matrix-btn" id="btn-compile" onclick="beginRealtimeCompilationLoop()">Authorize Compiler Execution</button>
+          <button class="matrix-btn ghost" onclick="advanceInternalClockTimeline(1)">Idle Week Tick</button>
+        </div>
+
+        <div id="production-monitor" class="monitor-panel" style="display:none;">
+          <div class="prog-row">
+            <strong id="lbl-active-title" style="color:#fff;">—</strong>
+            <span id="lbl-phase-name" style="color:var(--neon-amber);">Phase 1 / 3</span>
+          </div>
+          <div class="prog-bar-bg" style="height:10px;margin-bottom:14px;">
+            <div class="prog-bar-fill" id="bar-dev-cycle" style="background:linear-gradient(90deg,var(--neon-blue),var(--neon-green));"></div>
+          </div>
+          <div class="grid-hud">
+            <div class="hud-box blue"><div class="hud-label">Compiler Tech</div><div class="hud-val" id="lbl-val-tech">0</div></div>
+            <div class="hud-box green"><div class="hud-label">Design Structure</div><div class="hud-val" id="lbl-val-design">0</div></div>
+            <div class="hud-box pink"><div class="hud-label">Runtime Bugs</div><div class="hud-val" id="lbl-val-bugs">0</div></div>
+            <div class="hud-box amber"><div class="hud-label">Stability Pts</div><div class="hud-val" id="lbl-val-stab">0</div></div>
+          </div>
+          <p style="font-size:0.72rem;color:var(--text-muted);margin:0;">Realtime phase progression — points synthesize each frame; T-Engine halves bug ingress in phase 2.</p>
+        </div>
+      </div>
+
+      <!-- ENGINE LAB -->
+      <div id="ws-engine" class="tab-content">
+        <h3 style="font-size:0.95rem;color:var(--neon-purple);">Framework Component Cards</h3>
+        <p style="font-size:0.75rem;color:var(--text-muted);">Select modules — costs recompute live before compile.</p>
+        <div class="spec-grid" id="engine-spec-grid"></div>
+        <div class="hw-live" id="engine-live-cost">Select components to preview build cost.</div>
+        <button class="matrix-btn purple" onclick="compileFrameworkAsset()">Compile System Spec Framework</button>
+      </div>
+
+      <!-- CAMPAIGNS -->
+      <div id="ws-campaign" class="tab-content">
+        <h3 style="font-size:0.95rem;color:var(--neon-pink);">Broadcast Campaign Vectors</h3>
+        <div class="spec-grid">
+          <div class="spec-card" onclick="launchMediaCampaign(2000,5,12)">
+            <h4>Dev Blog Sync</h4>
+            <p>Cost $2,000<br>Hype 5–12</p>
+          </div>
+          <div class="spec-card" onclick="launchMediaCampaign(15000,20,45)">
+            <h4>Magazine Spread</h4>
+            <p>Cost $15,000<br>Hype 20–45</p>
+          </div>
+          <div class="spec-card" onclick="launchMediaCampaign(65000,60,130)">
+            <h4>G3 Expo Booth</h4>
+            <p>Cost $65,000<br>Hype 60–130</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- HARDWARE -->
+      <div id="ws-hardware" class="tab-content">
+        <h3 style="font-size:0.95rem;color:var(--neon-amber);">Hardware Spec Matrix</h3>
+        <p style="font-size:0.75rem;color:var(--text-muted);">Pick media + GPU. Unit mfg cost & share mod update live.</p>
+        <label>Media Drive</label>
+        <div class="spec-grid" id="media-grid"></div>
+        <label>Graphics Processor</label>
+        <div class="spec-grid" id="gpu-grid"></div>
+        <div class="hw-live" id="hw-live-metrics"></div>
+        <label>Retail Price ($199–$599)</label>
+        <input type="range" id="hw-price" min="199" max="599" value="299" oninput="recalcHardwareLive()" />
+        <div class="hw-live" id="hw-price-label">Retail $299</div>
+        <button class="matrix-btn" onclick="fundConsoleBuild()">Fund Console Prototype R&D</button>
+        <h4 style="margin-top:18px;font-size:0.8rem;">Platform SDK Licenses</h4>
+        <div id="hardware-licensing-matrix" class="spec-grid"></div>
+      </div>
+
+      <!-- STOREFRONT -->
+      <div id="ws-store" class="tab-content">
+        <h3 style="font-size:0.95rem;color:var(--neon-green);">Live Storefront Shelves</h3>
+        <p style="font-size:0.75rem;color:var(--text-muted);">Titles earn weekly for 12 market weeks — not a single cash dump.</p>
+        <div class="market-shelf-container" id="shelf-injection-target"></div>
+      </div>
+
+      <!-- SAVE -->
+      <div id="ws-save" class="tab-content">
+        <h3 style="font-size:0.95rem;">JSON Save / Load</h3>
+        <button class="matrix-btn" onclick="downloadSave()">Download Save JSON</button>
+        <button class="matrix-btn ghost" onclick="copySave()">Copy Save JSON</button>
+        <label>Import JSON</label>
+        <textarea id="save-paste" rows="8" style="width:100%;background:var(--box-bg);color:#fff;border:1px solid var(--border-standard);border-radius:6px;padding:10px;font-family:monospace;font-size:0.72rem;"></textarea>
+        <button class="matrix-btn green" onclick="importSavePaste()">Load Pasted JSON</button>
+        <input type="file" accept="application/json,.json" style="margin-top:10px;color:var(--text-muted);font-size:0.75rem;" onchange="importSaveFile(event)" />
+      </div>
+    </div>
+  </div>
+
+  <div class="footer-bar">
+    <span>NEONCORE OS Suite v3.0.0 · TYCOON spine math · trailing retail shelves · hardware matrix</span>
+    <span id="footer-engine">engine ready</span>
+  </div>
+
+<script>
+(function () {
+  'use strict';
+
+  const HIST_FLOOR = 10;
+  const RENT = 8000;
+  const UNIT_PRICE = 9.99;
+  const TAX = 0.15;
+
+  const MEDIA = {
+    Cartridge_Slot: { name: 'Cartridge Slot', cost: 100000, rp: 40, unit: 5, share: 0.8 },
+    High_Speed_CD: { name: 'High-Speed CD', cost: 750000, rp: 150, unit: 1.5, share: 1.2 },
+    Blue_Laser_Disc: { name: 'Blue Laser Disc', cost: 4000000, rp: 600, unit: 12, share: 2.0 }
+  };
+  const GPUS = {
+    '8_Bit_Blitter': { name: '8-Bit Blitter', cost: 50000, rp: 20, unit: 3.5, share: 0.5 },
+    '16_Bit_Copper': { name: '16-Bit Copper', cost: 300000, rp: 90, unit: 8, share: 1.0 },
+    '3D_Geometry_Pipe': { name: '3D Geometry Pipe', cost: 6500000, rp: 900, unit: 45, share: 2.4 }
+  };
+
+  const ENGINE_PARTS = [
+    { id: 'card-v2', name: '2D Engine V2', cash: 15000, rp: 20, tech: 0.15, design: 0.05, is3d: false },
+    { id: 'card-3d', name: '3D Graphics V1', cash: 40000, rp: 50, tech: 0.35, design: 0.10, is3d: true },
+    { id: 'card-stereo', name: 'Stereo Audio', cash: 8000, rp: 15, tech: 0.05, design: 0.10, is3d: false },
+    { id: 'card-phys', name: 'Linear Physics', cash: 20000, rp: 30, tech: 0.25, design: 0.0, is3d: false },
+    { id: 'card-tengine', name: 'T-Engine Core', cash: 500000, rp: 150, tech: 0.0, design: 0.0, is3d: false, tEngine: true }
+  ];
+
+  const platforms_db = {
+    PC: { name: 'PC Mainframe', cost: 0, share: 1.0, audience: 'Everyone', releaseYear: 1 },
+    Super_TES: { name: 'Super TES', cost: 120000, share: 1.5, audience: 'Everyone', releaseYear: 3 },
+    Vena_Gen: { name: 'Vena Genesis', cost: 100000, share: 1.3, audience: 'Young', releaseYear: 3 },
+    MBox_360: { name: 'mBox 360', cost: 250000, share: 2.1, audience: 'Mature', releaseYear: 7 },
+    Play_3: { name: 'Playsystem 3', cost: 300000, share: 2.2, audience: 'Mature', releaseYear: 7 },
+    Pip_Phone: { name: 'Pip-Phone', cost: 40000, share: 2.5, audience: 'Casual', releaseYear: 8 }
+  };
+
+  let state = {
+    year: 1, month: 1, week: 1,
+    cash: 75000, fans: 0, rp: 40,
+    avgPoints: 35, hype: 0,
+    genreExp: { Action: 0, RPG: 0, Simulation: 0, Casual: 0 },
+    genreLvl: { Action: 1, RPG: 1, Simulation: 1, Casual: 1 },
+    activeEngine: { name: 'Default Text Core', tech_mult: 1, design_mult: 1, has_t_engine: false, uses_3d: false },
+    ownedLicenses: ['PC'],
+    shippedProducts: [],
+    compiling: false,
+    selectedMedia: 'High_Speed_CD',
+    selectedGpu: '16_Bit_Copper',
+    consolePrototype: null,
+    history: []
+  };
+
+  // ── UI helpers ────────────────────────────────────────────
+  window.shiftWorkspace = function (id, btn) {
+    document.querySelectorAll('.tab-content').forEach(function (el) {
+      el.classList.remove('active');
+      el.style.display = 'none';
+    });
+    document.querySelectorAll('.tab-btn').forEach(function (el) { el.classList.remove('active'); });
+    var panel = document.getElementById(id);
+    if (panel) {
+      panel.classList.add('active');
+      panel.style.display = 'block';
+    }
+    if (btn) btn.classList.add('active');
+  };
+
+  function streamConsoleMsg(text, cls) {
+    cls = cls || 'c-info';
+    var el = document.getElementById('ide-console-target');
+    var row = document.createElement('div');
+    row.className = 'stream-row ' + cls;
+    row.textContent = '[Y' + state.year + ' M' + state.month + ' W' + state.week + '] ' + text;
+    el.appendChild(row);
+    el.scrollTop = el.scrollHeight;
+  }
+
+  function genreLevel(exp) { return 1 + Math.floor(Math.max(0, exp) / 5); }
+  function genreMult(g) { return 1 + (state.genreLvl[g] || 1) * 0.05; }
+
+  function comboMult(topic, genre) {
+    if ((genre === 'Action' && (topic === 'Sci-Fi' || topic === 'Space')) ||
+        (genre === 'Simulation' && topic === 'City') ||
+        (genre === 'RPG' && (topic === 'Fantasy' || topic === 'Medieval')) ||
+        (genre === 'Casual' && topic === 'Casual')) return 1.3;
+    if (genre === 'Action' && topic === 'Casual') return 0.7;
+    return 0.95;
+  }
+
+  function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
+
+  function syncGlobalTelemetryHUD() {
+    document.getElementById('ui-clock').textContent = 'CYCLE: Y' + state.year + ' M' + state.month + ' W' + state.week;
+    document.getElementById('hud-cash').textContent = '$' + Math.round(state.cash).toLocaleString();
+    document.getElementById('hud-rp').textContent = String(state.rp);
+    document.getElementById('hud-fans').textContent = Math.floor(state.fans).toLocaleString();
+    document.getElementById('hud-hype').textContent = String(state.hype);
+
+    ['Action', 'RPG', 'Simulation', 'Casual'].forEach(function (g) {
+      var key = g.toLowerCase();
+      var exp = state.genreExp[g] || 0;
+      var lvl = state.genreLvl[g] || 1;
+      var within = exp % 5;
+      var lbl = document.getElementById('lbl-g-' + key);
+      var bar = document.getElementById('bar-g-' + key);
+      if (lbl) lbl.textContent = 'Lvl ' + lvl + ' (' + within + '/5)';
+      if (bar) bar.style.width = ((within / 5) * 100) + '%';
+    });
+
+    var eng = state.activeEngine;
+    document.getElementById('engine-status').textContent =
+      eng.name + ' · T×' + eng.tech_mult.toFixed(2) + ' D×' + eng.design_mult.toFixed(2) +
+      ' · T-Engine ' + (eng.has_t_engine ? 'ON' : 'OFF') +
+      (eng.uses_3d ? ' · 3D' : '');
+    document.getElementById('footer-engine').textContent =
+      'licenses ' + state.ownedLicenses.length + ' · shelf ' + state.shippedProducts.length +
+      ' · hist ' + state.avgPoints.toFixed(1);
+
+    var chips = document.getElementById('license-chips');
+    chips.innerHTML = '';
+    state.ownedLicenses.forEach(function (k) {
+      var c = document.createElement('span');
+      c.className = 'chip on';
+      c.textContent = k;
+      chips.appendChild(c);
+    });
+
+    renderHardwareLicensingMatrix();
+    syncPlatformOptionsDropdowns();
+    renderLiveStorefrontShelves();
+    recalcEngineLive();
+    recalcHardwareLive();
+  }
+
+  function advanceInternalClockTimeline(weeksCount) {
+    for (var i = 0; i < weeksCount; i++) {
+      state.week++;
+      if (state.hype > 0) {
+        state.hype = Math.max(0, state.hype - Math.max(1, Math.floor(state.hype * 0.12)));
+      }
+      if (state.consolePrototype && state.consolePrototype.status === 'shipping') {
+        var c = state.consolePrototype;
+        var units = Math.floor(200 * c.share * (0.8 + Math.random() * 0.4));
+        var margin = c.retail - c.unitCost;
+        state.cash += units * margin;
+        c.sold += units;
+      }
+      if (state.week > 4) {
+        state.week = 1;
+        state.month++;
+        state.cash -= RENT;
+        streamConsoleMsg('Operational overhead −$' + RENT.toLocaleString() + ' rent.', 'c-warn');
+        processMarketShelfDecayCycles();
+      }
+      if (state.month > 12) {
+        state.month = 1;
+        state.year++;
+        streamConsoleMsg('Year matrix ' + state.year + ' — competitor pressure up.', 'c-ok');
+      }
+      if (state.cash < 0) {
+        streamConsoleMsg('[GAME OVER] Capital depleted. Load a save or inject /money_boost.', 'c-err');
+      }
+    }
+    state.cash = Math.round(state.cash);
+    state.fans = Math.floor(Math.max(0, state.fans));
+    syncGlobalTelemetryHUD();
+  }
+
+  // ── Engine lab ────────────────────────────────────────────
+  function buildEngineCards() {
+    var grid = document.getElementById('engine-spec-grid');
+    grid.innerHTML = '';
+    ENGINE_PARTS.forEach(function (p) {
+      var card = document.createElement('div');
+      card.className = 'spec-card';
+      card.id = p.id;
+      card.innerHTML = '<h4>' + p.name + '</h4><p>$' + p.cash.toLocaleString() + '<br>' + p.rp + ' RP</p><div class="live"></div>';
+      card.onclick = function () {
+        card.classList.toggle('selected');
+        recalcEngineLive();
+      };
+      grid.appendChild(card);
+    });
+  }
+
+  function selectedEngineParts() {
+    return ENGINE_PARTS.filter(function (p) {
+      var el = document.getElementById(p.id);
+      return el && el.classList.contains('selected');
+    });
+  }
+
+  function recalcEngineLive() {
+    var parts = selectedEngineParts();
+    var cash = 0, rp = 0, t = 1, d = 1, te = false, is3d = false;
+    parts.forEach(function (p) {
+      cash += p.cash; rp += p.rp; t += p.tech; d += p.design;
+      if (p.tEngine) te = true;
+      if (p.is3d) is3d = true;
+    });
+    var el = document.getElementById('engine-live-cost');
+    if (!el) return;
+    el.innerHTML = parts.length
+      ? 'Build cost <strong>$' + cash.toLocaleString() + '</strong> · <strong>' + rp + ' RP</strong><br>Projected T×' + t.toFixed(2) + ' D×' + d.toFixed(2) +
+        (te ? ' · T-Engine' : '') + (is3d ? ' · 3D path' : '')
+      : 'Select components to preview build cost.';
+  }
+
+  window.compileFrameworkAsset = function () {
+    var parts = selectedEngineParts();
+    if (!parts.length) {
+      streamConsoleMsg('Select at least one component card.', 'c-err');
+      return;
+    }
+    var cash = 0, rp = 0, t = 1, d = 1, te = false, is3d = false;
+    parts.forEach(function (p) {
+      cash += p.cash; rp += p.rp; t += p.tech; d += p.design;
+      if (p.tEngine) te = true;
+      if (p.is3d) is3d = true;
+    });
+    if (state.cash < cash || state.rp < rp) {
+      streamConsoleMsg('Compilation failure: need $' + cash.toLocaleString() + ' and ' + rp + ' RP.', 'c-err');
+      return;
+    }
+    state.cash -= cash;
+    state.rp -= rp;
+    state.activeEngine = {
+      name: 'Custom ' + parts.map(function (p) { return p.name.split(' ')[0]; }).join('+'),
+      tech_mult: Math.round(t * 100) / 100,
+      design_mult: Math.round(d * 100) / 100,
+      has_t_engine: te,
+      uses_3d: is3d
+    };
+    streamConsoleMsg('Framework compiled: ' + state.activeEngine.name + ' T×' + state.activeEngine.tech_mult + ' D×' + state.activeEngine.design_mult, 'c-ok');
+    syncGlobalTelemetryHUD();
+  };
+
+  // ── Marketing ─────────────────────────────────────────────
+  window.launchMediaCampaign = function (cost, minH, maxH) {
+    if (state.cash < cost) {
+      streamConsoleMsg('Broadcast aborted: need $' + cost.toLocaleString() + '.', 'c-err');
+      return;
+    }
+    state.cash -= cost;
+    var h = Math.floor(Math.random() * (maxH - minH + 1)) + minH;
+    state.hype += h;
+    streamConsoleMsg('Media sync +' + h + ' hype (now ' + state.hype + ').', 'c-info');
+    advanceInternalClockTimeline(1);
+  };
+
+  // ── Platforms ─────────────────────────────────────────────
+  function renderHardwareLicensingMatrix() {
+    var m = document.getElementById('hardware-licensing-matrix');
+    if (!m) return;
+    m.innerHTML = '';
+    Object.keys(platforms_db).forEach(function (key) {
+      if (state.ownedLicenses.indexOf(key) >= 0) return;
+      var p = platforms_db[key];
+      var locked = state.year < p.releaseYear;
+      var card = document.createElement('div');
+      card.className = 'spec-card';
+      card.innerHTML = '<h4>' + p.name + '</h4><p>$' + p.cost.toLocaleString() + '<br>' + p.audience +
+        (locked ? '<br>Year ' + p.releaseYear + '+' : '') + '</p>';
+      if (!locked) {
+        card.onclick = function () { acquireHardwareLicense(key, p.cost); };
+      } else {
+        card.style.opacity = '0.45';
+      }
+      m.appendChild(card);
+    });
+  }
+
+  window.acquireHardwareLicense = function (key, cost) {
+    if (state.ownedLicenses.indexOf(key) >= 0) return;
+    if (state.cash < cost) {
+      streamConsoleMsg('SDK purchase failed: insufficient capital.', 'c-err');
+      return;
+    }
+    state.cash -= cost;
+    state.ownedLicenses.push(key);
+    streamConsoleMsg('Licensed ' + platforms_db[key].name + '.', 'c-ok');
+    syncGlobalTelemetryHUD();
+  };
+
+  function syncPlatformOptionsDropdowns() {
+    var select = document.getElementById('dev-platform');
+    if (!select) return;
+    var cache = select.value;
+    select.innerHTML = '';
+    state.ownedLicenses.forEach(function (key) {
+      if (!platforms_db[key]) return;
+      var opt = document.createElement('option');
+      opt.value = key;
+      opt.textContent = platforms_db[key].name + ' (×' + platforms_db[key].share + ')';
+      select.appendChild(opt);
+    });
+    if (state.ownedLicenses.indexOf(cache) >= 0) select.value = cache;
+  }
+
+  // ── Hardware matrix ───────────────────────────────────────
+  function buildHwGrids() {
+    var mg = document.getElementById('media-grid');
+    var gg = document.getElementById('gpu-grid');
+    mg.innerHTML = '';
+    gg.innerHTML = '';
+    Object.keys(MEDIA).forEach(function (id) {
+      var p = MEDIA[id];
+      var c = document.createElement('div');
+      c.className = 'spec-card' + (state.selectedMedia === id ? ' selected' : '');
+      c.innerHTML = '<h4>' + p.name + '</h4><p>unit $' + p.unit.toFixed(2) + '<br>share ×' + p.share + '</p>';
+      c.onclick = function () {
+        state.selectedMedia = id;
+        buildHwGrids();
+        recalcHardwareLive();
+      };
+      mg.appendChild(c);
+    });
+    Object.keys(GPUS).forEach(function (id) {
+      var p = GPUS[id];
+      var c = document.createElement('div');
+      c.className = 'spec-card' + (state.selectedGpu === id ? ' selected' : '');
+      c.innerHTML = '<h4>' + p.name + '</h4><p>unit $' + p.unit.toFixed(2) + '<br>share ×' + p.share + '</p>';
+      c.onclick = function () {
+        state.selectedGpu = id;
+        buildHwGrids();
+        recalcHardwareLive();
+      };
+      gg.appendChild(c);
+    });
+  }
+
+  window.recalcHardwareLive = function () {
+    var m = MEDIA[state.selectedMedia];
+    var g = GPUS[state.selectedGpu];
+    if (!m || !g) return;
+    var unit = m.unit + g.unit + 15;
+    var rdCash = m.cost + g.cost;
+    var rdRp = m.rp + g.rp;
+    var share = m.share * g.share;
+    var price = parseInt(document.getElementById('hw-price').value, 10) || 299;
+    document.getElementById('hw-price-label').textContent =
+      'Retail $' + price + (price < unit ? ' · LOSS LEADER −$' + (unit - price).toFixed(2) + '/box' : ' · margin $' + (price - unit).toFixed(2));
+    document.getElementById('hw-live-metrics').innerHTML =
+      'Unit mfg <strong>$' + unit.toFixed(2) + '</strong> (media+GPU+$15)<br>' +
+      'R&D <strong>$' + rdCash.toLocaleString() + '</strong> · <strong>' + rdRp + ' RP</strong><br>' +
+      'Share mod <strong>×' + share.toFixed(2) + '</strong>';
+  };
+
+  window.fundConsoleBuild = function () {
+    var m = MEDIA[state.selectedMedia];
+    var g = GPUS[state.selectedGpu];
+    var unit = m.unit + g.unit + 15;
+    var rdCash = m.cost + g.cost;
+    var rdRp = m.rp + g.rp;
+    if (state.cash < rdCash || state.rp < rdRp) {
+      streamConsoleMsg('Console R&D denied: need $' + rdCash.toLocaleString() + ' / ' + rdRp + ' RP.', 'c-err');
+      return;
+    }
+    state.cash -= rdCash;
+    state.rp -= rdRp;
+    var price = parseInt(document.getElementById('hw-price').value, 10) || 299;
+    state.consolePrototype = {
+      name: m.name + ' / ' + g.name,
+      unitCost: unit,
+      retail: price,
+      share: 0.2 * m.share * g.share,
+      status: 'shipping',
+      sold: 0
+    };
+    streamConsoleMsg('Console prototype funded: ' + state.consolePrototype.name + ' unit $' + unit.toFixed(2), 'c-ok');
+    syncGlobalTelemetryHUD();
+  };
+
+  // ── Production loop ───────────────────────────────────────
+  window.beginRealtimeCompilationLoop = function () {
+    if (state.compiling) return;
+    if (state.cash < 0) {
+      streamConsoleMsg('Cannot compile while insolvent.', 'c-err');
+      return;
+    }
+    var title = document.getElementById('dev-title').value.trim() || 'Untitled Build';
+    var topic = document.getElementById('dev-topic').value;
+    var genre = document.getElementById('dev-genre').value;
+    var platKey = document.getElementById('dev-platform').value;
+    var plat = platforms_db[platKey];
+    if (!plat) {
+      streamConsoleMsg('No platform SDK selected.', 'c-err');
+      return;
+    }
+
+    document.getElementById('pipeline-config-form').style.display = 'none';
+    var monitor = document.getElementById('production-monitor');
+    monitor.style.display = 'block';
+    document.getElementById('lbl-active-title').textContent = title;
+    document.getElementById('btn-compile').disabled = true;
+    state.compiling = true;
+
+    var step = 0, tech = 0, design = 0, bugs = 0, stab = 0;
+    var combo = comboMult(topic, genre);
+    var expM = genreMult(genre);
+    var s1 = (parseInt(document.getElementById('slider-p1').value, 10) || 50) / 50;
+    var s2 = (parseInt(document.getElementById('slider-p2').value, 10) || 50) / 50;
+    var s3 = (parseInt(document.getElementById('slider-p3').value, 10) || 50) / 50;
+
+    streamConsoleMsg('Compiler authorized: "' + title + '" [' + topic + '/' + genre + '] @ ' + plat.name, 'c-info');
+
+    var loop = setInterval(function () {
+      step += 2;
+      document.getElementById('bar-dev-cycle').style.width = Math.min(100, step) + '%';
+      var phase = step < 34 ? 1 : step < 68 ? 2 : 3;
+      document.getElementById('lbl-phase-name').textContent = 'Phase ' + phase + ' / 3';
+
+      var weight = phase === 1 ? s1 : phase === 2 ? s2 : s3;
+      var base = 1.2 + Math.random() * 3.2;
+      tech += base * state.activeEngine.tech_mult * combo * expM * (0.55 + weight * 0.35);
+      design += base * state.activeEngine.design_mult * combo * expM * (0.45 + weight * 0.4);
+
+      // Phase 2 T-Engine stability / bug half
+      var bugChance = 0.22;
+      if (phase === 2 && state.activeEngine.has_t_engine) {
+        stab += base * 0.25;
+        bugChance = 0.12;
+      }
+      if (Math.random() < bugChance) {
+        bugs += state.activeEngine.has_t_engine && phase === 2 ? 1 : (Math.random() > 0.5 ? 2 : 1);
+      }
+
+      document.getElementById('lbl-val-tech').textContent = String(Math.round(tech));
+      document.getElementById('lbl-val-design').textContent = String(Math.round(design));
+      document.getElementById('lbl-val-bugs').textContent = String(Math.round(bugs));
+      document.getElementById('lbl-val-stab').textContent = String(Math.round(stab));
+
+      if (step >= 100) {
+        clearInterval(loop);
+        state.compiling = false;
+        document.getElementById('btn-compile').disabled = false;
+        monitor.style.display = 'none';
+        document.getElementById('pipeline-config-form').style.display = 'block';
+        document.getElementById('bar-dev-cycle').style.width = '0%';
+        finalizeShippedProduct(title, topic, genre, plat, tech, design, bugs, stab);
+      }
+    }, 80);
+  };
+
+  function finalizeShippedProduct(title, topic, genre, plat, tech, design, bugs, stab) {
+    if (state.activeEngine.has_t_engine) bugs = Math.max(0, Math.floor(bugs / 2));
+    var aggregate = tech + design + stab * 0.5;
+    var hist = Math.max(HIST_FLOOR, state.avgPoints);
+    var raw = (aggregate / hist) * 7.0;
+    raw *= clamp(1 - bugs / 80, 0.7, 1);
+    if (state.activeEngine.has_t_engine && state.activeEngine.uses_3d) raw += 0.5;
+    var review = clamp(Math.round(raw * 10) / 10, 1, 10);
+
+    state.avgPoints = Math.max(HIST_FLOOR, hist * 0.7 + aggregate * 0.3);
+
+    var hypeM = 1 + state.hype / 100;
+    var units = Math.round(aggregate * Math.pow(review, 2.3) * 15 * hypeM * plat.share);
+    units = Math.max(50, units - bugs * 60);
+
+    // Genre EXP after review, before ledger
+    state.genreExp[genre] = (state.genreExp[genre] || 0) + 1;
+    var newLvl = genreLevel(state.genreExp[genre]);
+    if (newLvl > state.genreLvl[genre]) {
+      state.genreLvl[genre] = newLvl;
+      streamConsoleMsg(genre + ' expertise LEVEL UP → ' + newLvl, 'c-ok');
+    } else {
+      state.genreLvl[genre] = newLvl;
+    }
+
+    var weekly = Math.max(5, Math.round(units / 12));
+    state.shippedProducts.push({
+      title: title,
+      info: topic + '/' + genre,
+      platform: plat.name,
+      score: review,
+      remainingWeeks: 12,
+      totalSold: 0,
+      baselineWeeklyRate: weekly,
+      gross: 0,
+      net: 0,
+      devCost: 5000,
+      bugs: bugs
+    });
+
+    state.history.push({
+      title: title, topic: topic, genre: genre, score: review,
+      unitsTarget: units, week: state.week, year: state.year, month: state.month
+    });
+
+    state.rp += Math.floor(Math.random() * 8) + 8;
+    state.hype = 0;
+    streamConsoleMsg('Shipped "' + title + '" · review ' + review + '/10 · shelf load ' + weekly + '/wk · bugs ' + bugs, 'c-ok');
+    advanceInternalClockTimeline(1);
+    shiftWorkspace('ws-store', document.querySelector('[data-tab="ws-store"]'));
+  }
+
+  function processMarketShelfDecayCycles() {
+    state.shippedProducts.forEach(function (p) {
+      if (p.remainingWeeks <= 0) return;
+      var weeklyVolume = Math.round(
+        p.baselineWeeklyRate * (0.55 + p.score / 20) * (p.remainingWeeks / 12)
+      );
+      weeklyVolume = Math.max(1, weeklyVolume);
+      p.totalSold += weeklyVolume;
+      p.remainingWeeks--;
+      var gross = weeklyVolume * UNIT_PRICE;
+      var net = gross * (1 - TAX);
+      p.gross += gross;
+      p.net += net;
+      state.cash += net;
+      state.fans += Math.round(weeklyVolume * 0.04);
+    });
+    var before = state.shippedProducts.length;
+    state.shippedProducts = state.shippedProducts.filter(function (p) { return p.remainingWeeks > 0; });
+    if (state.shippedProducts.length < before) {
+      streamConsoleMsg('Shelf purge: ' + (before - state.shippedProducts.length) + ' title(s) left retail.', 'c-warn');
+    }
+  }
+
+  function renderLiveStorefrontShelves() {
+    var shelf = document.getElementById('shelf-injection-target');
+    if (!shelf) return;
+    if (!state.shippedProducts.length) {
+      shelf.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:36px 12px;font-style:italic;">No active commercial products on distribution shelves.</div>';
+      return;
+    }
+    shelf.innerHTML = '';
+    state.shippedProducts.forEach(function (p) {
+      var row = document.createElement('div');
+      row.className = 'shelf-item';
+      row.innerHTML =
+        '<div><b style="color:#fff;font-size:0.9rem;">' + escapeHtml(p.title) + '</b><br>' +
+        '<span style="font-size:0.72rem;color:var(--text-muted);">' + escapeHtml(p.info) + ' · ' + escapeHtml(p.platform || '') + '</span></div>' +
+        '<div style="color:var(--neon-blue);font-weight:800;font-family:monospace;">★ ' + p.score + '</div>' +
+        '<div style="font-size:0.78rem;color:var(--neon-green);font-family:monospace;">' + p.totalSold.toLocaleString() + ' sold<br>$' + Math.round(p.net).toLocaleString() + ' net</div>' +
+        '<div style="font-size:0.7rem;color:var(--neon-pink);text-transform:uppercase;">' + p.remainingWeeks + 'w left</div>';
+      shelf.appendChild(row);
+    });
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return ({ '&': '&', '<': '<', '>': '>', '"': '"', "'": '&#39;' })[c];
+    });
+  }
+
+  // ── Cheats ────────────────────────────────────────────────
+  window.executeSystemOverride = function () {
+    var field = document.getElementById('cheat-entry');
+    var token = (field.value || '').trim().toLowerCase();
+    field.value = '';
+    if (token === '/money_boost') {
+      state.cash += 5000000;
+      streamConsoleMsg('CHEAT /money_boost → +$5,000,000', 'c-ok');
+    } else if (token === '/rp_max') {
+      state.rp = 999;
+      streamConsoleMsg('CHEAT /rp_max → RP 999', 'c-ok');
+    } else if (token === '/instafans') {
+      state.fans = Math.max(5, Math.floor(state.fans * 5));
+      streamConsoleMsg('CHEAT /instafans → ' + state.fans + ' fans', 'c-ok');
+    } else if (token === '/bug_wipe') {
+      streamConsoleMsg('CHEAT /bug_wipe — only applies mid-compile (no-op outside loop)', 'c-warn');
+    } else {
+      streamConsoleMsg('Unknown override: ' + token, 'c-err');
+      return;
+    }
+    syncGlobalTelemetryHUD();
+  };
+
+  // ── Save / Load ───────────────────────────────────────────
+  function exportState() {
+    return JSON.stringify({
+      v: '3.0.0',
+      state: state
+    }, null, 2);
+  }
+
+  window.downloadSave = function () {
+    var blob = new Blob([exportState()], { type: 'application/json' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'neoncore_Y' + state.year + '_M' + state.month + '_W' + state.week + '.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    streamConsoleMsg('Save JSON downloaded.', 'c-ok');
+  };
+
+  window.copySave = function () {
+    var t = exportState();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(t).then(function () {
+        streamConsoleMsg('Save JSON copied.', 'c-ok');
+      });
+    } else {
+      document.getElementById('save-paste').value = t;
+      streamConsoleMsg('Clipboard blocked — JSON dumped into paste box.', 'c-warn');
+    }
+  };
+
+  window.importSavePaste = function () {
+    try {
+      var raw = document.getElementById('save-paste').value;
+      var data = JSON.parse(raw);
+      if (data.state) state = data.state;
+      else state = data;
+      streamConsoleMsg('Campaign loaded from JSON.', 'c-ok');
+      syncGlobalTelemetryHUD();
+      buildHwGrids();
+    } catch (e) {
+      streamConsoleMsg('Invalid save JSON.', 'c-err');
+    }
+  };
+
+  window.importSaveFile = function (ev) {
+    var f = ev.target.files && ev.target.files[0];
+    if (!f) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      document.getElementById('save-paste').value = String(reader.result || '');
+      importSavePaste();
+    };
+    reader.readAsText(f);
+  };
+
+  // boot
+  buildEngineCards();
+  buildHwGrids();
+  streamConsoleMsg('SYSTEM CORE ONLINE — NEONCORE OS v3.0.0 workspace locked.', 'c-ok');
+  streamConsoleMsg('Trailing retail shelves · live hardware matrix · phase compiler ready.', 'c-info');
+  syncGlobalTelemetryHUD();
+  // show sandbox
+  document.getElementById('ws-sandbox').style.display = 'block';
+})();
+</script>
+</body>
+</html>

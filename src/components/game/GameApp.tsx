@@ -250,6 +250,14 @@ function MainMenu() {
               </Button>
             </div>
           )}
+          <a
+            href="/neoncore-os.html"
+            target="_blank"
+            rel="noreferrer"
+            className="block w-full rounded-lg border border-border bg-elevated px-3 py-2.5 text-center text-xs font-bold uppercase tracking-wide text-muted transition hover:border-accent hover:text-accent"
+          >
+            NEONCORE OS · experimental IDE sim
+          </a>
         </div>
       </div>
     </div>
