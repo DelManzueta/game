@@ -287,51 +287,56 @@ export const REVIEWER_NAMES = [
 ];
 
 export const OFFICE_INFO = {
+  /** Level 1 — Garage */
   1: {
-    name: "Founder Garage",
-    /** TYCOON v2.1 monthly_rent — garage burn pressure */
+    name: "Garage",
     rent: 8_000,
-    /** Total HQ seats including founder (bible §2). */
     capacity: 1,
-    upgradeCost: 150_000,
-    fanRequirement: 1_000,
-    gamesRequirement: 5,
-    cashRequirement: 1_000_000,
-    /** Earliest: campaign year 3 (1979 start → 1981 M10 floor). */
-    minYear: 1981,
-    minMonth: 10,
+    upgradeCost: 0,
+    fanRequirement: 0,
+    gamesRequirement: 0,
+    cashRequirement: 180_000,
+    minYear: 0,
+    minMonth: 0,
   },
+  /** Level 2 — Professional Tech Park */
   2: {
-    name: "First Office",
-    rent: 8_000,
-    capacity: 5, // founder + 4 (blueprint tech park)
-    upgradeCost: 120_000,
-    fanRequirement: 0,
-    gamesRequirement: 0,
-    cashRequirement: 0,
-  },
-  3: {
-    name: "Upgraded Office",
+    name: "Professional Tech Park",
     rent: 25_000,
-    capacity: 7,
-    upgradeCost: 850_000,
+    capacity: 5, // founder + 4
+    upgradeCost: 0,
     fanRequirement: 0,
     gamesRequirement: 0,
-    cashRequirement: 0,
+    cashRequirement: 1_000_000,
+    minYearsAtOffice: 4,
+    minStaff: 3,
   },
+  /** Level 3 — Industry Mega-Complex */
+  3: {
+    name: "Industry Mega-Complex",
+    rent: 80_000,
+    capacity: 7, // founder + 6
+    upgradeCost: 5_000_000, // R&D lab payment
+    fanRequirement: 0,
+    gamesRequirement: 0,
+    cashRequirement: 5_000_000,
+    needLabDirector: true,
+  },
+  /** Level 4 — R&D Laboratory */
   4: {
-    name: "Technology Park",
-    rent: 15_000,
-    capacity: 6, // founder + 5
-    upgradeCost: 50_000_000,
+    name: "R&D Laboratory",
+    rent: 150_000,
+    capacity: 7,
+    upgradeCost: 0,
     fanRequirement: 0,
     gamesRequirement: 0,
     cashRequirement: 0,
   },
+  /** Legacy alias → same as R&D */
   5: {
-    name: "Expanded Technology Campus",
-    rent: 40_000,
-    capacity: 8, // founder + 5 + 2 directors
+    name: "R&D Laboratory (Campus)",
+    rent: 150_000,
+    capacity: 7,
     upgradeCost: 0,
     fanRequirement: 0,
     gamesRequirement: 0,

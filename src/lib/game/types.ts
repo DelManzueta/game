@@ -638,6 +638,9 @@ export interface GameState {
   lastEngineAgeYear?: number;
   /** Module 23 — physical accessories on warehouse shelves */
   hardwareProducts?: import("./hardwareMerch").HardwareProduct[];
+  /** Calendar year when current office level was entered */
+  officeEnteredYear?: number;
+  officeEnteredMonth?: number;
   /** Known combo labels after post-mortem */
   knownCombos?: Record<string, import("./tycoonRiskAnalytics").MatchLabel>;
   playerConsoles?: import("./tycoonLateMarket").PlayerConsole[];

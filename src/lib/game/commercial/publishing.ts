@@ -51,10 +51,17 @@ const PUBLISHERS = [
 const GENRES: GenreId[] = ["action", "adventure", "rpg", "simulation", "strategy", "casual"];
 const SIZES: GameSize[] = ["small", "medium"];
 
-export function publishingUnlocked(opts: { gamesPublished: number; fans: number }): boolean {
+export function publishingUnlocked(opts: {
+  gamesPublished: number;
+  fans: number;
+  office?: number;
+}): boolean {
+  // Master progression: publishers only from Level 2 Tech Park
+  if (opts.office != null && opts.office < 2) return false;
   return (
     opts.gamesPublished >= PUBLISHING_UNLOCK.minReleasedGames ||
-    opts.fans >= PUBLISHING_UNLOCK.minFans
+    opts.fans >= PUBLISHING_UNLOCK.minFans ||
+    (opts.office != null && opts.office >= 2)
   );
 }
 

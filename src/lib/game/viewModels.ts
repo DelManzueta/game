@@ -12,6 +12,12 @@ import {
   migrateStudioProgression,
   type ProofResult,
 } from "./progression";
+import {
+  canAdvanceOffice,
+  stageForOffice,
+  PROGRESSION_STAGES,
+  normalizeOfficeLevel,
+} from "./progressionStages";
 
 export type PhaseLabel = {
   code: string;
@@ -195,56 +201,95 @@ export function studioOverview(s: GameState) {
 }
 
 function buildOfficeGoal(s: GameState) {
-  if (s.office !== 1) return null;
-  const office = OFFICE_INFO[1];
-
-  if (isFeatureEnabled("officeFoundation")) {
-    const prog = migrateStudioProgression(s.progression, s.office);
-    const v = firstOfficeOfferView(s, prog);
-    const fansNeed = 1_000;
-    const gamesNeed = 5;
-    const cashNeed = v.offer.liquidCashGate;
+  const level = normalizeOfficeLevel(s.office);
+  const current = stageForOffice(level);
+  if (level >= 4) {
     return {
-      fansNeed,
-      gamesNeed,
-      cashNeed,
-      moveCost: v.offer.moveCost,
-      fansPct: Math.min(100, (s.fans / fansNeed) * 100),
-      gamesPct: Math.min(100, (s.gamesPublished / gamesNeed) * 100),
-      cashPct: Math.min(100, (s.cash / Math.max(1, cashNeed)) * 100),
-      canMove: v.proofsMet && v.afford.ok,
-      proofs: v.proofs as ProofResult[],
-      offerState: v.offer.state,
-      runway: v.afford.runway,
-      seatsAfter: v.dest.hqSeatsTotal,
-      constructionWeeks: v.offer.constructionWeeks,
-      weeklyOverheadAfter: v.offer.weeklyOverheadAfter,
-      activeMove: prog.activeMove,
+      fansNeed: 0,
+      gamesNeed: 0,
+      cashNeed: 0,
+      moveCost: 0,
+      fansPct: 100,
+      gamesPct: 100,
+      cashPct: 100,
+      canMove: false,
+      proofs: [] as ProofResult[],
+      offerState: "hidden" as const,
+      runway: 0,
+      seatsAfter: current.staffMax,
+      constructionWeeks: 0,
+      weeklyOverheadAfter: current.rent,
+      activeMove: null,
+      stageName: current.name,
+      stageLevel: level,
+      nextName: null as string | null,
+      nextHint: "Max office — R&D Laboratory.",
+      allowedSizes: current.allowedSizes,
     };
   }
 
+  // Optional foundation offer still for garage UX
+  if (level === 1 && isFeatureEnabled("officeFoundation")) {
+    const prog = migrateStudioProgression(s.progression, s.office);
+    const v = firstOfficeOfferView(s, prog);
+    const cashNeed = Math.max(v.offer.liquidCashGate, 180_000);
+    return {
+      fansNeed: 0,
+      gamesNeed: 0,
+      cashNeed,
+      moveCost: v.offer.moveCost,
+      fansPct: 100,
+      gamesPct: 100,
+      cashPct: Math.min(100, (s.cash / Math.max(1, cashNeed)) * 100),
+      canMove: v.proofsMet && v.afford.ok && s.cash >= 180_000,
+      proofs: v.proofs as ProofResult[],
+      offerState: v.offer.state,
+      runway: v.afford.runway,
+      seatsAfter: 5,
+      constructionWeeks: v.offer.constructionWeeks,
+      weeklyOverheadAfter: 25_000,
+      activeMove: prog.activeMove,
+      stageName: current.name,
+      stageLevel: level,
+      nextName: "Professional Tech Park",
+      nextHint: "Hold $180k liquid to leave the garage.",
+      allowedSizes: current.allowedSizes,
+    };
+  }
+
+  const next = PROGRESSION_STAGES[(level + 1) as 2 | 3 | 4];
+  const check = canAdvanceOffice({
+    office: s.office,
+    cash: s.cash,
+    staffCount: s.staff.length,
+    staff: s.staff,
+    officeEnteredYear: s.officeEnteredYear ?? s.year,
+    officeEnteredMonth: s.officeEnteredMonth ?? s.month,
+    currentYear: s.year,
+    currentMonth: s.month,
+  });
+  const cashNeed = next.cashReq;
   return {
-    fansNeed: office.fanRequirement ?? 1_000,
-    gamesNeed: office.gamesRequirement ?? 5,
-    cashNeed: office.cashRequirement ?? 1_000_000,
-    moveCost: office.upgradeCost,
-    fansPct: Math.min(100, (s.fans / Math.max(1, office.fanRequirement ?? 1)) * 100),
-    gamesPct: Math.min(
-      100,
-      (s.gamesPublished / Math.max(1, office.gamesRequirement ?? 1)) * 100,
-    ),
-    cashPct: Math.min(100, (s.cash / Math.max(1, office.cashRequirement ?? 1)) * 100),
-    canMove:
-      s.fans >= (office.fanRequirement ?? 0) &&
-      s.gamesPublished >= (office.gamesRequirement ?? 0) &&
-      s.cash >= Math.max(office.cashRequirement ?? 0, office.upgradeCost),
+    fansNeed: 0,
+    gamesNeed: 0,
+    cashNeed,
+    moveCost: next.cashIsPayment ? next.cashReq : 0,
+    fansPct: 100,
+    gamesPct: 100,
+    cashPct: Math.min(100, (s.cash / Math.max(1, cashNeed)) * 100),
+    canMove: check.ok,
     proofs: [] as ProofResult[],
     offerState: "hidden" as const,
-    runway: 0,
-    seatsAfter: 4,
-    constructionWeeks: 2,
-    weeklyOverheadAfter: 2_000,
+    runway: cashNeed > 0 ? Math.floor(s.cash / Math.max(1, next.rent / 4)) : 99,
+    seatsAfter: next.staffMax,
+    constructionWeeks: 0,
+    weeklyOverheadAfter: next.rent,
     activeMove: null,
+    stageName: current.name,
+    stageLevel: level,
+    nextName: next.name,
+    nextHint: check.ok ? `Ready to move into ${next.name}.` : check.error,
+    allowedSizes: current.allowedSizes,
   };
 }
 

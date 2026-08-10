@@ -159,6 +159,13 @@ import {
   type AccessoryCategoryId,
   type HardwareProduct,
 } from "./hardwareMerch";
+import {
+  canAdvanceOffice,
+  normalizeOfficeLevel,
+  stageForOffice,
+  sizesForOffice,
+  PROGRESSION_STAGES,
+} from "./progressionStages";
 import { tycoonHypeDecay, tycoonStaffEnergyTick, TYCOON_DEFAULTS } from "./tycoonEngine";
 import {
   competitorRelease,
@@ -355,25 +362,31 @@ export function availableSizes(
   unlocks: Record<string, UnlockState>,
   opts?: { office?: number; staffCount?: number },
 ): GameSize[] {
-  const sizes: GameSize[] = ["small"];
   const office = opts?.office ?? 1;
   const staffCount = opts?.staffCount ?? 1;
-  const mediumReady =
-    (researched.includes("medium_games") || unlocks.medium_games === "owned") &&
-    office >= 2 &&
-    staffCount >= 2;
-  if (mediumReady) sizes.push("medium");
+  const byOffice = new Set(sizesForOffice(office));
+  const sizes: GameSize[] = ["small"];
+  // Medium: office 2+ and (research OR custom engine later — research gate soft)
   if (
+    byOffice.has("medium") &&
+    (researched.includes("medium_games") ||
+      unlocks.medium_games === "owned" ||
+      office >= 2) &&
+    staffCount >= 1
+  ) {
+    sizes.push("medium");
+  }
+  if (
+    byOffice.has("large") &&
     (researched.includes("large_games") || unlocks.large_games === "owned") &&
-    office >= 3 &&
-    staffCount >= 3
+    staffCount >= 2
   ) {
     sizes.push("large");
   }
   if (
+    byOffice.has("aaa") &&
     (researched.includes("aaa_games") || unlocks.aaa === "owned") &&
-    office >= 4 &&
-    staffCount >= 5
+    staffCount >= 3
   ) {
     sizes.push("aaa");
   }
@@ -479,6 +492,8 @@ function initialState(): GameState {
     genreExp: { action: 0, adventure: 0, rpg: 0, simulation: 0, strategy: 0, casual: 0 },
     gameHistoryLedger: [],
     hardwareProducts: [],
+    officeEnteredYear: START_YEAR,
+    officeEnteredMonth: 1,
     knownCombos: {},
     playerConsoles: [],
     lastAwardsYear: 0,
@@ -2576,6 +2591,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         publishingUnlocked({
           gamesPublished: next.gamesPublished,
           fans: next.fans,
+          office: next.office,
         }) ||
         next.unlocks.publishing === "owned" ||
         next.gamesPublished >= 2;
@@ -3385,36 +3401,58 @@ export const useGame = create<GameState & Actions>((set, get) => ({
   },
 
   upgradeOffice: () => {
-    // Prefer progression offer path when foundation flag is on
-    if (isFeatureEnabled("officeFoundation")) {
+    // Prefer progression offer path when foundation flag is on (garage → first only)
+    if (isFeatureEnabled("officeFoundation") && normalizeOfficeLevel(get().office) === 1) {
       return get().acceptOfficeOffer();
     }
     const state = get();
-    const info = OFFICE_INFO[state.office as 1 | 2 | 3 | 4 | 5];
-    if (state.office >= 5) return "Already max office.";
-    if (state.office === 1) {
-      const fansNeed = info.fanRequirement ?? 1000;
-      const gamesNeed = info.gamesRequirement ?? 5;
-      const cashNeed = info.cashRequirement ?? 1_000_000;
-      if (state.fans < fansNeed) return `Need ${fansNeed.toLocaleString()} fans (have ${state.fans.toLocaleString()}).`;
-      if (state.gamesPublished < gamesNeed) return `Need ${gamesNeed} released games.`;
-      if (state.cash < cashNeed) return `Need ${formatCash(cashNeed)} on hand.`;
-    }
-    if (state.cash < info.upgradeCost) return `Need ${formatCash(info.upgradeCost)} for the move.`;
-    const nextOffice = (state.office + 1) as 1 | 2 | 3 | 4 | 5;
+    const check = canAdvanceOffice({
+      office: state.office,
+      cash: state.cash,
+      staffCount: state.staff.length,
+      staff: state.staff,
+      officeEnteredYear: state.officeEnteredYear ?? state.year,
+      officeEnteredMonth: state.officeEnteredMonth ?? state.month,
+      currentYear: state.year,
+      currentMonth: state.month,
+    });
+    if (!check.ok) return check.error;
+    const stage = stageForOffice(check.next);
     let next: GameState = {
       ...state,
-      cash: state.cash - info.upgradeCost,
-      office: nextOffice,
+      cash: state.cash - check.cost,
+      office: check.next,
+      officeEnteredYear: state.year,
+      officeEnteredMonth: state.month,
       dirty: true,
       notifications: pushNote(
         state,
-        nextOffice === 2
-          ? `Moved into ${OFFICE_INFO[nextOffice].name}.`
-          : `Moved to ${OFFICE_INFO[nextOffice].name}.`,
+        `Moved into ${stage.name}. Rent ${formatCash(stage.rent)}/mo · seats ${stage.staffMax} · sizes: ${stage.allowedSizes.join(", ")}.`,
         "good",
       ),
     };
+    if (check.cost > 0) {
+      next.ledger = applyLedger(next.ledger, {
+        week: next.week,
+        amount: -check.cost,
+        category: "other",
+        label: `Office move: ${stage.name}`,
+        ref: `office-${check.next}-y${state.year}`,
+      });
+    }
+    // Unlock notes by level
+    if (check.next === 2) {
+      next.unlocks = { ...next.unlocks, hiring: "owned", training: "owned", publishing: "owned" };
+      next.notifications = pushNote(next, "Staff hiring, training, and publisher deals unlocked.", "info");
+    }
+    if (check.next === 3) {
+      next.unlocks = { ...next.unlocks, marketing: next.unlocks.marketing ?? "owned" };
+      next.notifications = pushNote(next, "Mega-complex: marketing + accessory factory online.", "info");
+    }
+    if (check.next === 4) {
+      next.unlocks = { ...next.unlocks, aaa: next.unlocks.aaa ?? "available", hardware_lab: "owned" };
+      next.notifications = pushNote(next, "R&D Lab online — AAA and console manufacturing path open.", "info");
+    }
     next = applyUnlockNotes(next);
     set(next);
     return null;
@@ -3569,6 +3607,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       publishingUnlocked({
         gamesPublished: state.gamesPublished,
         fans: state.fans,
+        office: state.office,
       }) ||
       state.unlocks.publishing === "owned" ||
       state.gamesPublished >= 2;

@@ -537,12 +537,15 @@ function GarageRoomView({ immersive = false }: { immersive?: boolean }) {
                         : "Studio floor"}
                 </p>
               </div>
-              {state.office === 1 && ov.officeGoal && !ov.officeGoal.activeMove && (
-                <p className="max-w-[16rem] text-right text-[12px] leading-snug text-white/50">
-                  <span className="text-[#f0b24a]/90">Next · </span>
-                  {ov.gamesPublished}/{ov.officeGoal.gamesNeed} games ·{" "}
-                  {formatFans(ov.fans)}/{formatFans(ov.officeGoal.fansNeed)} fans · hold{" "}
-                  {formatCash(ov.officeGoal.cashNeed)}
+              {ov.officeGoal && !ov.officeGoal.activeMove && (
+                <p className="max-w-[18rem] text-right text-[12px] leading-snug text-white/50">
+                  <span className="text-[#f0b24a]/90">
+                    L{ov.officeGoal.stageLevel ?? state.office} {ov.officeGoal.stageName ?? "Studio"} ·{" "}
+                  </span>
+                  {ov.officeGoal.nextName
+                    ? `Next ${ov.officeGoal.nextName}: hold ${formatCash(ov.officeGoal.cashNeed)}`
+                    : "Max campus"}
+                  {ov.officeGoal.nextHint ? ` — ${ov.officeGoal.nextHint}` : ""}
                 </p>
               )}
             </div>
@@ -590,10 +593,18 @@ function GarageRoomView({ immersive = false }: { immersive?: boolean }) {
               How it works
             </button>
             {(ov.officeGoal?.offerState === "offered" ||
-              ov.officeGoal?.offerState === "deferred" ||
-              ov.officeGoal?.canMove) && (
+              ov.officeGoal?.offerState === "deferred") && (
               <button type="button" className="se-cta-secondary" onClick={() => setModal("officeOffer")}>
                 Office offer
+              </button>
+            )}
+            {ov.officeGoal?.canMove && (
+              <button
+                type="button"
+                className="se-cta"
+                onClick={() => useGame.getState().upgradeOffice()}
+              >
+                Move · {ov.officeGoal.nextName ?? "Next office"}
               </button>
             )}
           </div>
@@ -2549,19 +2560,21 @@ function HardwareLabScreen() {
   const setConsolePricing = useGame((s) => s.setConsolePricing);
   const [msg, setMsg] = useState("");
   const [name, setName] = useState("Forge Station");
-  const unlocked = office >= 3 || cash >= 7_500_000;
+  const accessoriesOpen = office >= 3;
+  const consoleOpen = office >= 4;
+  const unlocked = accessoriesOpen || consoleOpen;
 
   return (
     <div className="space-y-3">
       <div className="game-panel px-4 py-3 text-center">
         <h2 className="text-xl font-bold text-fg">Hardware Lab</h2>
         <p className="text-xs text-muted">
-          Module 13 · own console · first-party synergy · third-party royalties
+          L3 Mega-Complex: accessories · L4 R&D: own consoles & royalties
         </p>
       </div>
       {!unlocked && (
         <p className="text-center text-sm text-muted">
-          Unlock near office 3+ with ~$15M capital. Cash now {formatCash(cash)}.
+          Reach Industry Mega-Complex (Level 3) for peripherals. R&D Lab (Level 4) for consoles.
         </p>
       )}
       {msg && <p className="text-center text-sm text-warn">{msg}</p>}
@@ -2615,10 +2628,10 @@ function HardwareLabScreen() {
           </li>
         ))}
       </ul>
-      {unlocked && (
+      {consoleOpen && (
         <ConsoleConfigurator name={name} setName={setName} onMsg={setMsg} />
       )}
-      {unlocked && (
+      {consoleOpen && (
         <div className="rounded-xl border border-border bg-elevated p-3">
           <p className="mb-2 text-[10px] font-bold uppercase text-muted">Quick tiers (legacy)</p>
           <div className="space-y-2">
@@ -2639,7 +2652,7 @@ function HardwareLabScreen() {
           </div>
         </div>
       )}
-      <AccessoryFactoryPanel onMsg={setMsg} />
+      {accessoriesOpen && <AccessoryFactoryPanel onMsg={setMsg} />}
     </div>
   );
 }
