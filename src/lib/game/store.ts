@@ -120,6 +120,14 @@ import {
   tickReleasedSales,
 } from "./commercial/runtime";
 import {
+  evaluatePublisherDeal,
+  tickPublishingBoard,
+  refreshPublishingBoard,
+  generatePublishingBoard,
+  publishingUnlocked,
+  type PublishingDeal,
+} from "./commercial/publishing";
+import {
   classicComboMultiplier,
   classicReviewScore,
   classicUnitsSold,
@@ -1095,7 +1103,44 @@ function releaseProject(next: GameState, project: GameProject): GameState {
   // No cash from sales at release — reviews first; sales start next week tick
   next.releasedGames = [released, ...next.releasedGames];
   next.activeSales = [released, ...next.activeSales.filter((g) => g.onSale)];
-  next.gamesPublished += 1;
+  
+  // Publisher deal settlement (advance already paid on accept)
+  if (next.activePublisherDealId && next.publishingBoard) {
+    const deal = next.publishingBoard.deals.find((d) => d.id === next.activePublisherDealId);
+    if (deal) {
+      const gross = (sales.totalUnits ?? 0) * (sales.price ?? 9.99);
+      const result = evaluatePublisherDeal({
+        deal,
+        avgReview: reviews.avg,
+        genreId: scored.genreId,
+        size: scored.size,
+        platformId: scored.platformId,
+        grossRevenue: gross,
+      });
+      next.cash += result.cashDelta;
+      next.ledger = applyLedger(next.ledger, {
+        week: next.week,
+        amount: result.cashDelta,
+        category: result.met ? "sales" : "other",
+        label: result.met
+          ? `Publisher royalties: ${deal.publisherName}`
+          : `Publisher penalty: ${deal.publisherName}`,
+        gameId: scored.id,
+        ref: `pub-${deal.id}-${scored.id}`,
+      });
+      next.notifications = pushNote(
+        next,
+        result.note,
+        result.met ? "good" : "bad",
+      );
+      released.distributionType = "publisher";
+      released.publisherId = deal.publisherId;
+      released.publisherRoyalty = deal.royaltyRate;
+    }
+    next.activePublisherDealId = null;
+  }
+
+next.gamesPublished += 1;
 
   if (USE_MARKET_V2) {
     const m = next.market ?? initMarket(next.campaignSeed, next.week);
@@ -1265,6 +1310,9 @@ interface Actions {
   researchItem: (id: string) => string | null;
   researchTopic: (id: string) => string | null;
   hireStaff: (candidate: StaffMember) => string | null;
+  acceptPublisherDeal: (id: string) => string | null;
+  refreshPublisherBoard: () => string | null;
+  clearPublisherDeal: () => void;
   fireStaff: (id: string) => void;
   refreshCandidates: () => StaffMember[];
   getCandidates: () => StaffMember[];
@@ -1657,16 +1705,22 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       if (rent > 0) next.cash -= rent;
     }
 
-    // Founder never drains energy
+    // Staff AI (blueprint): work costs energy; ≤20 forces rest week (+25)
     next.staff = next.staff.map((m) => {
       if (m.id === "founder" || next.settings.noVacationMode) return { ...m, energy: 100 };
       let energy = m.energy ?? 100;
-      if (next.currentProject && next.currentProject.devPhase.includes("RUNNING")) {
-        energy = Math.max(10, energy - 3);
-      } else if (next.currentProject?.devPhase === "POLISHING") {
-        energy = Math.max(15, energy - 2);
+      const working =
+        !!next.currentProject &&
+        (next.currentProject.devPhase.includes("RUNNING") ||
+          next.currentProject.devPhase === "POLISHING");
+      if (working) {
+        if (energy <= 20) {
+          energy = Math.min(100, energy + 25); // forced rest
+        } else {
+          energy = Math.max(0, energy - 5);
+        }
       } else {
-        energy = Math.min(100, energy + 5);
+        energy = Math.min(100, energy + 8);
       }
       return { ...m, energy };
     });
@@ -1845,15 +1899,21 @@ export const useGame = create<GameState & Actions>((set, get) => ({
           next.currentProject.production?.phase === "polish" ||
           next.currentProject.production?.phase === "bug_fixing";
         if (!isPolish && (stageN === 1 || stageN === 2 || stageN === 3)) {
+          const eng =
+            next.engines.find((e) => e.id === next.currentProject!.engineId) ??
+            next.engines[0];
+          // Custom engine builder boosts (tech/design mult as % boosts)
+          const designBoost = Math.min(40, (eng?.designBonus ?? 0) * 1.2);
+          const techBoost = Math.min(45, (eng?.techBonus ?? 0) * 1.2);
           const gen = generateWeekPoints({
             staff: next.staff,
             stage: stageN,
             genreId: next.currentProject.genreId,
             sliders: next.currentProject.sliders,
             size: next.currentProject.size,
-            engineFeatures: next.currentProject.features ?? [],
-            designBoost: 0,
-            techBoost: 0,
+            engineFeatures: next.currentProject.features ?? eng?.features ?? [],
+            designBoost,
+            techBoost,
             seed: hashSeed(
               next.campaignSeed,
               next.currentProject.id,
@@ -1962,6 +2022,24 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       }
     } else if (next.week % 8 === 0 && (next.unlocks.contracts === "owned" || next.flags.contracts)) {
       next.contracts = generateContracts(3, next.year);
+    }
+
+    // Publisher board (Module 3) — season refresh when unlocked
+    {
+      const unlocked =
+        publishingUnlocked({
+          gamesPublished: next.gamesPublished,
+          fans: next.fans,
+        }) ||
+        next.unlocks.publishing === "owned" ||
+        next.gamesPublished >= 2;
+      next.publishingBoard = tickPublishingBoard(next.publishingBoard, {
+        campaignSeed: next.campaignSeed,
+        week: next.week,
+        year: next.year,
+        fans: next.fans,
+        unlocked,
+      });
     }
 
     next = tryFireEvent(next);
@@ -2777,6 +2855,65 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     });
     return null;
   },
+
+
+  acceptPublisherDeal: (id) => {
+    const state = get();
+    const unlocked =
+      publishingUnlocked({
+        gamesPublished: state.gamesPublished,
+        fans: state.fans,
+      }) ||
+      state.unlocks.publishing === "owned" ||
+      state.gamesPublished >= 2;
+    if (!unlocked) return "Publishing board locked — ship more games or grow fans.";
+    const board = state.publishingBoard;
+    if (!board?.deals?.length) return "No publisher offers right now.";
+    const deal = board.deals.find((d) => d.id === id);
+    if (!deal) return "Unknown deal.";
+    if (state.week >= deal.expirationWeek) return "That offer expired.";
+    // Upfront cash (covers development risk)
+    set({
+      cash: state.cash + deal.upfrontPayment,
+      activePublisherDealId: deal.id,
+      dirty: true,
+      notifications: pushNote(
+        state,
+        `${deal.publisherName} signed: +${formatCash(deal.upfrontPayment)} advance. Hit ${deal.minimumReviewScore}+ reviews.`,
+        "good",
+      ),
+      ledger: applyLedger(state.ledger, {
+        week: state.week,
+        amount: deal.upfrontPayment,
+        category: "other",
+        label: `Publisher advance: ${deal.publisherName}`,
+        ref: `pub-advance-${deal.id}`,
+      }),
+    });
+    return null;
+  },
+
+  refreshPublisherBoard: () => {
+    const state = get();
+    const board = state.publishingBoard ?? generatePublishingBoard({
+      campaignSeed: state.campaignSeed,
+      week: state.week,
+      year: state.year,
+      fans: state.fans,
+    });
+    const res = refreshPublishingBoard(board, {
+      campaignSeed: state.campaignSeed,
+      week: state.week,
+      year: state.year,
+      fans: state.fans,
+      cash: state.cash,
+    });
+    if (res.error) return res.error;
+    set({ publishingBoard: res.board, cash: res.cash, dirty: true });
+    return null;
+  },
+
+  clearPublisherDeal: () => set({ activePublisherDealId: null, dirty: true }),
 
   takeContract: (id) => {
     const state = get();

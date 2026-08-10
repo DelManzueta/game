@@ -1324,6 +1324,9 @@ function StaffScreen() {
       <p className="mt-1 text-sm text-muted">
         {hiringOpen ? "Hire up to your HQ seats · signing cap $2M" : "Garage is founder-led until First Office."}
       </p>
+      <p className="mt-1 text-xs font-semibold tabular text-fg/80">
+        Payroll {formatCash(staff.reduce((s, m) => s + (m.id === "founder" ? 0 : m.salary), 0))}/mo
+      </p>
       </div>
       {msg && <p className="mt-2 text-center text-sm text-warn">{msg}</p>}
 
@@ -1340,7 +1343,33 @@ function StaffScreen() {
                   Lv {m.level} · D{m.design} · T{m.tech} · S{m.speed}
                   {m.specialization ? ` · ${m.specialization}` : ""}
                   {(m.bugFixBonus ?? 0) > 0 ? ` · QA +${Math.round((m.bugFixBonus ?? 0) * 100)}%` : ""}
+                  {" · "}
+                  {formatCash(m.salary)}/mo
                 </div>
+                {m.id !== "founder" && (
+                  <div className="mt-1.5 max-w-[14rem]">
+                    <div className="mb-0.5 flex justify-between text-[10px] font-bold uppercase tracking-wide text-muted">
+                      <span>Energy</span>
+                      <span className="tabular">{Math.round(m.energy ?? 100)}%</span>
+                    </div>
+                    <div className="h-1.5 overflow-hidden rounded-full bg-panel">
+                      <div
+                        className={cnJoin(
+                          "h-full rounded-full transition-all",
+                          (m.energy ?? 100) <= 20
+                            ? "bg-bad"
+                            : (m.energy ?? 100) < 50
+                              ? "bg-warn"
+                              : "bg-good",
+                        )}
+                        style={{ width: `${Math.round(m.energy ?? 100)}%` }}
+                      />
+                    </div>
+                    {(m.energy ?? 100) <= 20 && (
+                      <p className="mt-0.5 text-[10px] text-warn">Resting — too exhausted to contribute</p>
+                    )}
+                  </div>
+                )}
                 {m.training && (
                   <div className="mt-1 text-xs text-tech">
                     Training… {m.training.weeksLeft}w left / {m.training.totalWeeks}w
@@ -1497,7 +1526,7 @@ function EnginesScreen() {
     <ScreenBackdrop screen="engines">
       <h2 className="text-center text-2xl font-bold text-fg">Engine Workshop</h2>
       <p className="mx-auto mt-1 max-w-lg text-center text-xs text-muted">
-        Engines create capability and efficiency — your team turns that into games. Released versions
+        Bundle researched modules into a proprietary engine. Tech/Design bonuses multiply every future title. Released versions
         are immutable; each project freezes a snapshot.
       </p>
       {msg && <p className="mt-2 text-center text-sm text-warn">{msg}</p>}
@@ -1559,6 +1588,15 @@ function EnginesScreen() {
                 {(v.features ?? v.modules?.map((m) => m.moduleId) ?? []).slice(0, 8).join(" · ") ||
                   "Core runtime"}
               </div>
+              {(() => {
+                const eng = engines.find((e) => e.id === v.versionId || e.name === v.label);
+                if (!eng) return null;
+                return (
+                  <div className="mt-1 text-[11px] font-semibold text-accent">
+                    Tech +{eng.techBonus ?? 0} · Design +{eng.designBonus ?? 0} (boosts every game)
+                  </div>
+                );
+              })()}
               {"technicalDebt" in v && (
                 <div className="mt-1 text-[11px] text-subtle">
                   Tech debt {Math.round(Number(v.technicalDebt) || 0)}
@@ -1937,21 +1975,138 @@ function FinancesScreen() {
   );
 }
 
+
+function ContractsScreen() {
+  const board = useGame((s) => s.publishingBoard);
+  const activeId = useGame((s) => s.activePublisherDealId);
+  const contracts = useGame((s) => s.contracts);
+  const activeContract = useGame((s) => s.activeContract);
+  const fans = useGame((s) => s.fans);
+  const gamesPublished = useGame((s) => s.gamesPublished);
+  const acceptPublisherDeal = useGame((s) => s.acceptPublisherDeal);
+  const refreshPublisherBoard = useGame((s) => s.refreshPublisherBoard);
+  const clearPublisherDeal = useGame((s) => s.clearPublisherDeal);
+  const takeContract = useGame((s) => s.takeContract);
+  const unlocks = useGame((s) => s.unlocks);
+  const [msg, setMsg] = useState("");
+  const unlocked =
+    gamesPublished >= 2 ||
+    fans >= 500 ||
+    unlocks.publishing === "owned" ||
+    unlocks.contracts === "owned";
+  const deals = board?.deals ?? [];
+  const activeDeal = deals.find((d) => d.id === activeId) ?? null;
+
+  return (
+    <ScreenBackdrop screen="finances">
+      <div className="game-panel px-4 py-3 text-center">
+        <h2 className="text-2xl font-bold text-fg">Contracts</h2>
+        <p className="mt-0.5 text-sm text-muted">Publisher advances · freelance work</p>
+      </div>
+      {msg && <p className="text-center text-sm text-warn">{msg}</p>}
+
+      {activeDeal && (
+        <div className="rounded-xl border border-accent/40 bg-accent/10 p-3">
+          <div className="text-xs font-bold uppercase tracking-wide text-accent">Active publisher deal</div>
+          <div className="mt-1 font-bold text-fg">{activeDeal.publisherName}</div>
+          <p className="mt-1 text-xs text-muted">{activeDeal.description}</p>
+          <Button size="sm" variant="ghost" className="mt-2" onClick={() => { clearPublisherDeal(); setMsg("Deal cleared (advance kept)."); }}>
+            Drop deal
+          </Button>
+        </div>
+      )}
+
+      <div className="mt-3">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h3 className="text-sm font-bold uppercase tracking-wide text-muted">Publisher board</h3>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={!unlocked}
+            onClick={() => setMsg(refreshPublisherBoard() ?? "Board refreshed.")}
+          >
+            Refresh
+          </Button>
+        </div>
+        {!unlocked && (
+          <p className="text-sm text-muted">Ship 2 games or grow fans to unlock publisher offers.</p>
+        )}
+        {unlocked && !deals.length && (
+          <p className="text-sm text-muted">No offers this season — wait a few weeks or refresh.</p>
+        )}
+        <ul className="space-y-2">
+          {deals.map((d) => (
+            <li key={d.id} className="rounded-xl border border-border bg-paper p-3">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <div className="font-bold text-fg">{d.publisherName}</div>
+                  <p className="mt-1 text-xs text-muted">{d.description}</p>
+                  <p className="mt-1 text-[11px] text-subtle">
+                    Advance {formatCash(d.upfrontPayment)} · keep {Math.round(d.royaltyRate * 100)}% · need{" "}
+                    {d.minimumReviewScore}+ · expires W{d.expirationWeek}
+                    {d.genreRequirement ? ` · wants ${d.genreRequirement}` : ""}
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  disabled={!!activeId}
+                  onClick={() => setMsg(acceptPublisherDeal(d.id) ?? "Deal signed.")}
+                >
+                  Sign
+                </Button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      {(unlocks.contracts === "owned" || contracts.length > 0 || activeContract) && (
+        <div className="mt-5">
+          <h3 className="mb-2 text-sm font-bold uppercase tracking-wide text-muted">Freelance</h3>
+          {activeContract && (
+            <p className="mb-2 text-sm text-fg">
+              Active: {activeContract.title} · {activeContract.progress}/{activeContract.weeks}w
+            </p>
+          )}
+          <ul className="space-y-2">
+            {contracts.map((c) => (
+              <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-paper px-3 py-2">
+                <div>
+                  <div className="font-semibold text-fg">{c.title}</div>
+                  <div className="text-xs text-muted">
+                    {formatCash(c.reward)} · {c.researchReward} RP · {c.weeks}w
+                  </div>
+                </div>
+                <Button size="sm" disabled={!!activeContract} onClick={() => setMsg(takeContract(c.id) ?? "Accepted.")}>
+                  Take
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </ScreenBackdrop>
+  );
+}
+
 function SettingsScreen() {
   const saveGame = useGame((s) => s.saveGame);
   const setModal = useGame((s) => s.setModal);
   const returnToMenu = useGame((s) => s.returnToMenu);
   const setScreen = useGame((s) => s.setScreen);
-  const [showUnlocks, setShowUnlocks] = useState(true);
+  const [panel, setPanel] = useState<"unlocks" | "contracts" | "none">("unlocks");
   return (
     <div className="mx-auto max-w-lg space-y-3 px-1 pb-4 pt-1">
       <div className="game-panel px-4 py-3 text-center">
         <h2 className="text-2xl font-bold text-fg">More</h2>
-        <p className="text-sm text-muted">Unlocks · staff · money · save</p>
+        <p className="text-sm text-muted">Unlocks · contracts · staff · engines</p>
       </div>
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" variant="secondary" onClick={() => setShowUnlocks(true)}>
+        <Button size="sm" variant={panel === "unlocks" ? "primary" : "secondary"} onClick={() => setPanel("unlocks")}>
           Unlocks
+        </Button>
+        <Button size="sm" variant={panel === "contracts" ? "primary" : "secondary"} onClick={() => setPanel("contracts")}>
+          Contracts
         </Button>
         <Button size="sm" variant="secondary" onClick={() => setScreen("staff")}>
           People
@@ -1963,7 +2118,8 @@ function SettingsScreen() {
           Engines
         </Button>
       </div>
-      {showUnlocks && <UnlocksScreen embedded />}
+      {panel === "unlocks" && <UnlocksScreen embedded />}
+      {panel === "contracts" && <ContractsScreen />}
       <div className="space-y-2">
         <Button className="w-full" variant="secondary" onClick={() => saveGame()}>
           Save campaign
