@@ -15,6 +15,7 @@ import { formatCash, formatFans } from "@/lib/game/simulation";
 import { useGame } from "@/lib/game/store";
 import { explainSales, calendarHudLabel, weekToCalendarLabel, weekToYearMonth } from "@/lib/game/viewModels";
 import { cnJoin } from "@/components/ui/primitives";
+import { SalesChart, salesPointsFromGame } from "@/components/game/SalesChart";
 import {
   CalendarDays,
   ChevronLeft,
@@ -351,22 +352,35 @@ export function MarketScreen() {
       {tab === "sales" && (
         <section className="mt-4 space-y-4">
           <div className="game-panel p-3">
-            <h3 className="text-sm font-bold text-fg">Your titles on sale</h3>
-            <ul className="mt-2 space-y-2">
-              {liveSales.map((g) => (
-                <li key={g.id} className="rounded-xl border border-border bg-elevated p-3">
-                  <div className="flex justify-between gap-2">
-                    <span className="font-bold text-fg">{g.title}</span>
-                    <span className="tabular font-bold text-accent">{g.avgReview.toFixed(1)}</span>
-                  </div>
-                  <p className="mt-1 text-sm text-muted">
-                    {g.sales.toLocaleString()} units · {formatCash(g.revenue)}
-                  </p>
-                  <p className="mt-1 text-xs text-subtle">{explainSales(g)}</p>
-                </li>
-              ))}
-              {!liveSales.length && (
-                <li className="py-4 text-center text-sm text-muted">No titles selling.</li>
+            <h3 className="text-sm font-bold text-fg">Your titles · sales graphs</h3>
+            <ul className="mt-2 space-y-3">
+              {(liveSales.length ? liveSales : released.slice(0, 4)).map((g) => {
+                const pts = salesPointsFromGame(g);
+                const planOnly = !g.weeklyHistory?.length && pts.length > 0;
+                return (
+                  <li key={g.id} className="rounded-xl border border-border bg-elevated p-3">
+                    <div className="flex justify-between gap-2">
+                      <span className="font-bold text-fg">{g.title}</span>
+                      <span className="tabular font-bold text-accent">{g.avgReview.toFixed(1)}</span>
+                    </div>
+                    <p className="mt-1 text-sm text-muted">
+                      {g.sales.toLocaleString()} units · {formatCash(g.revenue)}
+                      {g.onSale ? " · live" : " · catalog"}
+                    </p>
+                    <div className="mt-2">
+                      <SalesChart
+                        points={pts}
+                        height={110}
+                        label={planOnly ? "Projected weekly units" : "Weekly units"}
+                        emptyHint="Curve fills in as market weeks pass after release."
+                      />
+                    </div>
+                    <p className="mt-1 text-xs text-subtle">{explainSales(g)}</p>
+                  </li>
+                );
+              })}
+              {!liveSales.length && !released.length && (
+                <li className="py-4 text-center text-sm text-muted">No titles yet — ship from the garage.</li>
               )}
             </ul>
           </div>

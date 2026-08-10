@@ -55,6 +55,8 @@ import type { AudienceId, DevField, GameSize, GenreId, ScreenId } from "@/lib/ga
 import { Badge, Button, Input, Modal, SearchField, cnJoin } from "@/components/ui/primitives";
 import { GarageLoopFlowchart, ScoringPipelineFlow } from "@/components/game/LoopFlowchart";
 import { MarketScreen } from "@/components/game/MarketScreen";
+import { SalesChart, salesPointsFromGame } from "@/components/game/SalesChart";
+import { SYSTEM_UNLOCKS, describeUnlockRequirements } from "@/lib/game/progression/unlockRegistry";
 import { idealPhaseSliders } from "@/lib/game/classicGdt";
 import {
   FlaskConical,
@@ -343,7 +345,8 @@ function StudioTopBar({ forcePause }: { forcePause: boolean }) {
         aria-label="Menu"
       >
         <div className="text-[11px] font-bold tracking-wide text-white/90">{company || "Studio"}</div>
-        <div className="se-metric-muted text-[10px] tabular">
+        <div className="flex items-center gap-1.5 text-[11px] font-semibold tabular text-white/70">
+          <CalendarDays className="h-3.5 w-3.5 text-[#f0b24a]" aria-hidden />
           {calendarHudLabel({ year, month, week })}
         </div>
       </button>
@@ -414,14 +417,14 @@ function StudioDock() {
   const items: { id: typeof screen; label: string; icon: typeof Home }[] = [
     { id: "studio", label: "Studio", icon: Home },
     { id: "games", label: "Games", icon: Gamepad2 },
-    { id: "research", label: "Lab", icon: FlaskConical },
     { id: "market", label: "Market", icon: TrendingUp },
-    { id: "staff", label: "People", icon: Users },
-    { id: "finances", label: "Books", icon: Wallet },
+    { id: "platforms", label: "Systems", icon: Cpu },
+    { id: "research", label: "Lab", icon: FlaskConical },
+    { id: "settings", label: "More", icon: Settings },
   ];
-  if (office >= 2) {
-    items.splice(4, 0, { id: "engines", label: "Engine", icon: Cpu });
-  }
+  void office;
+  void Users;
+  void Wallet;
 
   return (
     <nav className="se-dock" aria-label="Studio navigation">
@@ -1038,48 +1041,133 @@ function GamesScreen() {
   const selectGame = useGame((s) => s.selectGame);
   const setModal = useGame((s) => s.setModal);
   const startTitleCampaign = useGame((s) => s.startTitleCampaign);
+  const year = useGame((s) => s.year);
   const [sel, setSel] = useState<string | null>(null);
   const [campMsg, setCampMsg] = useState("");
   const rows = libraryRows(games);
-  const selected = games.find((g) => g.id === sel);
+  const selected = games.find((g) => g.id === (sel ?? games[0]?.id));
+  const chartPts = selected ? salesPointsFromGame(selected) : [];
+  const isPlan =
+    !!selected &&
+    !(selected.weeklyHistory?.length) &&
+    (selected.weeklySalesLeft?.length ?? 0) > 0;
+
   return (
     <ScreenBackdrop screen="games">
       <div className="game-panel px-4 py-3 text-center">
-        <h2 className="text-2xl font-bold text-fg">Game History</h2>
-        <p className="mt-0.5 text-sm text-muted">Shipped titles and campaigns</p>
+        <h2 className="text-2xl font-bold text-fg">Library</h2>
+        <p className="mt-0.5 text-sm text-muted">Sales graphs · reviews · campaigns</p>
       </div>
-      {!rows.length && <p className="mt-8 text-center text-muted">No releases yet.</p>}
-      <ul className="mt-4 space-y-2">
-        {rows.map((r) => (
-          <li key={r.id}>
-            <button
-              type="button"
-              onClick={() => setSel(r.id === sel ? null : r.id)}
-              className={cnJoin(
-                "w-full rounded-xl border p-4 text-left backdrop-blur-sm",
-                sel === r.id ? "border-accent bg-accent/15" : "border-border bg-paper",
-              )}
-            >
-              <div className="flex justify-between gap-2">
-                <span className="font-bold text-fg">{r.title}</span>
-                <span className="text-lg font-bold tabular text-tech">{r.avgReview.toFixed(1)}</span>
-              </div>
-              <p className="mt-1 text-xs text-muted">
-                {r.genre} · {r.sales.toLocaleString()} sold · {r.revenueLabel}
-              </p>
-            </button>
-          </li>
-        ))}
+      {!rows.length && (
+        <p className="mt-6 text-center text-muted">
+          No releases yet. Ship your first title from the garage desk.
+        </p>
+      )}
+      <ul className="mt-3 space-y-2">
+        {rows.map((r) => {
+          const g = games.find((x) => x.id === r.id);
+          const thumb = g ? platformThumb(g.platformId, g.yearReleased ?? year) : undefined;
+          const on = (sel ?? games[0]?.id) === r.id;
+          return (
+            <li key={r.id}>
+              <button
+                type="button"
+                onClick={() => setSel(r.id)}
+                className={cnJoin(
+                  "flex w-full items-center gap-3 rounded-xl border p-3 text-left",
+                  on ? "border-accent bg-accent/15" : "border-border bg-paper",
+                )}
+              >
+                {thumb ? (
+                  <img
+                    src={thumb}
+                    alt=""
+                    className="h-12 w-12 shrink-0 rounded-lg object-cover ring-1 ring-white/15"
+                    draggable={false}
+                  />
+                ) : (
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-panel text-[10px] font-bold text-muted">
+                    {r.avgReview.toFixed(1)}
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="flex justify-between gap-2">
+                    <span className="truncate font-bold text-fg">{r.title}</span>
+                    <span className="tabular text-lg font-bold text-tech">{r.avgReview.toFixed(1)}</span>
+                  </div>
+                  <p className="mt-0.5 text-xs text-muted">
+                    {r.genre} · {r.platform} · {r.sales.toLocaleString()} sold · {r.revenueLabel}
+                  </p>
+                </div>
+              </button>
+            </li>
+          );
+        })}
       </ul>
+
       {selected && (
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Button size="sm" variant="secondary" onClick={() => { selectGame(selected.id); setModal("reviews"); }}>
-            Reviews
-          </Button>
-          <Button size="sm" variant="secondary" onClick={() => setCampMsg(startTitleCampaign(selected.id, "flyer_run") ?? "Flyer started.")}>
-            Flyer
-          </Button>
-          {campMsg && <p className="w-full text-xs text-muted">{campMsg}</p>}
+        <div className="mt-3 space-y-3 rounded-2xl border border-border bg-paper p-3">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h3 className="text-lg font-bold text-fg">{selected.title}</h3>
+              <p className="text-xs text-muted">
+                {getGenre(selected.genreId).name} ·{" "}
+                {getPlatform(selected.platformId)?.name ?? selected.platformId} ·{" "}
+                {selected.yearReleased}
+              </p>
+            </div>
+            <div className="text-right">
+              <div className="text-2xl font-bold tabular text-accent">{selected.avgReview.toFixed(1)}</div>
+              <div className="text-[10px] font-bold uppercase text-muted">avg review</div>
+            </div>
+          </div>
+
+          <SalesChart
+            points={chartPts}
+            label={isPlan ? "Projected shelf (pre-sales)" : "Weekly units sold"}
+            emptyHint="Sales curve appears after release weeks tick."
+            height={140}
+          />
+
+          <div className="grid grid-cols-3 gap-2 text-center text-xs">
+            <div className="rounded-lg border border-border bg-elevated px-2 py-2">
+              <div className="font-bold tabular text-fg">{selected.sales.toLocaleString()}</div>
+              <div className="text-muted">Units</div>
+            </div>
+            <div className="rounded-lg border border-border bg-elevated px-2 py-2">
+              <div className="font-bold tabular text-good">{formatCash(selected.revenue)}</div>
+              <div className="text-muted">Revenue</div>
+            </div>
+            <div className="rounded-lg border border-border bg-elevated px-2 py-2">
+              <div className="font-bold tabular text-fg">{selected.weeksOnMarket}w</div>
+              <div className="text-muted">On sale</div>
+            </div>
+          </div>
+
+          <p className="text-xs text-muted">{explainSales(selected)}</p>
+
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                selectGame(selected.id);
+                setModal("reviews");
+              }}
+            >
+              Reviews
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() =>
+                setCampMsg(startTitleCampaign(selected.id, "flyer_run") ?? "Flyer started.")
+              }
+            >
+              Flyer campaign
+            </Button>
+            {campMsg && <p className="w-full text-xs text-muted">{campMsg}</p>}
+          </div>
         </div>
       )}
     </ScreenBackdrop>
@@ -1644,43 +1732,184 @@ function PlatformsScreen() {
   const year = useGame((s) => s.year);
   const licensePlatform = useGame((s) => s.licensePlatform);
   const [msg, setMsg] = useState("");
-  const list = PLATFORMS.filter((p) => p.year <= year + 1);
+  const [focus, setFocus] = useState<string | null>(null);
+  const list = PLATFORMS.filter((p) => p.year <= year + 3 && !(p as { isCustom?: boolean }).isCustom);
+  const focused =
+    list.find((p) => p.id === focus) ?? list.find((p) => unlocked.includes(p.id)) ?? list[0];
+
   return (
     <ScreenBackdrop screen="platforms">
-      <h2 className="text-center text-2xl font-bold text-fg">Systems</h2>
-      {msg && <p className="mt-2 text-center text-sm text-warn">{msg}</p>}
-      <ul className="mt-4 space-y-2">
+      <div className="game-panel px-4 py-3 text-center">
+        <h2 className="text-2xl font-bold text-fg">Systems</h2>
+        <p className="mt-0.5 text-sm text-muted">Hardware you can ship on · product shots</p>
+      </div>
+      {msg && <p className="text-center text-sm text-warn">{msg}</p>}
+
+      {focused && (
+        <div className="overflow-hidden rounded-2xl border border-border bg-paper">
+          <div className="relative aspect-[16/9] bg-black/40">
+            <img
+              src={platformArt(focused.id, year) ?? platformThumb(focused.id, year) ?? ""}
+              alt={focused.name}
+              className="h-full w-full object-contain p-4"
+              draggable={false}
+            />
+            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent px-4 pb-3 pt-8">
+              <h3 className="text-xl font-bold text-white">{focused.name}</h3>
+              <p className="text-xs text-white/60">
+                {focused.year} · {unlocked.includes(focused.id) ? "Licensed" : "Not licensed"} · market{" "}
+                {Math.round(focused.marketSize * 100)}%
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ul className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
         {list.map((p) => {
           const owned = unlocked.includes(p.id);
           const thumb = platformThumb(p.id, year);
+          const lockedYear = p.year > year;
           return (
-            <li key={p.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-paper px-3 py-3 shadow-sm">
-              <div className="flex min-w-0 items-center gap-3">
-                {thumb ? (
-                  <img src={thumb} alt="" className="h-12 w-12 shrink-0 rounded-lg object-cover ring-1 ring-white/20" draggable={false} />
-                ) : (
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-panel text-[10px] font-bold text-muted">
-                    {p.short}
-                  </div>
+            <li key={p.id}>
+              <button
+                type="button"
+                onClick={() => setFocus(p.id)}
+                className={cnJoin(
+                  "flex w-full flex-col overflow-hidden rounded-xl border text-left",
+                  focus === p.id || (!focus && focused?.id === p.id)
+                    ? "border-accent ring-1 ring-accent/40"
+                    : "border-border",
+                  owned ? "bg-paper" : "bg-elevated/80",
                 )}
-                <div className="min-w-0">
-                  <div className="truncate font-semibold text-fg">{p.name}</div>
-                  <div className="text-xs text-muted">{p.year}</div>
+              >
+                <div className="aspect-square bg-black/30 p-2">
+                  {thumb ? (
+                    <img src={thumb} alt="" className="h-full w-full object-contain" draggable={false} />
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-xs font-bold text-muted">
+                      {p.short}
+                    </div>
+                  )}
                 </div>
-              </div>
-              {owned ? (
-                <Badge tone="good">Owned</Badge>
-              ) : (
-                <Button size="sm" onClick={() => setMsg(licensePlatform(p.id) ?? "Licensed.")}>
-                  License {formatCash(p.licenseCost)}
-                </Button>
-              )}
+                <div className="px-2 py-2">
+                  <div className="truncate text-xs font-bold text-fg">{p.name}</div>
+                  <div className="mt-0.5 flex items-center justify-between gap-1">
+                    <span className="text-[10px] text-muted">{p.year}</span>
+                    {owned ? (
+                      <Badge tone="good">Owned</Badge>
+                    ) : lockedYear ? (
+                      <span className="text-[10px] font-bold text-tech">Soon</span>
+                    ) : (
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        className="text-[10px] font-bold text-accent"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setMsg(licensePlatform(p.id) ?? "Licensed.");
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.stopPropagation();
+                            setMsg(licensePlatform(p.id) ?? "Licensed.");
+                          }
+                        }}
+                      >
+                        License
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </button>
             </li>
           );
         })}
       </ul>
     </ScreenBackdrop>
   );
+}
+
+function UnlocksScreen({ embedded = false }: { embedded?: boolean }) {
+  const unlocks = useGame((s) => s.unlocks);
+  const researched = useGame((s) => s.researched);
+  const gamesPublished = useGame((s) => s.gamesPublished);
+  const office = useGame((s) => s.office);
+  const fans = useGame((s) => s.fans);
+  const year = useGame((s) => s.year);
+
+  const stateObj = useGame();
+  const rows = SYSTEM_UNLOCKS.map((u) => ({
+    def: u,
+    state: (unlocks[u.id] ?? (u.startOwned ? "owned" : "hidden")) as string,
+  }));
+  // Show owned/teased/discovered/researchable + a few locked previews with requirements
+  const open = rows.filter((r) => r.state !== "hidden");
+  const lockedPreview = rows
+    .filter((r) => r.state === "hidden")
+    .slice(0, 8)
+    .map((r) => ({ ...r, state: "teased" as string, preview: true as const }));
+  const visible = [...open, ...lockedPreview.filter((l) => !open.some((o) => o.def.id === l.def.id))];
+
+  const tone: Record<string, string> = {
+    owned: "border-good/40 bg-good/10 text-good",
+    researchable: "border-accent/40 bg-accent/15 text-accent",
+    discovered: "border-border bg-elevated text-fg",
+    teased: "border-border bg-panel text-muted",
+    hidden: "border-border/50 bg-panel/50 text-subtle",
+  };
+
+  const body = (
+    <>
+      {!embedded && (
+        <div className="game-panel px-4 py-3 text-center">
+          <h2 className="text-2xl font-bold text-fg">Unlocks</h2>
+          <p className="mt-0.5 text-sm text-muted">
+            Studio systems · {gamesPublished} games · office {office} · {formatFans(fans)} fans · {year}
+          </p>
+        </div>
+      )}
+      {embedded && (
+        <p className="text-xs text-muted">
+          Progress · {gamesPublished} games · office {office} · {year}
+        </p>
+      )}
+      <ul className="mt-3 max-h-[40dvh] space-y-2 overflow-y-auto pr-0.5">
+        {visible.map(({ def, state }) => (
+          <li key={def.id} className={cnJoin("rounded-xl border px-3 py-3", tone[state] ?? tone.hidden)}>
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <div className="font-bold">{def.label}</div>
+                <p className="mt-0.5 text-xs opacity-80">{def.ownNote}</p>
+                {(state === "teased" || state === "discovered") && (
+                  <p className="mt-1 text-[10px] opacity-70">
+                    {describeUnlockRequirements(def.id, stateObj)
+                      .slice(0, 3)
+                      .map((r) => (r.met ? "✓ " : "○ ") + r.label)
+                      .join(" · ") || "Keep shipping"}
+                  </p>
+                )}
+              </div>
+              <span className="shrink-0 rounded-full border border-current/30 px-2 py-0.5 text-[10px] font-bold uppercase">
+                {state}
+              </span>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <div className="mt-3 rounded-xl border border-border bg-paper p-3">
+        <h3 className="text-sm font-bold text-fg">Research owned</h3>
+        <p className="mt-1 text-xs text-muted">
+          {researched.length
+            ? researched.slice(0, 24).join(" · ")
+            : "None yet — earn RP while developing."}
+        </p>
+      </div>
+    </>
+  );
+
+  if (embedded) return <div className="space-y-1">{body}</div>;
+  return <ScreenBackdrop screen="research">{body}</ScreenBackdrop>;
 }
 
 function FinancesScreen() {
@@ -1713,11 +1942,29 @@ function SettingsScreen() {
   const setModal = useGame((s) => s.setModal);
   const returnToMenu = useGame((s) => s.returnToMenu);
   const setScreen = useGame((s) => s.setScreen);
+  const [showUnlocks, setShowUnlocks] = useState(true);
   return (
-    <div className="mx-auto max-w-lg px-3 pb-8 pt-4">
-      <h2 className="text-center text-2xl font-bold">More</h2>
-      <div className="mx-auto mt-1 h-px w-24 bg-border-strong" />
-      <div className="mt-4 space-y-2">
+    <div className="mx-auto max-w-lg space-y-3 px-1 pb-4 pt-1">
+      <div className="game-panel px-4 py-3 text-center">
+        <h2 className="text-2xl font-bold text-fg">More</h2>
+        <p className="text-sm text-muted">Unlocks · staff · money · save</p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" variant="secondary" onClick={() => setShowUnlocks(true)}>
+          Unlocks
+        </Button>
+        <Button size="sm" variant="secondary" onClick={() => setScreen("staff")}>
+          People
+        </Button>
+        <Button size="sm" variant="secondary" onClick={() => setScreen("finances")}>
+          Books
+        </Button>
+        <Button size="sm" variant="secondary" onClick={() => setScreen("engines")}>
+          Engines
+        </Button>
+      </div>
+      {showUnlocks && <UnlocksScreen embedded />}
+      <div className="space-y-2">
         <Button className="w-full" variant="secondary" onClick={() => saveGame()}>
           Save campaign
         </Button>
@@ -1727,28 +1974,14 @@ function SettingsScreen() {
         <Button className="w-full" variant="secondary" onClick={() => setModal("cheats")}>
           CheatMod
         </Button>
-        <Button className="w-full" variant="secondary" onClick={() => setScreen("market")}>
-          Market
-        </Button>
-        <Button className="w-full" variant="secondary" onClick={() => setScreen("finances")}>
-          Finances
-        </Button>
-        <Button className="w-full" variant="secondary" onClick={() => setScreen("platforms")}>
-          Systems
-        </Button>
-        <Button className="w-full" variant="secondary" onClick={() => setScreen("staff")}>
-          People
-        </Button>
-        <Button className="w-full" variant="secondary" onClick={() => setScreen("engines")}>
-          Engines
-        </Button>
         <Button className="w-full" variant="ghost" onClick={() => returnToMenu()}>
-          Exit to title
+          Exit to menu
         </Button>
       </div>
     </div>
   );
 }
+
 
 /* ═══════════════════════════ Modals ═══════════════════════════ */
 
