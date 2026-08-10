@@ -154,7 +154,7 @@ export function tryMarkResearchable(
   techId: string,
   opts: Parameters<typeof canBecomeResearchable>[1],
 ): ResearchPipelineState {
-  let next = ensureCompanyTech(pipe, techId);
+  const next = ensureCompanyTech(pipe, techId);
   const cur = next.knowledge[techId]!;
   if (cur.state !== "observed" && cur.state !== "unknown") return next;
   const check = canBecomeResearchable(techId, opts);
@@ -236,7 +236,7 @@ export function tickResearchPipeline(
   week: number,
 ): { pipe: ResearchPipelineState; notes: string[] } {
   const notes: string[] = [];
-  let knowledge = { ...pipe.knowledge };
+  const knowledge = { ...pipe.knowledge };
   const jobs: ResearchPipelineState["activePipelineJobs"] = [];
 
   for (const job of pipe.activePipelineJobs) {
@@ -328,7 +328,7 @@ export function recordCommercialUse(
   featureKeys: string[],
   week: number,
 ): ResearchPipelineState {
-  let knowledge = { ...pipe.knowledge };
+  const knowledge = { ...pipe.knowledge };
   for (const t of TECH_CATALOG) {
     if (!t.featureKey || !featureKeys.includes(t.featureKey)) continue;
     const cur = knowledge[t.id];

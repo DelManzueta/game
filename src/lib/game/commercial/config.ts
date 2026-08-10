@@ -7,7 +7,9 @@ import { WEEKS_PER_MONTH, WEEKS_PER_YEAR } from "../data";
 
 /** First office gate (Garage → First Office). Bible §4.3. */
 export const FIRST_OFFICE_GATE = {
-  /** Campaign year 3 ≈ START_YEAR+2 (1979 → 1981) */
+  /** Campaign year 3+ (not calendar year). */
+  minCampaignYear: 3,
+  /** @deprecated use minCampaignYear — kept for older callers */
   minYear: 1981,
   minMonth: 10,
   minReleasedGames: 5,
@@ -18,10 +20,10 @@ export const FIRST_OFFICE_GATE = {
 } as const;
 
 /** Approximate week floor: 1981 M10 from START 1979. */
-export function firstOfficeMinWeek(startYear = 1979): number {
-  const years = FIRST_OFFICE_GATE.minYear - startYear;
-  const months = FIRST_OFFICE_GATE.minMonth - 1;
-  return years * WEEKS_PER_YEAR + months * WEEKS_PER_MONTH;
+/** Campaign-relative floor: start of year 3 (2 full years × 48 weeks). Independent of calendar START_YEAR. */
+export function firstOfficeMinWeek(_startYear = 1979): number {
+  // Bible: campaign year 3+ — earliest offer at week 96 (after year 2 completes).
+  return 2 * WEEKS_PER_YEAR; // 96 >= 80
 }
 
 /** Fan awareness uses diminishing returns — not 1 fan = 1 sale. */
@@ -91,11 +93,11 @@ export function releaseRpSpike(avgReview: number): number {
 
 /** Employee production RP by office stage (production seats only). */
 export const EMPLOYEE_RP_PER_WEEK: Record<1 | 2 | 3 | 4 | 5, number> = {
-  1: 0, // garage — founder learn-by-doing only
-  2: 1.2,
-  3: 2.2,
-  4: 3.5,
-  5: 4.5,
+  1: 0,
+  2: 1,
+  3: 2,
+  4: 3,
+  5: 4,
 };
 
 /** Max hired production employees (excludes founder). */

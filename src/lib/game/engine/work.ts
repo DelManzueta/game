@@ -56,7 +56,7 @@ export function clampPriorityPoints(
   priorities: Partial<Record<ArchitecturePriority, number>>,
 ): Partial<Record<ArchitecturePriority, number>> {
   const keys = Object.keys(priorities) as ArchitecturePriority[];
-  let sum = keys.reduce((s, k) => s + (priorities[k] ?? 0), 0);
+  const sum = keys.reduce((s, k) => s + (priorities[k] ?? 0), 0);
   if (sum <= PRIORITY_BUDGET) return { ...priorities };
   const scale = PRIORITY_BUDGET / sum;
   const out: Partial<Record<ArchitecturePriority, number>> = {};

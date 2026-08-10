@@ -3294,23 +3294,13 @@ function SettingsScreen() {
         <Button size="sm" variant={panel === "unlocks" ? "primary" : "secondary"} onClick={() => setPanel("unlocks")}>
           Unlocks
         </Button>
+        {office > 1 && (
         <Button size="sm" variant={panel === "contracts" ? "primary" : "secondary"} onClick={() => setPanel("contracts")}>
           Contracts
         </Button>
-        {/* Late systems hidden in Garage Phase One (Foundation Lock) */}
-        {office > 1 && (
-          <>
-            <Button size="sm" variant={panel === "hardware" ? "primary" : "secondary"} onClick={() => setPanel("hardware")}>
-              Hardware
-            </Button>
-            <Button size="sm" variant={panel === "netflix" ? "primary" : "secondary"} onClick={() => setPanel("netflix")}>
-              Netflix
-            </Button>
-            <Button size="sm" variant={panel === "platform" ? "primary" : "secondary"} onClick={() => setPanel("platform")}>
-              NeonStore
-            </Button>
-          </>
         )}
+        {/* Late systems hidden in Garage Phase One (Foundation Lock) */}
+        {/* Foundation Lock: late packages require feature flags (all off) — never show in Phase One+ */}
         <Button size="sm" variant={panel === "engines" ? "primary" : "secondary"} onClick={() => setPanel("engines")}>
           Engines
         </Button>
@@ -3325,10 +3315,7 @@ function SettingsScreen() {
         </Button>
       </div>
       {panel === "unlocks" && <UnlocksScreen embedded />}
-      {panel === "contracts" && (<><OpsPublisherDeals /><ContractsScreen /></>)}
-      {office > 1 && panel === "hardware" && <HardwareLabScreen />}
-      {office > 1 && panel === "netflix" && <NetflixEditionScreen />}
-      {office > 1 && panel === "platform" && <PlatformScreen />}
+      {office > 1 && panel === "contracts" && (<><OpsPublisherDeals /><ContractsScreen /></>)}
       {panel === "engines" && <TEngineScreen />}
       <SaveLoadPanel />
       <div className="space-y-2">

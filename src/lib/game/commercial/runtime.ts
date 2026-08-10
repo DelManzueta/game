@@ -135,28 +135,24 @@ export function initReleasedCommercial(opts: {
     marketCapacityRate: 0.012,
   };
 
-  const planTotal = planUnits.reduce((a, b) => a + b, 0);
-  const fansDelta = launchFanDelta({
-    avgReview,
-    awareness: released.awarenessAtLaunch,
-    fansAtLaunch: state.fans,
-    totalUnits: planTotal,
-    productQuality,
-  });
+  // Foundation Lock: NO projected-lifetime fan award from plan units.
+  // Bounded review reaction only; weekly fans come from actual sales.
+  const fansDelta =
+    avgReview >= 8.5 ? 25 : avgReview >= 7 ? 10 : avgReview >= 5.5 ? 0 : -5;
   released.fansGained = fansDelta;
   released.fanHistory = [
-    { week: state.week, delta: fansDelta, reason: "launch_reaction" },
+    { week: state.week, delta: fansDelta, reason: "review_reaction" },
   ];
 
   let notification: { text: string; tone: "good" | "bad" | "info" } | undefined;
-  if (fansDelta > 120) {
+  if (fansDelta > 0) {
     notification = {
-      text: `Fans love it — +${fansDelta.toLocaleString()} followers after reviews.`,
+      text: `Reviews land — +${fansDelta} fans (sales convert later).`,
       tone: "good",
     };
-  } else if (fansDelta < -5) {
+  } else if (fansDelta < 0) {
     notification = {
-      text: `Reviews hurt the brand — ${fansDelta.toLocaleString()} fans.`,
+      text: `Soft reviews — ${fansDelta} fans.`,
       tone: "bad",
     };
   }

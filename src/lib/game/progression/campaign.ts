@@ -4,7 +4,7 @@
  */
 import type { CampaignConfig, CampaignMode } from "./types";
 
-export const INDUSTRY_START_YEAR = 1977;
+export const INDUSTRY_START_YEAR = 1980;
 
 export function campaignConfigFor(mode: CampaignMode): CampaignConfig {
   if (mode === "legacy_50") {

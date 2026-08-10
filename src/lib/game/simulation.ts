@@ -625,6 +625,7 @@ export function generateGameTitle(topic: string, genre: string): string {
 
 /** Recent candidate names — avoid repetitive shortlists. */
 const RECENT_CANDIDATE_NAMES: string[] = [];
+let _staffGenSeq = 0;
 
 const STAFF_FIRST = [
   "Alex", "Sam", "Jordan", "Riley", "Casey", "Morgan", "Quinn", "Avery",
@@ -655,15 +656,26 @@ export function generateStaff(
   opts?: { forceStar?: boolean; seed?: number; candidateIndex?: number },
 ): StaffMember {
   const eraBoost = 1 + Math.max(0, year - 1979) * 0.008;
+  const idx = opts?.candidateIndex ?? 0;
+  _staffGenSeq += 1;
   const rng = new SeededRng(
     opts?.seed ??
-      hashSeed("staff", year, levelBias, opts?.candidateIndex ?? 0, opts?.forceStar ? 1 : 0),
+      hashSeed(
+        "staff-v3",
+        year,
+        Math.round(levelBias * 1000),
+        idx,
+        _staffGenSeq,
+        opts?.forceStar ? 1 : 0,
+      ),
   );
   const r = (a: number, b: number) => rng.range(a, b);
   const ri = (a: number, b: number) => rng.int(a, b);
   // ~12% chance of a higher-level "find" (or forced)
-  const isStar = opts?.forceStar || rng.next() < 0.12;
-  const isSolid = !isStar && rng.next() < 0.35;
+  // Spread archetypes by index so boards stay varied without Math.random()
+  const archetype = opts?.forceStar ? 0 : idx % 5;
+  const isStar = opts?.forceStar || archetype === 0 || rng.next() < 0.1;
+  const isSolid = !isStar && (archetype === 1 || archetype === 2 || rng.next() < 0.35);
   let level = 1;
   if (isStar) level = Math.round(r(4, 8));
   else if (isSolid) level = Math.round(r(2, 4));
@@ -688,12 +700,13 @@ export function generateStaff(
   if (isStar) salary = Math.round(salary * 1.35);
   salary = Math.min(salary, 1_800_000);
 
-  const pickSeeded = <T,>(arr: T[]) => arr[ri(0, arr.length - 1)]!;
-  let name = `${pickSeeded(STAFF_FIRST)} ${pickSeeded(STAFF_LAST)}`;
+  const pickSeeded = <T,>(arr: T[], salt: number) =>
+    arr[Math.floor((hashSeed("name", salt, _staffGenSeq, idx) / 4294967296) * arr.length) % arr.length]!;
+  let name = `${pickSeeded(STAFF_FIRST, 1)} ${pickSeeded(STAFF_LAST, 2)}`;
   let guard = 0;
-  while (RECENT_CANDIDATE_NAMES.includes(name) && guard < 20) {
-    name = `${pickSeeded(STAFF_FIRST)} ${pickSeeded(STAFF_LAST)}`;
+  while (RECENT_CANDIDATE_NAMES.includes(name) && guard < 40) {
     guard++;
+    name = `${pickSeeded(STAFF_FIRST, 3 + guard)} ${pickSeeded(STAFF_LAST, 9 + guard)}`;
   }
   RECENT_CANDIDATE_NAMES.push(name);
   if (RECENT_CANDIDATE_NAMES.length > 24) RECENT_CANDIDATE_NAMES.shift();

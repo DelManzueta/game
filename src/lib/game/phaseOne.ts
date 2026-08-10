@@ -1,50 +1,61 @@
 /**
  * Foundation Lock — Garage Phase One authority.
- * Late systems stay dark and must not tick while office is still Garage.
+ * Late systems stay dark; feature flags remain authoritative after Garage.
  */
 import type { GameState } from "./types";
-import { FEATURE_FLAGS, isFeatureEnabled } from "./progression/featureFlags";
+import { FEATURE_FLAGS, isFeatureEnabled, type FeatureFlagId } from "./progression/featureFlags";
 
 /** Founder-only garage campaign (office tier 1). */
 export function isGaragePhaseOne(state: Pick<GameState, "office">): boolean {
   return (state.office ?? 1) <= 1;
 }
 
-/** Systems that must not run or appear during Garage Phase One. */
-export const PHASE_ONE_QUARANTINE = {
-  netflixEdition: false,
-  streamerMarketing: false,
-  studioConventions: false,
-  digitalStorefront: false,
-  hardwareMerch: false,
-  playerConsoles: false,
-  mmoLifecycle: false,
-  qualityCrisisEvents: false,
-  awardsG3: false,
-  ipLitigation: false,
-  highDensityBay: false,
-  /** Unlimited marketing spam — replaced by yearly opportunity cap. */
-  unlimitedMarketing: false,
-} as const;
+const SYSTEM_FLAG: Partial<Record<string, FeatureFlagId>> = {
+  netflixEdition: "netflixEdition",
+  streamerMarketing: "streamerMarketing",
+  studioConventions: "studioConventions",
+  digitalStorefront: "digitalStorefront",
+  hardwareMerch: "hardwareMerch",
+  playerConsoles: "endgameBusinesses",
+  mmoLifecycle: "liveServices",
+  qualityCrisisEvents: "qualityCrisisEvents",
+  awardsG3: "endgameBusinesses",
+  ipLitigation: "netflixEdition",
+  highDensityBay: "techParkLabs",
+  publishers: "officeFoundation", // still gated by garage separately
+};
 
+export type LateSystem =
+  | "netflixEdition"
+  | "streamerMarketing"
+  | "studioConventions"
+  | "digitalStorefront"
+  | "hardwareMerch"
+  | "playerConsoles"
+  | "mmoLifecycle"
+  | "qualityCrisisEvents"
+  | "awardsG3"
+  | "ipLitigation"
+  | "highDensityBay"
+  | "publishers";
+
+/** Systems never active in Garage; after Garage still require feature flags. */
 export function lateSystemAllowed(
   state: Pick<GameState, "office">,
-  system: keyof typeof PHASE_ONE_QUARANTINE,
+  system: LateSystem,
 ): boolean {
   if (isGaragePhaseOne(state)) return false;
-  if (system === "digitalStorefront" || system === "playerConsoles" || system === "mmoLifecycle") {
-    return isFeatureEnabled("endgameBusinesses");
-  }
-  if (system === "hardwareMerch") {
-    return isFeatureEnabled("endgameBusinesses") || isFeatureEnabled("techParkLabs");
-  }
-  void FEATURE_FLAGS;
-  return !isGaragePhaseOne(state);
+  const flag = SYSTEM_FLAG[system];
+  if (flag && !isFeatureEnabled(flag)) return false;
+  // publishers: office foundation only, still needs non-garage
+  if (system === "publishers") return !isGaragePhaseOne(state);
+  return true;
 }
 
-/** Max marketing campaign purchases per campaign year in Phase One. */
 export const PHASE_ONE_MARKETING_PER_YEAR = 2;
 
 export function marketingYearIndex(week: number, weeksPerYear = 48): number {
   return Math.floor(Math.max(0, week) / weeksPerYear);
 }
+
+void FEATURE_FLAGS;

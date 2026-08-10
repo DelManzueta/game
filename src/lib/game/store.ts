@@ -199,6 +199,10 @@ import {
   PHASE_ONE_MARKETING_PER_YEAR,
   marketingYearIndex,
 } from "./phaseOne";
+import {
+  emptyMarketingOpportunityState,
+  ensureYearOpportunities,
+} from "./marketingOpportunities";
 import { applyCashTransaction, moneyRound } from "./finance/transaction";
 import {
   canAdvanceOffice,
@@ -470,6 +474,24 @@ function canPurchaseMarketing(state: GameState): string | null {
   return null;
 }
 
+
+/** Apply cash+ledger atomically on a draft state. */
+function commitTxn(
+  next: GameState,
+  entry: {
+    week: number;
+    amount: number;
+    category: import("./finance/ledger").LedgerCategory;
+    label: string;
+    ref: string;
+    gameId?: string;
+  },
+): GameState {
+  const txn = applyCashTransaction(next.cash, next.ledger, entry);
+  if (!txn.applied) return next;
+  return { ...next, cash: txn.cash, ledger: txn.ledger };
+}
+
 export function hasSave(): boolean {
   try {
     return findSave(localStorage) != null;
@@ -577,6 +599,7 @@ function initialState(): GameState {
     ipRoyaltyGameIds: [],
     activeMmos: [],
     digitalStorefront: emptyStorefront(),
+    marketingOpportunities: undefined,
     installedPacks: [],
     infringementDue: [],
     knownCombos: {},
@@ -805,7 +828,7 @@ function applyEventChoice(state: GameState, choiceIndex: number): GameState {
   // Part 2 decision catalog
   if (pe.decisionChoices && pe.decisionChoices.length) {
     const choice = pe.decisionChoices[choiceIndex] ?? pe.decisionChoices[0];
-    let next: GameState = {
+    const next: GameState = {
       ...state,
       pendingEvent: null,
       modal: null,
@@ -847,7 +870,7 @@ function applyEventChoice(state: GameState, choiceIndex: number): GameState {
 
   const def = EVENT_POOL.find((e) => e.key === pe.id);
   const choice = def?.choices[choiceIndex] ?? def?.choices[0];
-  let next: GameState = {
+  const next: GameState = {
     ...state,
     pendingEvent: null,
     modal: null,
@@ -968,7 +991,7 @@ function releaseProject(next: GameState, project: GameProject): GameState {
   );
 
   let qualityResult = scored.qualityResult;
-  let reviewResult = undefined as import("./quality/algorithm").ReviewResult | undefined;
+  const reviewResult = undefined as import("./quality/algorithm").ReviewResult | undefined;
   let reviews: ReturnType<typeof computeReviews>;
   let productQuality: number;
   let hidden: number;
@@ -1216,7 +1239,7 @@ function releaseProject(next: GameState, project: GameProject): GameState {
   }
   const platformAgeYears = Math.max(0, (releaseDay - pSpec.launchDay) / (48 * 7));
 
-  let sales = computeSalesCurve(hidden, {
+  const sales = computeSalesCurve(hidden, {
     size: scored.size,
     platformMarket,
     fans: next.fans,
@@ -2205,6 +2228,14 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     next.year = date.year;
     next.month = date.month;
     next.dirty = true;
+    if (isGaragePhaseOne(next)) {
+      const mkt = ensureYearOpportunities(
+        next.marketingOpportunities ?? emptyMarketingOpportunityState(),
+        next.week,
+        next.campaignSeed,
+      );
+      next.marketingOpportunities = mkt;
+    }
 
     // Progression tenure + office offers + move completion (CP1)
     if (isFeatureEnabled("officeFoundation")) {
@@ -2229,14 +2260,30 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     }
 
     const payroll = next.staff.reduce((s, m) => s + m.salary, 0);
-    next.cash -= payroll / 4;
+    if (payroll > 0) {
+      next = commitTxn(next, {
+        week: next.week,
+        amount: -(payroll / 4),
+        category: "payroll",
+        label: "Weekly payroll",
+        ref: `payroll-w${next.week}`,
+      });
+    }
     if (date.weekOfMonth === 1) {
       const rent =
           (next.office === 2 && isHighDensity(next.officeSubTier)
             ? HIGH_DENSITY.rent
             : OFFICE_INFO[next.office as 1 | 2 | 3 | 4 | 5].rent) +
           clutterTax((next.hardwareProducts ?? []).filter((h) => (h.fabWeeksLeft ?? 0) <= 0 || h.workbenchMode).length);
-      if (rent > 0) next.cash -= rent;
+      if (rent > 0) {
+        next = commitTxn(next, {
+          week: next.week,
+          amount: -rent,
+          category: "rent",
+          label: "Monthly office rent",
+          ref: `rent-w${next.week}`,
+        });
+      }
     }
 
     // Staff energy + Module 20 burnout fatigue
@@ -2246,7 +2293,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       }
       const crunch = !!next.currentProject?.crunchMode;
       const working = !!next.currentProject && (m.busy || m.id === "founder");
-      let status = (m.workStatus ?? "Active") as "Active" | "Vacation";
+      const status = (m.workStatus ?? "Active") as "Active" | "Vacation";
       let fatigue = m.fatigue ?? Math.max(0, 100 - (m.energy ?? 100));
       // Map vacation force when not working optional rest
       if (!working && status === "Active" && fatigue > 60 && !crunch) {
@@ -2675,8 +2722,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
             : OFFICE_INFO[next.office as 1 | 2 | 3 | 4 | 5].rent) +
           clutterTax((next.hardwareProducts ?? []).filter((h) => (h.fabWeeksLeft ?? 0) <= 0 || h.workbenchMode).length);
         if (rent > 0) {
-          next.cash -= rent;
-          next.ledger = applyLedger(next.ledger, {
+          next = commitTxn(next, {
             week: next.week,
             amount: -rent,
             category: "rent",
@@ -2709,7 +2755,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
           historicalAverage: next.targetHighScore ?? 35,
           rivalIndex: idx,
         });
-        next.targetHighScore = clampHistoricalAverage(rel.nextHistorical);
+        // Foundation Lock: rival releases never mutate player scoring target.
         next.lastRivalReleaseWeek = next.week;
         next.rivalRotateIndex = (idx + 1) % 3;
         // Genre saturation 8 weeks
@@ -3080,8 +3126,28 @@ export const useGame = create<GameState & Actions>((set, get) => ({
 
 
     // Module 15 — bankruptcy halt (no further auto-advance)
-    next.cash = intCash(next.cash);
+    next.cash = moneyRound(next.cash);
     next.fans = intFans(next.fans);
+    // Foundation Lock: cash and ledger must agree after settlement
+    if (next.ledger) {
+      if (Math.abs(next.cash - next.ledger.balance) > 0.02) {
+        // Prefer ledger when txn path used; if cash moved without ledger, append reconciling entry
+        const drift = moneyRound(next.cash - next.ledger.balance);
+        if (Math.abs(drift) > 0.02) {
+          next.ledger = applyLedger(next.ledger, {
+            week: next.week,
+            amount: drift,
+            category: "other",
+            label: "Balance reconciliation",
+            ref: `recon-w${next.week}-${next.ledger.entries.length}`,
+          });
+          next.cash = moneyRound(next.ledger.balance);
+        }
+      } else {
+        next.cash = moneyRound(next.ledger.balance);
+      }
+    }
+
     if (isBankrupt(next.cash, !!next.settings.disableBankruptcy)) {
       next.speed = 0;
       if (next.cash < -5000 && !next.currentProject && next.activeSales.length === 0) {
@@ -3215,8 +3281,18 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       year: state.year,
     });
 
+    {
+    const txn = applyCashTransaction(state.cash, state.ledger, {
+      week: state.week,
+      amount: -cost,
+      category: "development",
+      label: `Start project: ${project.title}`,
+      ref: `dev-start-${project.id}`,
+    });
+    if (!txn.applied) return "Project start already charged.";
     set({
-      cash: state.cash - cost,
+      cash: txn.cash,
+      ledger: txn.ledger,
       currentProject: project,
       engineWorkshop: workshop,
       speed: 0,
@@ -3229,6 +3305,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         "info",
       ),
     });
+    }
     return null;
   },
 
@@ -3277,7 +3354,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     );
     if (planned.error) return planned.error;
     let project = planned.project;
-    let cash = state.cash;
+    const cash = state.cash;
     let notes = pushNote(state, `Stage ${stageNum} started.`, "info");
     let modal: GameState["modal"] = null;
     let pendingEvent: GameState["pendingEvent"] = state.pendingEvent;
@@ -3739,7 +3816,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     if (state.researchPoints < course.rpCost) return "Not enough RP.";
     const result = startTrainingOnMember(member, course);
     if (typeof result === "string") return result;
-    let next: GameState = {
+    const next: GameState = {
       ...state,
       cash: state.cash - course.cashCost,
       researchPoints: state.researchPoints - course.rpCost,
@@ -3981,6 +4058,9 @@ export const useGame = create<GameState & Actions>((set, get) => ({
 
   acceptPublisherDeal: (id) => {
     const state = get();
+    if (isGaragePhaseOne(state) || !lateSystemAllowed(state, "publishers")) {
+      return "Publishing locked during Garage Phase One.";
+    }
     const unlocked =
       publishingUnlocked({
         gamesPublished: state.gamesPublished,
@@ -3996,8 +4076,17 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     if (!deal) return "Unknown deal.";
     if (state.week >= deal.expirationWeek) return "That offer expired.";
     // Upfront cash (covers development risk)
+    const txn = applyCashTransaction(state.cash, state.ledger, {
+      week: state.week,
+      amount: deal.upfrontPayment,
+      category: "publisher",
+      label: `Publisher advance: ${deal.publisherName}`,
+      ref: `pub-advance-${deal.id}`,
+    });
+    if (!txn.applied) return "Advance already recorded.";
     set({
-      cash: state.cash + deal.upfrontPayment,
+      cash: txn.cash,
+      ledger: txn.ledger,
       activePublisherDealId: deal.id,
       dirty: true,
       notifications: pushNote(
@@ -4005,19 +4094,15 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         `${deal.publisherName} signed: +${formatCash(deal.upfrontPayment)} advance. Hit ${deal.minimumReviewScore}+ reviews.`,
         "good",
       ),
-      ledger: applyLedger(state.ledger, {
-        week: state.week,
-        amount: deal.upfrontPayment,
-        category: "other",
-        label: `Publisher advance: ${deal.publisherName}`,
-        ref: `pub-advance-${deal.id}`,
-      }),
     });
     return null;
   },
 
   refreshPublisherBoard: () => {
     const state = get();
+    if (isGaragePhaseOne(state) || !lateSystemAllowed(state, "publishers")) {
+      return "Publishing locked during Garage Phase One.";
+    }
     const board = state.publishingBoard ?? generatePublishingBoard({
       campaignSeed: state.campaignSeed,
       week: state.week,
@@ -4036,18 +4121,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     return null;
   },
 
-  clearPublisherDeal: () => set({ activePublisherDealId: null,
-    unlockedDrm: ["None"],
-    postMortems: [],
-    genreExp: { action: 0, adventure: 0, rpg: 0, simulation: 0, strategy: 0, casual: 0 },
-    gameHistoryLedger: [],
-    hardwareProducts: [],
-    knownCombos: {},
-    playerConsoles: [],
-    lastAwardsYear: 0,
-    lastRivalReleaseWeek: 0,
-    rivalRotateIndex: 0,
-    rivalGenrePressure: {}, dirty: true }),
+  clearPublisherDeal: () => set({ activePublisherDealId: null, dirty: true }),
 
   takeContract: (id) => {
     const state = get();
@@ -4470,12 +4544,24 @@ export const useGame = create<GameState & Actions>((set, get) => ({
 
   signOpsPublisher: (publisherId: string) => {
     const state = get();
+    if (isGaragePhaseOne(state) || !lateSystemAllowed(state, "publishers")) {
+      return "Publishing locked during Garage Phase One.";
+    }
     const offer = PUBLISHER_MATRIX.find((p) => p.id === publisherId);
     if (!offer) return "Unknown publisher.";
     if (state.fans < offer.minFans) return `Need ${offer.minFans.toLocaleString()} fans.`;
     if (state.activePublisherDealId) return "Already bound to a publisher deal.";
+    const txn = applyCashTransaction(state.cash, state.ledger, {
+      week: state.week,
+      amount: offer.advancePay,
+      category: "publisher",
+      label: `Publisher advance: ${offer.company}`,
+      ref: `ops-pub-${offer.id}`,
+    });
+    if (!txn.applied) return "Advance already recorded.";
     set({
-      cash: state.cash + offer.advancePay,
+      cash: txn.cash,
+      ledger: txn.ledger,
       activePublisherDealId: offer.id,
       dirty: true,
       notifications: pushNote(
@@ -4483,13 +4569,6 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         `${offer.company} advance +${formatCash(offer.advancePay)}. Hit ${offer.reqScore}+ or pay 60% breach fine.`,
         "good",
       ),
-      ledger: applyLedger(state.ledger, {
-        week: state.week,
-        amount: offer.advancePay,
-        category: "other",
-        label: `Publisher advance: ${offer.company}`,
-        ref: `ops-pub-${offer.id}`,
-      }),
     });
     return null;
   },
@@ -5050,7 +5129,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       ref: `studio-mkt-${campaignId}-w${state.week}-${countMarketingInYear(state, marketingYearIndex(state.week))}`,
     });
     if (!txn.applied) return "Marketing purchase already recorded this week.";
-    let next: GameState = {
+    const next: GameState = {
       ...state,
       cash: txn.cash,
       ledger: txn.ledger,
@@ -5210,7 +5289,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     const logEntry = (action: string, detail?: string) =>
       [{ week: get().week, action, detail }, ...(get().cheatLog ?? [])].slice(0, 80);
 
-    let next: GameState = {
+    const next: GameState = {
       ...state,
       cheatsEnabled: true,
       dirty: true,

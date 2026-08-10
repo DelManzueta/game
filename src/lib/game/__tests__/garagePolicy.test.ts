@@ -178,7 +178,7 @@ function releasedFrom(
 describe("garage content slice", () => {
   it("exposes ~12 topics and early garage platforms", () => {
     assert.ok(GARAGE_TOPIC_IDS.length >= 8 && GARAGE_TOPIC_IDS.length <= 14);
-    assert.equal(GARAGE_PLATFORM_IDS.length, 10);
+    assert.equal(GARAGE_PLATFORM_IDS.length, 6);
     assert.equal(GARAGE_GENRE_IDS.length, 6);
     assert.ok(isGarageTopic("space"));
     assert.ok(isGaragePlatform("pc"));
