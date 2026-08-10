@@ -135,6 +135,11 @@ import {
   sliderDeviation,
   CLASSIC_INITIAL_HISTORICAL,
 } from "./classicGdt";
+import {
+  runAllocationEngine,
+  staffPoolStats,
+  FEATURE_INJECTION_DB,
+} from "./gdtAllocation";
 import { tycoonHypeDecay, tycoonStaffEnergyTick, TYCOON_DEFAULTS } from "./tycoonEngine";
 import {
   competitorRelease,
@@ -790,7 +795,7 @@ function releaseProject(next: GameState, project: GameProject): GameState {
 
   const boosts = researchBoosts(next.researched);
   const merged = mergeSlidersFromConfigs(project.stageConfigs);
-  const scored: GameProject = {
+  let scored: GameProject = {
     ...project,
     sliders: merged,
     stage: "done",
@@ -852,6 +857,31 @@ function releaseProject(next: GameState, project: GameProject): GameState {
       sliderDeviation(scored.genreId, 2, scored.sliders) +
       sliderDeviation(scored.genreId, 3, scored.sliders)) /
     3;
+
+  // ── Phase-weighted feature allocation (bottlenecks → bugs) ──────────────
+  {
+    const pool = staffPoolStats(next.staff);
+    const alloc = runAllocationEngine({
+      genreId: scored.genreId,
+      featureIds: scored.features ?? [],
+      stage1: (scored.sliders ?? {}) as Record<string, number>,
+      stage2: (scored.sliders ?? {}) as Record<string, number>,
+      stage3: (scored.sliders ?? {}) as Record<string, number>,
+      staffTech: pool.tech,
+      staffDesign: pool.design,
+    });
+    // Feature baseline points fold into totals; bottleneck bugs stack
+    scored = {
+      ...scored,
+      designPoints: scored.designPoints + alloc.design * 0.55,
+      techPoints: scored.techPoints + alloc.tech * 0.55,
+      bugs: scored.bugs + alloc.bugs,
+    };
+    if (alloc.notes.length) {
+      next.notifications = pushNote(next, alloc.notes[0]!, "warn");
+    }
+    (scored as { allocationNote?: string }).allocationNote = alloc.notes.join(" · ");
+  }
 
   // ── Classic GDT spine (Python blueprint math) ───────────────────────────
   // score = (points / historical) * combo * 7.5 * sliderFit * bugFit

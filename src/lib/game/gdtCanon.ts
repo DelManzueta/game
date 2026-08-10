@@ -159,3 +159,78 @@ export const CANON_PRODUCTION = {
   polishRequiredWork: 200,
   polishWorkPerDay: 200,
 };
+
+
+/** High-fidelity storefront row (trailing market). */
+export type StorefrontTitle = {
+  title: string;
+  score: number;
+  totalLifespan: number;
+  remainingWeeks: number;
+  salesPoolBase: number;
+  accumulatedUnitsSold: number;
+  price: number;
+};
+
+/**
+ * Initial pool: rawPoints × review^2.4 × 18 × platformShare × hype
+ * Weekly: (pool / L) × (1 − t/L)^2.2   min 5 units
+ */
+export function injectStorefrontRelease(opts: {
+  title: string;
+  size: GameSize;
+  reviewScore: number;
+  rawPoints: number;
+  platformShare: number;
+  currentHype: number;
+  unitPrice?: number;
+}): StorefrontTitle {
+  const L = SHELF_LIFE_WEEKS[opts.size] ?? 12;
+  const hypeM = 1 + Math.max(0, opts.currentHype) / 100;
+  const pool =
+    Math.max(1, opts.rawPoints) *
+    Math.pow(clamp(opts.reviewScore, 1, 10), 2.4) *
+    18 *
+    Math.max(0.2, opts.platformShare) *
+    hypeM;
+  return {
+    title: opts.title,
+    score: opts.reviewScore,
+    totalLifespan: L,
+    remainingWeeks: L,
+    salesPoolBase: pool,
+    accumulatedUnitsSold: 0,
+    price: opts.unitPrice ?? UNIT_PRICE,
+  };
+}
+
+export function processStorefrontWeek(list: StorefrontTitle[]): {
+  list: StorefrontTitle[];
+  cashGain: number;
+  fansChange: number;
+  unitsThisWeek: number;
+} {
+  let cash = 0;
+  let fans = 0;
+  let units = 0;
+  const next: StorefrontTitle[] = [];
+  for (const game of list) {
+    if (game.remainingWeeks <= 0) continue;
+    const t = game.totalLifespan - game.remainingWeeks;
+    const progress = t / Math.max(1, game.totalLifespan);
+    const decay = Math.pow(Math.max(0, 1 - progress), 2.2);
+    let weeklyUnits = Math.round((game.salesPoolBase / game.totalLifespan) * decay);
+    weeklyUnits = Math.max(5, weeklyUnits);
+    const g = {
+      ...game,
+      accumulatedUnitsSold: game.accumulatedUnitsSold + weeklyUnits,
+      remainingWeeks: game.remainingWeeks - 1,
+    };
+    const gross = weeklyUnits * g.price;
+    cash += gross * (1 - PLATFORM_TAX);
+    fans += weeklyUnits * 0.03 * ((g.score - 5.0) / 5.0);
+    units += weeklyUnits;
+    if (g.remainingWeeks > 0) next.push(g);
+  }
+  return { list: next, cashGain: cash, fansChange: Math.round(fans), unitsThisWeek: units };
+}
