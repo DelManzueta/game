@@ -624,18 +624,58 @@
   color: var(--glass-text);
   backdrop-filter: blur(12px);
 }
-.glass-hud .text-muted { color: var(--glass-muted) !important; }
-.glass-hud .text-fg { color: var(--glass-text) !important; }
-.glass-hud .text-cash { color: #9dffc8 !important; }
-.glass-hud .text-fans { color: #9fd4ff !important; }
-.glass-hud .text-accent { color: var(--glass-cyan) !important; }
+/* glass-hud forced colors disabled — paper theme is source of truth */
+.glass-hud .text-muted { color: var(--color-muted) !important; }
+.glass-hud .text-fg { color: var(--color-fg) !important; }
+.glass-hud .text-cash { color: var(--color-cash) !important; }
+.glass-hud .text-fans { color: var(--color-fans) !important; }
+.glass-hud .text-accent { color: var(--color-accent) !important; }
 .glass-hud .bg-paper {
-  background: rgba(10, 32, 42, 0.7) !important;
-  color: var(--glass-text) !important;
-  border-color: var(--glass-border) !important;
+  background: var(--color-paper) !important;
+  color: var(--color-fg) !important;
+  border-color: var(--color-border) !important;
 }
-.glass-hud .border-border { border-color: var(--glass-border) !important; }
+.glass-hud .border-border { border-color: var(--color-border) !important; }
 .glass-hud .bg-accent {
-  background: linear-gradient(180deg, #3de8ff, #14a8c8) !important;
-  color: #042028 !important;
+  background: var(--color-accent) !important;
+  color: var(--color-accent-fg) !important;
 }
+
+/* Shared progress / heat scales */
+.scale-bar {
+  height: 0.5rem;
+  border-radius: 999px;
+  background: var(--color-panel);
+  border: 1px solid var(--color-border);
+  overflow: hidden;
+}
+.scale-bar > i,
+.scale-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-accent);
+}
+.hud-chip {
+  background: color-mix(in oklab, var(--color-paper) 96%, white);
+  border: 1px solid var(--color-border);
+  box-shadow: 0 1px 3px rgba(60, 40, 20, 0.06);
+  border-radius: 0.75rem;
+  color: var(--color-fg);
+}
+
+/* Paper modal fallback if glass-modal-shell class still appears */
+.glass-modal-shell {
+  background: var(--color-paper) !important;
+  color: var(--color-fg) !important;
+  border: 2px solid var(--color-border-strong) !important;
+  box-shadow: var(--shadow-soft) !important;
+  backdrop-filter: none !important;
+}
+.glass-modal-shell__title {
+  color: var(--color-fg) !important;
+  letter-spacing: -0.02em !important;
+  text-transform: none !important;
+  font-weight: 700 !important;
+}
+.glass-modal-shell__rule { display: none !important; }

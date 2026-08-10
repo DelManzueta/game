@@ -142,10 +142,10 @@ function MainMenu() {
       <div className="relative z-10 flex flex-1 flex-col items-center justify-end px-4 pb-10 pt-16 sm:justify-center sm:pb-16">
         <div className="mb-5 flex flex-col items-center text-center">
           <p className="text-[11px] font-bold uppercase tracking-[0.28em] text-accent drop-shadow">Phase One · Garage</p>
-          <h1 className="mt-1 font-display text-4xl font-bold tracking-tight text-white drop-shadow sm:text-5xl">
+          <h1 className="mt-1 font-display text-4xl font-bold tracking-tight text-fg sm:text-5xl">
             Studio Empire
           </h1>
-          <p className="mx-auto mt-2 max-w-sm text-sm text-white/85">
+          <p className="mx-auto mt-2 max-w-sm text-sm text-fg/85">
             One founder. One garage. Ship games, grow fans, earn the office.
           </p>
         </div>
@@ -184,7 +184,7 @@ function MainMenu() {
                   className={cnJoin(
                     "rounded-lg border px-2 py-2 text-xs font-bold",
                     difficulty === id
-                      ? "border-accent bg-accent/20 text-white"
+                      ? "border-accent bg-accent/20 text-fg"
                       : "border-border text-muted hover:border-accent/50",
                   )}
                   onClick={() => setDifficulty(id)}
@@ -302,7 +302,6 @@ function GdtTopChrome({ forcePause }: { forcePause: boolean }) {
   const month = useGame((s) => s.month);
   const cash = useGame((s) => s.cash);
   const fans = useGame((s) => s.fans);
-  const rp = useGame((s) => s.researchPoints);
   const speed = useGame((s) => s.speed);
   const setSpeed = useGame((s) => s.setSpeed);
   const setModal = useGame((s) => s.setModal);
@@ -312,65 +311,43 @@ function GdtTopChrome({ forcePause }: { forcePause: boolean }) {
   const unread = notifications.filter((n) => !n.read).length;
   const phase = projectPhaseLabel(project);
   const pct = Math.round((project?.stageProgress || 0) * 100);
+  const designPts = project ? Math.round(project.designPoints ?? 0) : null;
+  const techPts = project ? Math.round(project.techPoints ?? 0) : null;
   const bugs = project?.bugs ?? 0;
-  // GDT-style dual orbs: design pair (left) + tech pair (right), grow while developing
-  const dBase = project?.designPoints ?? 0;
-  const tBase = project?.techPoints ?? 0;
-  const grow = project
-    ? Math.round((project.stageProgress || 0) * 18 + (project.weeksDev || 0) * 1.5)
-    : 0;
-  const designOrbA = project ? Math.max(0, Math.round(dBase * 0.45 + grow * 0.4)) : 0;
-  const designOrbB = project ? Math.max(0, Math.round(dBase * 0.55 + grow * 0.6)) : 0;
-  const techOrbA = project ? Math.max(0, Math.round(tBase * 0.5 + grow * 0.45)) : 0;
-  const techOrbB = project ? Math.max(0, Math.round(tBase * 0.5 + grow * 0.55)) : 0;
-  const phaseBarLabel = project
-    ? project.devPhase.includes("RUNNING")
-      ? phase.title
-      : phase.title
-    : "";
-
 
   return (
-    <header className="sticky top-0 z-30">
-      <div className="mx-auto flex max-w-6xl flex-wrap items-start justify-between gap-2 px-2 pt-2 sm:px-4">
+    <header className="sticky top-0 z-30 border-b border-border/80 bg-[color-mix(in_oklab,var(--color-paper)_92%,transparent)] ">
+      <div className="mx-auto grid max-w-6xl grid-cols-[auto_1fr_auto] items-center gap-2 px-2 py-2 sm:gap-3 sm:px-4">
         {/* Menu */}
         <button
           type="button"
-          className="hud-chip flex h-11 items-center gap-2 px-2.5 pr-3 text-xs font-bold uppercase tracking-wide text-fg"
+          className="hud-chip flex h-10 items-center gap-2 px-2.5 text-xs font-bold tracking-wide text-fg"
           onClick={() => {
             saveGame();
             setModal("pauseMenu");
           }}
           aria-label="Menu"
         >
-          <span
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-accent/25 text-xs font-bold text-accent ring-2 ring-accent/40"
-            aria-hidden
-          >
+          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-panel text-[11px] font-bold text-fg ring-1 ring-border">
             {(company || "S").slice(0, 1).toUpperCase()}
           </span>
-          <span className="max-w-[7rem] truncate">{company || "Menu"}</span>
+          <span className="hidden max-w-[8rem] truncate sm:inline">{company || "Menu"}</span>
         </button>
 
-        {/* Project HUD — GDT top-center orbs */}
-        <div className="order-last flex w-full flex-col items-center sm:order-none sm:w-auto">
-          <div className="flex items-end gap-1 sm:gap-2">
-            {/* Design orbs (warm) — classic GDT left pair */}
-            <Orb value={designOrbA} label="Design" color="var(--color-design)" Icon={Palette} active={!!project} />
-            <Orb value={designOrbB} label="Design" color="#e8941a" Icon={Palette} active={!!project} />
-            <div className="hud-chip mx-0.5 min-w-[9.5rem] max-w-[14rem] px-3 py-2 text-center sm:min-w-[12rem]">
+        {/* Project strip — one design, one tech, clear progress */}
+        <div className="min-w-0 justify-self-center">
+          <div className="hud-chip flex max-w-full items-center gap-2 px-2.5 py-1.5 sm:gap-3 sm:px-3">
+            {project && <MetricPill label="Design" value={designPts} tone="design" />}
+            <div className="min-w-0 flex-1 px-1 text-center sm:min-w-[10rem]">
               {project ? (
                 <>
-                  <div className="truncate text-sm font-bold leading-tight">{project.title}</div>
+                  <div className="truncate text-sm font-bold leading-tight text-fg">{project.title}</div>
                   <div className="truncate text-[10px] text-muted">
-                    {getTopic(project.topicId)?.name} / {getGenre(project.genreId).name}
-                  </div>
-                  <div className="mt-1 rounded bg-panel px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-accent">
-                    {phaseBarLabel}
+                    {phase.title}
                     {project.devPhase.includes("RUNNING") ? ` · ${pct}%` : ""}
                   </div>
                   {project.devPhase.includes("RUNNING") && (
-                    <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-panel">
+                    <div className="mx-auto mt-1 h-1.5 max-w-[11rem] overflow-hidden rounded-full bg-panel">
                       <div
                         className="h-full rounded-full bg-accent transition-all duration-300"
                         style={{ width: `${Math.max(pct > 0 ? 4 : 0, pct)}%` }}
@@ -379,31 +356,34 @@ function GdtTopChrome({ forcePause }: { forcePause: boolean }) {
                   )}
                 </>
               ) : (
-                <div className="py-0.5 text-sm font-semibold text-muted">No Project</div>
+                <div className="py-0.5 text-sm font-semibold text-muted">Ready · start a game</div>
               )}
             </div>
-            {/* Tech orbs (cool) — classic GDT right pair */}
-            <Orb value={techOrbA} label="Tech" color="var(--color-tech)" Icon={Cpu} active={!!project} />
-            <Orb value={techOrbB} label="Tech" color="#4ecb8a" Icon={Cpu} active={!!project} />
+            {project && <MetricPill label="Tech" value={techPts} tone="tech" />}
+            {project && bugs > 0 && <MetricPill label="Bugs" value={bugs} tone="bugs" />}
           </div>
         </div>
 
         {/* Vitals + clock */}
-        <div className="flex flex-col items-end gap-1">
-          <div className="hud-chip px-2.5 py-1.5 text-right text-[11px] leading-snug sm:text-xs">
-            <div className="font-semibold tabular text-fans">{formatFans(fans)} Fans</div>
-            <div className="tabular text-muted">
-              {calendarHudLabel({ year, month, week })}
-            </div>
-            <div className="font-bold tabular text-cash">Cash: {formatCash(cash)}</div>
+        <div className="flex items-center gap-1.5 sm:gap-2">
+          <div className="hud-chip hidden px-2.5 py-1 text-right text-[11px] leading-snug sm:block sm:text-xs">
+            <div className="font-semibold tabular text-fans">{formatFans(fans)} fans</div>
+            <div className="tabular text-muted">{calendarHudLabel({ year, month, week })}</div>
+            <div className="font-bold tabular text-cash">{formatCash(cash)}</div>
           </div>
-          <div className="flex items-center gap-0.5">
+          {/* Mobile vitals — one line */}
+          <div className="hud-chip px-2 py-1 text-[10px] font-semibold tabular sm:hidden">
+            <span className="text-cash">{formatCash(cash)}</span>
+            <span className="mx-1 text-border-strong">·</span>
+            <span className="text-muted">{year}</span>
+          </div>
+          <div className="flex items-center gap-0.5" role="group" aria-label="Game speed">
             {(
               [
                 [0, Pause, "Pause"],
                 [1, Play, "Play"],
-                [2, FastForward, "Faster"],
-                [4, FastForward, "Fastest"],
+                [2, FastForward, "Fast"],
+                [4, FastForward, "Max"],
               ] as const
             ).map(([s, Icon, label]) => (
               <button
@@ -411,27 +391,26 @@ function GdtTopChrome({ forcePause }: { forcePause: boolean }) {
                 type="button"
                 title={label}
                 aria-label={label}
+                aria-pressed={speed === s}
                 onClick={() => setSpeed(s as 0 | 1 | 2 | 4)}
                 className={cnJoin(
-                  "flex h-9 min-w-9 flex-col items-center justify-center gap-0 rounded-lg border px-1.5 transition-colors sm:min-w-[3.25rem] sm:flex-row sm:gap-1 sm:px-2",
+                  "flex h-9 w-9 items-center justify-center rounded-lg border transition-colors",
                   speed === s
                     ? "border-accent bg-accent text-accent-fg"
                     : "border-border bg-paper text-fg hover:border-border-strong",
                 )}
               >
-                <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                <span className="text-[9px] font-bold leading-none sm:text-[10px]">{label}</span>
+                <Icon className="h-3.5 w-3.5" aria-hidden="true" />
               </button>
             ))}
             <button
               type="button"
-              className="relative flex h-9 min-w-9 flex-col items-center justify-center gap-0 rounded-lg border border-border bg-paper px-1.5 text-fg hover:border-border-strong sm:min-w-[3.75rem] sm:flex-row sm:gap-1 sm:px-2"
+              className="relative flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-paper text-fg hover:border-border-strong"
               aria-label={unread ? `Notifications, ${unread} unread` : "Notifications"}
-              title="Notifications"
+              title="Inbox"
               onClick={() => setModal("notifications")}
             >
-              <Bell className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              <span className="text-[9px] font-bold leading-none sm:text-[10px]">Inbox</span>
+              <Bell className="h-3.5 w-3.5" aria-hidden="true" />
               {unread > 0 && (
                 <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-accent-fg">
                   {unread > 9 ? "9+" : unread}
@@ -442,7 +421,7 @@ function GdtTopChrome({ forcePause }: { forcePause: boolean }) {
         </div>
       </div>
       {forcePause && project && (
-        <div className="mx-auto mt-1 max-w-xl px-3 text-center text-[11px] font-semibold text-accent">
+        <div className="border-t border-border/60 bg-panel/80 px-3 py-1 text-center text-[11px] font-semibold text-fg">
           Desk decision — {phase.hint}
         </div>
       )}
@@ -450,34 +429,26 @@ function GdtTopChrome({ forcePause }: { forcePause: boolean }) {
   );
 }
 
-function Orb({
-  value,
+function MetricPill({
   label,
-  color,
-  Icon,
-  active,
-  always,
+  value,
+  tone,
 }: {
-  value: number;
   label: string;
-  color: string;
-  Icon: typeof Bug;
-  active?: boolean;
-  always?: boolean;
+  value: number | null;
+  tone: "design" | "tech" | "bugs";
 }) {
-  const show = always || active;
+  const color =
+    tone === "design" ? "var(--color-design)" : tone === "tech" ? "var(--color-tech)" : "var(--color-bugs)";
   return (
-    <div className={cnJoin("flex flex-col items-center", !show && "opacity-25")}>
+    <div className="flex shrink-0 flex-col items-center" title={label}>
       <div
-        className="flex h-10 w-10 items-center justify-center rounded-full border-2 bg-elevated text-xs font-bold tabular shadow-sm sm:h-11 sm:w-11 sm:text-sm"
+        className="flex h-9 w-9 items-center justify-center rounded-full border-2 bg-elevated text-xs font-bold tabular sm:h-10 sm:w-10 sm:text-sm"
         style={{ borderColor: color, color }}
-        title={label}
       >
-        {show ? value : "—"}
+        {value == null ? "—" : value}
       </div>
-      <span className="mt-0.5 max-w-[3.5rem] truncate text-center text-[9px] font-bold uppercase tracking-wide text-fg">
-        {label}
-      </span>
+      <span className="mt-0.5 text-[9px] font-bold uppercase tracking-wide text-muted">{label}</span>
     </div>
   );
 }
@@ -494,7 +465,7 @@ function BottomDock() {
     { id: "settings", label: "More", icon: Settings },
   ];
   return (
-    <nav className="fixed bottom-0 inset-x-0 z-30 border-t-2 border-border-strong bg-paper/95 shadow-[0_-8px_24px_rgba(60,40,20,0.12)] backdrop-blur-md">
+    <nav className="fixed bottom-0 inset-x-0 z-30 border-t-2 border-border-strong bg-paper/95 shadow-[0_-8px_24px_rgba(60,40,20,0.12)] ">
       <div className="mx-auto flex max-w-lg justify-around px-1 py-1.5 pb-[max(0.4rem,env(safe-area-inset-bottom))]">
         {items.map(({ id, label, icon: Icon }) => {
           const lit = screen === id;
@@ -552,7 +523,7 @@ function GarageRoomView() {
 
         {/* Desk hotspot label */}
         <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 flex-col items-center gap-1">
-          <span className="rounded-full border border-white/25 bg-black/55 px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-white shadow-md backdrop-blur-sm">
+          <span className="rounded-full border border-white/30 bg-black/65 px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-white shadow-md">
             {state.currentProject
               ? busy
                 ? art.hotspotBusy
@@ -563,9 +534,9 @@ function GarageRoomView() {
 
         {/* Project plaque */}
         {state.currentProject && (
-          <div className="absolute left-3 top-3 max-w-[70%] rounded-xl border border-white/20 bg-black/60 px-3 py-2 shadow-md backdrop-blur-sm">
+          <div className="absolute left-3 top-3 max-w-[70%] rounded-xl border border-white/25 bg-black/70 px-3 py-2 shadow-md">
             <div className="truncate text-sm font-bold text-white">{state.currentProject.title}</div>
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-cyan-200">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-amber-200">
               {ov.phase.title}
             </div>
           </div>
@@ -581,7 +552,7 @@ function GarageRoomView() {
         ) : state.currentProject.devPhase === "READY_TO_RELEASE" ? (
           <Button
             size="lg"
-            className="min-w-[12rem] !bg-emerald-500 !text-white hover:!bg-emerald-400"
+            className="min-w-[12rem] !bg-emerald-500 !text-fg hover:!bg-emerald-400"
             onClick={() => setScreen("develop")}
           >
             Finish · Release
@@ -606,55 +577,69 @@ function GarageRoomView() {
 
       {/* Office goal card — bible proofs, no formulas computed here */}
       {state.office === 1 && ov.officeGoal && (
-        <div className="game-panel mt-4 w-full max-w-md px-4 py-3 text-center text-xs">
-          <div className="mb-1 font-bold uppercase tracking-wide text-muted">
+        <div className="game-panel mt-4 w-full max-w-md px-4 py-3">
+          <div className="mb-2 text-center text-[10px] font-bold uppercase tracking-wide text-muted">
             {ov.officeGoal.activeMove
               ? "Move in progress"
               : ov.officeGoal.offerState === "offered" || ov.officeGoal.offerState === "deferred"
                 ? "Office offer ready"
-                : "Office goal"}
+                : "Path to first office"}
           </div>
           {ov.officeGoal.activeMove ? (
-            <p className="font-semibold text-fg">
-              Keys hand over week {ov.officeGoal.activeMove.completesWeek} (now W
-              {state.week}).
+            <p className="text-center text-sm font-semibold text-fg">
+              Keys hand over week {ov.officeGoal.activeMove.completesWeek} (now W{state.week}).
             </p>
           ) : (
-            <>
-              <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 font-semibold text-fg">
-                <span>
-                  Fans {formatFans(ov.fans)}/{formatFans(ov.officeGoal.fansNeed)}
-                </span>
-                <span>
-                  Games {ov.gamesPublished}/{ov.officeGoal.gamesNeed}
-                </span>
-                <span>
-                  Cash {formatCash(ov.cash)}/{formatCash(ov.officeGoal.cashNeed)}
-                </span>
-              </div>
-              {ov.officeGoal.proofs.length > 0 && (
-                <ul className="mt-2 space-y-0.5 text-left text-[11px] text-muted">
-                  {ov.officeGoal.proofs.map((p) => (
-                    <li key={p.id} className={p.met ? "text-good" : ""}>
-                      {p.met ? "✓" : "○"} {p.label}
-                      <span className="ml-1 opacity-70">({p.detail})</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
+            <div className="space-y-2">
+              {(
+                [
+                  [
+                    "Fans",
+                    ov.fans,
+                    ov.officeGoal.fansNeed,
+                    formatFans(ov.fans),
+                    formatFans(ov.officeGoal.fansNeed),
+                  ],
+                  [
+                    "Games",
+                    ov.gamesPublished,
+                    ov.officeGoal.gamesNeed,
+                    String(ov.gamesPublished),
+                    String(ov.officeGoal.gamesNeed),
+                  ],
+                  [
+                    "Cash",
+                    ov.cash,
+                    ov.officeGoal.cashNeed,
+                    formatCash(ov.cash),
+                    formatCash(ov.officeGoal.cashNeed),
+                  ],
+                ] as [string, number, number, string, string][]
+              ).map(([label, cur, need, curL, needL]) => {
+                const pct = Math.min(100, Math.round((cur / Math.max(1, need)) * 100));
+                return (
+                  <div key={label}>
+                    <div className="mb-0.5 flex justify-between text-[11px] font-semibold text-fg">
+                      <span>{label}</span>
+                      <span className="tabular text-muted">
+                        {curL} / {needL}
+                      </span>
+                    </div>
+                    <div className="h-1.5 overflow-hidden rounded-full bg-panel">
+                      <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
               {(ov.officeGoal.offerState === "offered" ||
                 ov.officeGoal.offerState === "deferred" ||
                 ov.officeGoal.offerState === "eligible" ||
                 ov.officeGoal.canMove) && (
-                <Button
-                  size="sm"
-                  className="mt-3"
-                  onClick={() => setModal("officeOffer")}
-                >
+                <Button size="sm" className="mt-2 w-full" onClick={() => setModal("officeOffer")}>
                   View office offer
                 </Button>
               )}
-            </>
+            </div>
           )}
         </div>
       )}
@@ -707,7 +692,7 @@ function TechReadinessPanel({
             <span>Runtime health · {profile.targetFps} FPS target</span>
             <span className="tabular">{Math.round(profile.overallHealth * 100)}%</span>
           </div>
-          <div className="h-2 overflow-hidden rounded-full bg-black/20">
+          <div className="h-2 overflow-hidden rounded-full bg-panel">
             <div
               className="h-full rounded-full bg-accent transition-all"
               style={{ width: `${Math.round(profile.overallHealth * 100)}%` }}
@@ -718,10 +703,10 @@ function TechReadinessPanel({
           </p>
           <ul className="mt-2 grid grid-cols-2 gap-1">
             {relevant.map((a) => (
-              <li key={a.axis} className="rounded-md border border-border/60 bg-black/10 px-1.5 py-1 text-[10px]">
+              <li key={a.axis} className="rounded-md border border-border/60 bg-panel px-1.5 py-1 text-[10px]">
                 <span className="font-semibold uppercase">{a.axis}</span>
                 <span className="float-right tabular text-muted">{Math.round(a.utilization * 100)}%</span>
-                <div className="mt-0.5 h-1 overflow-hidden rounded-full bg-black/20">
+                <div className="mt-0.5 h-1 overflow-hidden rounded-full bg-panel">
                   <div
                     className="h-full rounded-full"
                     style={{
@@ -827,8 +812,8 @@ function DevelopOverlay() {
         <div className="absolute inset-0 bg-gradient-to-r from-black/55 via-black/20 to-transparent" />
         <div className="absolute bottom-2 left-3 right-3 flex items-end justify-between gap-2">
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-white/80">Work desk</p>
-            <p className="text-sm font-bold text-white drop-shadow">{project.title}</p>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-muted">Work desk</p>
+            <p className="text-sm font-bold text-fg">{project.title}</p>
           </div>
         </div>
       </div>
@@ -1156,9 +1141,11 @@ function GamesScreen() {
   const selected = games.find((g) => g.id === sel);
   return (
     <ScreenBackdrop screen="games">
-      <h2 className="text-center text-2xl font-bold text-white drop-shadow">Game History</h2>
-      <div className="mx-auto mt-1 h-px w-40 bg-cyan-400/50" />
-      {!rows.length && <p className="mt-8 text-center text-white/70">No releases yet.</p>}
+      <div className="game-panel px-4 py-3 text-center">
+        <h2 className="text-2xl font-bold text-fg">Game History</h2>
+        <p className="mt-0.5 text-sm text-muted">Shipped titles and campaigns</p>
+      </div>
+      {!rows.length && <p className="mt-8 text-center text-muted">No releases yet.</p>}
       <ul className="mt-4 space-y-2">
         {rows.map((r) => (
           <li key={r.id}>
@@ -1167,14 +1154,14 @@ function GamesScreen() {
               onClick={() => setSel(r.id === sel ? null : r.id)}
               className={cnJoin(
                 "w-full rounded-xl border p-4 text-left backdrop-blur-sm",
-                sel === r.id ? "border-cyan-300/60 bg-cyan-400/15" : "border-white/15 bg-black/55",
+                sel === r.id ? "border-accent bg-accent/15" : "border-border bg-paper",
               )}
             >
               <div className="flex justify-between gap-2">
-                <span className="font-bold text-white">{r.title}</span>
-                <span className="text-lg font-bold tabular text-cyan-200">{r.avgReview.toFixed(1)}</span>
+                <span className="font-bold text-fg">{r.title}</span>
+                <span className="text-lg font-bold tabular text-tech">{r.avgReview.toFixed(1)}</span>
               </div>
-              <p className="mt-1 text-xs text-white/65">
+              <p className="mt-1 text-xs text-muted">
                 {r.genre} · {r.sales.toLocaleString()} sold · {r.revenueLabel}
               </p>
             </button>
@@ -1189,7 +1176,7 @@ function GamesScreen() {
           <Button size="sm" variant="secondary" onClick={() => setCampMsg(startTitleCampaign(selected.id, "flyer_run") ?? "Flyer started.")}>
             Flyer
           </Button>
-          {campMsg && <p className="w-full text-xs text-white/70">{campMsg}</p>}
+          {campMsg && <p className="w-full text-xs text-muted">{campMsg}</p>}
         </div>
       )}
     </ScreenBackdrop>
@@ -1197,7 +1184,7 @@ function GamesScreen() {
 }
 
 
-/** Full-bleed department still behind secondary screens — your photos only. */
+/** Soft room art behind paper department panels — one look with the garage. */
 function ScreenBackdrop({
   screen,
   children,
@@ -1214,17 +1201,17 @@ function ScreenBackdrop({
         <img
           src={art.src}
           alt=""
-          className="h-full w-full object-cover"
+          className="h-full w-full scale-105 object-cover opacity-40 blur-[1px]"
           style={{ objectPosition: art.objectPosition }}
           draggable={false}
         />
-        <div className="absolute inset-0 bg-gradient-to-b from-black/55 via-black/50 to-black/70" />
+        <div className="absolute inset-0 bg-[color-mix(in_oklab,var(--color-bg)_82%,transparent)]" />
       </div>
-      <div className="relative z-10 mx-auto max-w-3xl px-3 pb-10 pt-4">
-        <p className="mb-1 text-center text-[10px] font-bold uppercase tracking-[0.2em] text-cyan-200/80">
+      <div className="relative z-10 mx-auto max-w-3xl px-3 pb-10 pt-3">
+        <p className="mb-2 text-center text-[10px] font-bold uppercase tracking-[0.18em] text-muted">
           {art.label}
         </p>
-        {children}
+        <div className="space-y-3">{children}</div>
       </div>
     </div>
   );
@@ -1252,14 +1239,15 @@ function ResearchScreen() {
 
   return (
     <ScreenBackdrop screen="research">
-      <h2 className="text-center text-2xl font-bold text-white drop-shadow">Research</h2>
-      <div className="mx-auto mt-1 h-px w-32 bg-cyan-400/50" />
-      <p className="mt-2 text-center text-sm text-white/80">
+      <div className="game-panel px-4 py-3 text-center">
+        <h2 className="text-2xl font-bold text-fg">Research</h2>
+      <p className="mt-1 text-sm text-muted">
         {Math.floor(researchPoints)} RP{active ? ` · ${active.name}` : ""}
       </p>
-      <p className="mx-auto mt-1 max-w-md text-center text-[11px] text-white/60">
-        Research is a pipeline — observe, research, prototype, integrate, ship, mature. Not a shop.
+      <p className="mx-auto mt-1 max-w-md text-[11px] text-muted">
+        Observe → research → prototype → integrate → ship. Not a shop.
       </p>
+      </div>
       <div className="mx-auto mt-3 flex max-w-sm gap-1">
         <Button size="sm" variant={tab === "pipeline" ? "primary" : "secondary"} className="flex-1" onClick={() => setTab("pipeline")}>
           Tech pipeline
@@ -1268,7 +1256,7 @@ function ResearchScreen() {
           Studio unlocks
         </Button>
       </div>
-      {msg && <p className="mt-2 text-center text-sm text-amber-200">{msg}</p>}
+      {msg && <p className="mt-2 text-center text-sm text-warn">{msg}</p>}
       {tab === "pipeline" ? (
         <ul className="mt-4 space-y-2">
           {pipeRows.slice(0, 28).map(({ def, state, maturity, uses }) => {
@@ -1280,14 +1268,14 @@ function ResearchScreen() {
             return (
               <li
                 key={def.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/15 bg-black/55 px-3 py-3 backdrop-blur-sm"
+                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-paper px-3 py-3 shadow-sm"
               >
                 <div className="min-w-0">
-                  <div className="font-semibold text-white">{def.name}</div>
-                  <div className="text-xs text-white/65">
+                  <div className="font-semibold text-fg">{def.name}</div>
+                  <div className="text-xs text-muted">
                     {def.category.replace(/_/g, " ")} · {def.researchRp} RP
                     {def.isDesignOnly ? " · design" : ""} ·{" "}
-                    <span className="text-cyan-200/90">{String(state).replace(/_/g, " ")}</span>
+                    <span className="text-tech">{String(state).replace(/_/g, " ")}</span>
                     {uses > 0 ? ` · ${uses} ships` : ""}
                     {maturity > 0 ? ` · mat ${Math.round(maturity * 100)}%` : ""}
                   </div>
@@ -1312,11 +1300,11 @@ function ResearchScreen() {
           {available.map((r) => (
             <li
               key={r.id}
-              className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/15 bg-black/55 px-3 py-3 backdrop-blur-sm"
+              className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-paper px-3 py-3 shadow-sm"
             >
               <div>
-                <div className="font-semibold text-white">{r.name}</div>
-                <div className="text-xs text-white/65">
+                <div className="font-semibold text-fg">{r.name}</div>
+                <div className="text-xs text-muted">
                   {r.category} · {r.cost} RP
                 </div>
               </div>
@@ -1352,30 +1340,32 @@ function StaffScreen() {
 
   return (
     <ScreenBackdrop screen="staff">
-      <h2 className="text-center text-2xl font-bold text-white drop-shadow">People</h2>
-      <p className="mt-2 text-center text-sm text-white/75">
+      <div className="game-panel px-4 py-3 text-center">
+        <h2 className="text-2xl font-bold text-fg">People</h2>
+      <p className="mt-1 text-sm text-muted">
         {hiringOpen ? "Hire up to your HQ seats · signing cap $2M" : "Garage is founder-led until First Office."}
       </p>
-      {msg && <p className="mt-2 text-center text-sm text-amber-200">{msg}</p>}
+      </div>
+      {msg && <p className="mt-2 text-center text-sm text-warn">{msg}</p>}
 
       <ul className="mt-4 space-y-2">
         {staff.map((m) => (
-          <li key={m.id} className="rounded-xl border border-white/15 bg-black/55 px-4 py-3 backdrop-blur-sm">
+          <li key={m.id} className="rounded-xl border border-border bg-paper px-4 py-3 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div>
-                <div className="font-bold text-white">
+                <div className="font-bold text-fg">
                   {m.name}
                   {m.id === "founder" ? " (You)" : ""}
                 </div>
-                <div className="text-xs text-white/65">
+                <div className="text-xs text-muted">
                   Lv {m.level} · D{m.design} · T{m.tech} · S{m.speed}
                   {m.specialization ? ` · ${m.specialization}` : ""}
                   {(m.bugFixBonus ?? 0) > 0 ? ` · QA +${Math.round((m.bugFixBonus ?? 0) * 100)}%` : ""}
                 </div>
                 {m.training && (
-                  <div className="mt-1 text-xs text-cyan-200">
+                  <div className="mt-1 text-xs text-tech">
                     Training… {m.training.weeksLeft}w left / {m.training.totalWeeks}w
-                    <div className="mt-0.5 h-1.5 max-w-[12rem] overflow-hidden rounded-full bg-white/10">
+                    <div className="mt-0.5 h-1.5 max-w-[12rem] overflow-hidden rounded-full bg-panel">
                       <div
                         className="h-full rounded-full bg-cyan-400 transition-all"
                         style={{
@@ -1405,12 +1395,12 @@ function StaffScreen() {
               </div>
             </div>
             {trainFor === m.id && (
-              <div className="mt-2 space-y-1.5 border-t border-white/10 pt-2">
+              <div className="mt-2 space-y-1.5 border-t border-border pt-2">
                 {courses.map((c) => (
                   <button
                     key={c.id}
                     type="button"
-                    className="flex w-full items-center justify-between gap-2 rounded-lg border border-white/10 bg-black/40 px-2 py-1.5 text-left text-xs text-white/90 hover:border-cyan-400/40"
+                    className="flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-elevated px-2 py-1.5 text-left text-xs text-fg hover:border-cyan-400/40"
                     onClick={() => {
                       const err = trainStaff(m.id, c.id);
                       setMsg(err ?? `${m.name} → ${c.name}`);
@@ -1419,14 +1409,14 @@ function StaffScreen() {
                   >
                     <span>
                       <span className="font-bold">{c.name}</span>
-                      <span className="block text-white/55">{c.description}</span>
+                      <span className="block text-muted">{c.description}</span>
                     </span>
-                    <span className="shrink-0 tabular text-white/70">
+                    <span className="shrink-0 tabular text-muted">
                       {c.weeks}w · {formatCash(c.cashCost)} · {c.rpCost} RP
                     </span>
                   </button>
                 ))}
-                <p className="text-[10px] text-white/50">
+                <p className="text-[10px] text-subtle">
                   Cash {formatCash(cash)} · RP {Math.floor(rp)}
                 </p>
               </div>
@@ -1438,7 +1428,7 @@ function StaffScreen() {
       {hiringOpen && (
         <div className="mt-6">
           <div className="mb-2 flex items-center justify-between gap-2">
-            <h3 className="text-sm font-bold uppercase tracking-wide text-white/80">Candidates</h3>
+            <h3 className="text-sm font-bold uppercase tracking-wide text-muted">Candidates</h3>
             <Button
               size="sm"
               variant="secondary"
@@ -1454,18 +1444,18 @@ function StaffScreen() {
             {cands.map((c) => (
               <li
                 key={c.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/15 bg-black/55 px-3 py-3 backdrop-blur-sm"
+                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-paper px-3 py-3 shadow-sm"
               >
                 <div className="min-w-0">
-                  <div className="font-semibold text-white">
+                  <div className="font-semibold text-fg">
                     {c.name}
                     {c.level >= 5 ? (
-                      <span className="ml-1 rounded bg-amber-400/20 px-1.5 py-0.5 text-[10px] font-bold text-amber-200">
+                      <span className="ml-1 rounded bg-amber-400/20 px-1.5 py-0.5 text-[10px] font-bold text-warn">
                         STAR
                       </span>
                     ) : null}
                   </div>
-                  <div className="text-xs text-white/65">
+                  <div className="text-xs text-muted">
                     Lv {c.level} · D{c.design} T{c.tech} S{c.speed}
                     {c.specialization ? ` · ${c.specialization}` : ""}
                   </div>
@@ -1526,37 +1516,37 @@ function EnginesScreen() {
 
   return (
     <ScreenBackdrop screen="engines">
-      <h2 className="text-center text-2xl font-bold text-white drop-shadow">Engine Workshop</h2>
-      <p className="mx-auto mt-1 max-w-lg text-center text-xs text-white/60">
+      <h2 className="text-center text-2xl font-bold text-fg">Engine Workshop</h2>
+      <p className="mx-auto mt-1 max-w-lg text-center text-xs text-muted">
         Engines create capability and efficiency — your team turns that into games. Released versions
         are immutable; each project freezes a snapshot.
       </p>
-      {msg && <p className="mt-2 text-center text-sm text-amber-200">{msg}</p>}
+      {msg && <p className="mt-2 text-center text-sm text-warn">{msg}</p>}
 
       {build && (
         <div className="mt-4 rounded-xl border border-cyan-400/30 bg-cyan-950/40 px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <div className="font-bold text-cyan-100">{build.name}</div>
-              <div className="text-xs text-cyan-100/70">
+              <div className="font-bold text-fg">{build.name}</div>
+              <div className="text-xs text-muted">
                 Phase: {build.phase.replace(/_/g, " ")} · Week {build.weeksElapsed}/~
                 {build.weeksEstimate}
               </div>
             </div>
             <Badge tone="accent">{Math.round(build.overallProgress * 100)}%</Badge>
           </div>
-          <div className="mt-2 h-2 overflow-hidden rounded-full bg-black/40">
+          <div className="mt-2 h-2 overflow-hidden rounded-full bg-elevated">
             <div
               className="h-full rounded-full bg-cyan-400 transition-all"
               style={{ width: `${Math.round(build.overallProgress * 100)}%` }}
             />
           </div>
           {build.conflicts.length > 0 && (
-            <p className="mt-2 text-xs text-amber-200/90">
+            <p className="mt-2 text-xs text-warn/90">
               Soft conflicts (extra work): {build.conflicts.join("; ")}
             </p>
           )}
-          <p className="mt-1 text-xs text-white/55">
+          <p className="mt-1 text-xs text-muted">
             Debt {Math.round(build.technicalDebt)} · Capacity {Math.round(build.weeklyCapacity)}/wk ·
             Work {Math.round(build.completedWork)}/{build.requiredWork}
           </p>
@@ -1564,7 +1554,7 @@ function EnginesScreen() {
       )}
 
       <section className="mt-4">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-white/70">Released versions</h3>
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-muted">Released versions</h3>
         <ul className="mt-2 space-y-2">
           {(versions.length ? versions : engines.map((e) => ({
               versionId: e.id,
@@ -1577,21 +1567,21 @@ function EnginesScreen() {
             }))).map((v) => (
             <li
               key={v.versionId}
-              className="rounded-xl border border-white/15 bg-black/55 px-4 py-3 backdrop-blur-sm"
+              className="rounded-xl border border-border bg-paper px-4 py-3 shadow-sm"
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="font-bold text-white">{v.label}</div>
+                <div className="font-bold text-fg">{v.label}</div>
                 <Badge tone="good">
                   {SUPPORT_STATE_LABEL[v.status as keyof typeof SUPPORT_STATE_LABEL] ?? v.status}
                   {v.immutable ? " · locked" : ""}
                 </Badge>
               </div>
-              <div className="mt-1 text-xs text-white/65">
+              <div className="mt-1 text-xs text-muted">
                 {(v.features ?? v.modules?.map((m) => m.moduleId) ?? []).slice(0, 8).join(" · ") ||
                   "Core runtime"}
               </div>
               {"technicalDebt" in v && (
-                <div className="mt-1 text-[11px] text-white/45">
+                <div className="mt-1 text-[11px] text-subtle">
                   Tech debt {Math.round(Number(v.technicalDebt) || 0)}
                 </div>
               )}
@@ -1602,15 +1592,15 @@ function EnginesScreen() {
 
       {families.length > 0 && (
         <section className="mt-4">
-          <h3 className="text-sm font-semibold uppercase tracking-wide text-white/70">Families</h3>
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-muted">Families</h3>
           <ul className="mt-2 flex flex-wrap gap-2">
             {families.map((f) => (
               <li
                 key={f.familyId}
-                className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-white/80"
+                className="rounded-lg border border-border bg-elevated px-3 py-2 text-xs text-muted"
               >
-                <span className="font-semibold text-white">{f.name}</span>
-                <span className="text-white/50">
+                <span className="font-semibold text-fg">{f.name}</span>
+                <span className="text-subtle">
                   {" "}
                   · {PURPOSE_LABEL[f.purpose]} · {ARCH_LABEL[f.architecture]}
                 </span>
@@ -1621,9 +1611,9 @@ function EnginesScreen() {
       )}
 
       {!build && (
-        <section className="mt-5 overflow-hidden rounded-[1.5rem] border border-[var(--glass-border)] bg-[rgba(10,40,52,0.72)] p-4 shadow-[var(--glass-glow)] backdrop-blur-md sm:p-5">
+        <section className="mt-5 overflow-hidden rounded-[1.5rem] border border-border-strong bg-panel p-4 shadow-sm  sm:p-5">
           <div className="flex items-start justify-between gap-2">
-            <h3 className="text-xl font-black tracking-tight text-white sm:text-2xl">
+            <h3 className="text-xl font-black tracking-tight text-fg sm:text-2xl">
               Create a new Engine
             </h3>
           </div>
@@ -1659,21 +1649,21 @@ function EnginesScreen() {
               <>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <Input
-                    className="min-w-[10rem] flex-1 !border-white/25 !bg-[rgba(8,28,38,0.9)] !text-white"
+                    className="min-w-[10rem] flex-1 !border-border-strong !bg-[rgba(8,28,38,0.9)] !text-fg"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="Game Engine #1"
                   />
-                  <div className="flex items-center gap-1.5 rounded-xl border border-white/20 bg-black/35 px-3 py-2 text-sm font-bold text-cyan-100">
+                  <div className="flex items-center gap-1.5 rounded-xl border border-border-strong bg-panel px-3 py-2 text-sm font-bold text-fg">
                     Cost: {formatCash(totalCost)}
-                    <Diamond className="h-4 w-4 text-cyan-300" aria-hidden />
+                    <Diamond className="h-4 w-4 text-tech" aria-hidden />
                   </div>
                 </div>
                 <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                  <label className="block text-[11px] font-bold uppercase tracking-wide text-white/55">
+                  <label className="block text-[11px] font-bold uppercase tracking-wide text-muted">
                     Purpose
                     <select
-                      className="mt-1 w-full rounded-xl border border-white/20 bg-black/50 px-3 py-2.5 text-sm font-semibold text-white"
+                      className="mt-1 w-full rounded-xl border border-border-strong bg-paper px-3 py-2.5 text-sm font-semibold text-fg"
                       value={purpose}
                       onChange={(e) => setPurpose(e.target.value as EnginePurpose)}
                     >
@@ -1684,10 +1674,10 @@ function EnginesScreen() {
                       ))}
                     </select>
                   </label>
-                  <label className="block text-[11px] font-bold uppercase tracking-wide text-white/55">
+                  <label className="block text-[11px] font-bold uppercase tracking-wide text-muted">
                     Architecture
                     <select
-                      className="mt-1 w-full rounded-xl border border-white/20 bg-black/50 px-3 py-2.5 text-sm font-semibold text-white"
+                      className="mt-1 w-full rounded-xl border border-border-strong bg-paper px-3 py-2.5 text-sm font-semibold text-fg"
                       value={architecture}
                       onChange={(e) => setArchitecture(e.target.value as ArchitectureStyle)}
                     >
@@ -1707,9 +1697,9 @@ function EnginesScreen() {
                     return (
                       <div
                         key={key}
-                        className="rounded-2xl border border-white/15 bg-[rgba(8,30,40,0.55)] p-3"
+                        className="rounded-2xl border border-border bg-paper p-3"
                       >
-                        <h4 className="mb-2 text-base font-bold text-cyan-200">{label}</h4>
+                        <h4 className="mb-2 text-base font-bold text-tech">{label}</h4>
                         <div className={cnJoin("grid gap-2", isRender ? "grid-cols-2" : "grid-cols-1")}>
                           {list.map((m) => {
                             const on = selected.includes(m.id);
@@ -1722,12 +1712,12 @@ function EnginesScreen() {
                                 className={cnJoin(
                                   "flex items-center justify-between gap-2 rounded-xl border px-3 py-2.5 text-left text-sm transition",
                                   on
-                                    ? "border-cyan-300/70 bg-gradient-to-r from-cyan-500/25 to-teal-500/15 text-white shadow-[0_0_14px_rgba(77,240,255,0.2)]"
-                                    : "border-white/15 bg-[rgba(6,24,34,0.75)] text-white/80 hover:border-cyan-300/40",
+                                    ? "border-cyan-300/70 bg-gradient-to-r from-cyan-500/25 to-teal-500/15 text-fg shadow-[0_0_14px_rgba(77,240,255,0.2)]"
+                                    : "border-border bg-elevated text-muted hover:border-accent",
                                 )}
                               >
                                 <span className="min-w-0 font-semibold leading-snug">{m.name}</span>
-                                <span className="flex shrink-0 items-center gap-1 text-xs font-bold tabular text-cyan-200">
+                                <span className="flex shrink-0 items-center gap-1 text-xs font-bold tabular text-tech">
                                   {cost >= 1000 ? `${Math.round(cost / 1000)}K` : formatCash(cost)}
                                   <Diamond className="h-3.5 w-3.5" aria-hidden />
                                 </span>
@@ -1739,7 +1729,7 @@ function EnginesScreen() {
                     );
                   })}
                 </div>
-                <p className="mt-2 text-center text-[11px] text-white/50">
+                <p className="mt-2 text-center text-[11px] text-subtle">
                   Cash on hand {formatCash(cash)}. Modules set capability — not free review points.
                 </p>
                 <Button
@@ -1766,25 +1756,25 @@ function PlatformsScreen() {
   const list = PLATFORMS.filter((p) => p.year <= year + 1);
   return (
     <ScreenBackdrop screen="platforms">
-      <h2 className="text-center text-2xl font-bold text-white drop-shadow">Systems</h2>
-      {msg && <p className="mt-2 text-center text-sm text-amber-200">{msg}</p>}
+      <h2 className="text-center text-2xl font-bold text-fg">Systems</h2>
+      {msg && <p className="mt-2 text-center text-sm text-warn">{msg}</p>}
       <ul className="mt-4 space-y-2">
         {list.map((p) => {
           const owned = unlocked.includes(p.id);
           const thumb = platformThumb(p.id, year);
           return (
-            <li key={p.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/15 bg-black/55 px-3 py-3 backdrop-blur-sm">
+            <li key={p.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-paper px-3 py-3 shadow-sm">
               <div className="flex min-w-0 items-center gap-3">
                 {thumb ? (
                   <img src={thumb} alt="" className="h-12 w-12 shrink-0 rounded-lg object-cover ring-1 ring-white/20" draggable={false} />
                 ) : (
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-white/10 text-[10px] font-bold text-white/70">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-panel text-[10px] font-bold text-muted">
                     {p.short}
                   </div>
                 )}
                 <div className="min-w-0">
-                  <div className="truncate font-semibold text-white">{p.name}</div>
-                  <div className="text-xs text-white/65">{p.year}</div>
+                  <div className="truncate font-semibold text-fg">{p.name}</div>
+                  <div className="text-xs text-muted">{p.year}</div>
                 </div>
               </div>
               {owned ? (
@@ -1808,12 +1798,12 @@ function FinancesScreen() {
   const entries = ledger?.entries?.slice(-30).reverse() ?? [];
   return (
     <ScreenBackdrop screen="finances">
-      <h2 className="text-center text-2xl font-bold text-white drop-shadow">Finances</h2>
+      <h2 className="text-center text-2xl font-bold text-fg">Finances</h2>
       <p className="mt-2 text-center text-3xl font-bold tabular text-emerald-300">{formatCash(cash)}</p>
       <ul className="mt-4 space-y-1.5">
         {entries.map((e) => (
-          <li key={e.id} className="flex justify-between gap-3 rounded-lg border border-white/15 bg-black/55 px-3 py-2 text-sm backdrop-blur-sm">
-            <span className="truncate text-white/70">
+          <li key={e.id} className="flex justify-between gap-3 rounded-lg border border-border bg-paper px-3 py-2 text-sm backdrop-blur-sm">
+            <span className="truncate text-muted">
               W{e.week} · {e.label}
             </span>
             <span className={cnJoin("tabular font-bold", e.amount >= 0 ? "text-emerald-300" : "text-red-300")}>
@@ -1821,7 +1811,7 @@ function FinancesScreen() {
             </span>
           </li>
         ))}
-        {!entries.length && <li className="text-center text-sm text-white/60">No ledger entries yet.</li>}
+        {!entries.length && <li className="text-center text-sm text-muted">No ledger entries yet.</li>}
       </ul>
     </ScreenBackdrop>
   );
@@ -1958,8 +1948,8 @@ function NewGameModal() {
     cnJoin(
       "min-h-12 rounded-xl border-2 px-3 py-3 text-left text-sm font-bold transition active:scale-[0.98]",
       active
-        ? "border-[var(--glass-cyan)] bg-[rgba(77,240,255,0.18)] text-white shadow-[0_0_12px_rgba(77,240,255,0.25)]"
-        : "border-white/20 bg-[rgba(8,28,38,0.85)] text-white hover:border-[var(--glass-cyan)]/60",
+        ? "border-accent bg-accent/15 text-fg shadow-sm"
+        : "border-border bg-elevated text-fg hover:border-accent/50",
     );
 
   const canStart =
@@ -1980,7 +1970,7 @@ function NewGameModal() {
       {step === "concept" && (
         <div className="space-y-3">
           <div>
-            <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-[var(--glass-muted)]">
+            <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-muted">
               Working title
             </label>
             <Input
@@ -1988,23 +1978,23 @@ function NewGameModal() {
               placeholder={generateGameTitle(topicId, genreId)}
               onChange={(e) => setTitle(e.target.value)}
               maxLength={40}
-              className="!border-white/20 !bg-[rgba(8,28,38,0.9)] !text-white"
+              className="!border-border-strong !bg-[rgba(8,28,38,0.9)] !text-fg"
             />
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-            <span className="font-semibold text-[var(--glass-muted)]">Dev cost</span>
-            <span className={cnJoin("font-bold tabular", cash >= cost ? "text-cyan-200" : "text-red-300")}>
+            <span className="font-semibold text-muted">Dev cost</span>
+            <span className={cnJoin("font-bold tabular", cash >= cost ? "text-tech" : "text-red-300")}>
               {formatCash(cost)}
             </span>
           </div>
 
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <button type="button" className={chipBtn(!!topicId)} onClick={() => setStep("topic")}>
-              <div className="text-[10px] font-bold uppercase tracking-wide text-cyan-200/80">Topic</div>
+              <div className="text-[10px] font-bold uppercase tracking-wide text-muted">Topic</div>
               <div>{getTopic(topicId)?.name ?? "Pick Topic"}</div>
             </button>
             <button type="button" className={chipBtn(!!genreId)} onClick={() => setStep("genre")}>
-              <div className="text-[10px] font-bold uppercase tracking-wide text-cyan-200/80">Genre</div>
+              <div className="text-[10px] font-bold uppercase tracking-wide text-muted">Genre</div>
               <div className="flex items-center gap-2">
                 <img
                   src={genreIconSrc(genreId)}
@@ -2016,13 +2006,13 @@ function NewGameModal() {
               </div>
             </button>
             <button type="button" className={chipBtn(!!platformId)} onClick={() => setStep("platform")}>
-              <div className="text-[10px] font-bold uppercase tracking-wide text-cyan-200/80">Platform</div>
+              <div className="text-[10px] font-bold uppercase tracking-wide text-muted">Platform</div>
               <div className="flex items-center gap-2">
                 {(platformArt(platformId, year) || platformThumb(platformId, year)) && (
                   <img
                     src={platformArt(platformId, year) || platformThumb(platformId, year)}
                     alt=""
-                    className="h-8 w-10 shrink-0 rounded-md object-contain bg-black/30"
+                    className="h-8 w-10 shrink-0 rounded-md object-contain bg-panel"
                     draggable={false}
                   />
                 )}
@@ -2030,7 +2020,7 @@ function NewGameModal() {
               </div>
             </button>
             <button type="button" className={chipBtn(featureIds.length > 0)} onClick={() => setStep("tech")}>
-              <div className="text-[10px] font-bold uppercase tracking-wide text-cyan-200/80">Tech pack</div>
+              <div className="text-[10px] font-bold uppercase tracking-wide text-muted">Tech pack</div>
               <div className="truncate">
                 {featureIds
                   .map((id) => ENGINE_COMPONENTS.find((c) => c.id === id)?.name ?? id)
@@ -2042,7 +2032,7 @@ function NewGameModal() {
 
           {(unlocks.audience === "owned" || flags.audience) && (
             <div>
-              <label className="mb-1 block text-xs font-bold uppercase text-[var(--glass-muted)]">Audience</label>
+              <label className="mb-1 block text-xs font-bold uppercase text-muted">Audience</label>
               <div className="flex flex-wrap gap-2">
                 {AUDIENCES.map((a) => (
                   <button
@@ -2060,7 +2050,7 @@ function NewGameModal() {
 
           {sizes.length > 1 && (
             <div>
-              <label className="mb-1 block text-xs font-bold uppercase text-[var(--glass-muted)]">Size</label>
+              <label className="mb-1 block text-xs font-bold uppercase text-muted">Size</label>
               <div className="flex flex-wrap gap-2">
                 {sizes.map((s) => (
                   <button key={s} type="button" onClick={() => setSize(s)} className={chipBtn(size === s)}>
@@ -2071,11 +2061,11 @@ function NewGameModal() {
             </div>
           )}
 
-          <p className="text-center text-xs text-[var(--glass-muted)]">
+          <p className="text-center text-xs text-muted">
             Fit {combo.topicGenre}/{combo.platformGenre} · Cash {formatCash(cash)}
           </p>
           <div className="mt-2">
-            <p className="mb-1 text-center text-[10px] font-bold uppercase text-[var(--glass-muted)]">
+            <p className="mb-1 text-center text-[10px] font-bold uppercase text-muted">
               Project pillar
             </p>
             <div className="flex flex-wrap justify-center gap-1">
@@ -2122,7 +2112,7 @@ function NewGameModal() {
       {/* ── Pick Topic ── */}
       {step === "topic" && (
         <div>
-          <button type="button" className="mb-3 text-xs font-bold text-cyan-200 underline" onClick={() => setStep("concept")}>
+          <button type="button" className="mb-3 text-xs font-bold text-tech underline" onClick={() => setStep("concept")}>
             ← Game Concept
           </button>
           <SearchField
@@ -2148,7 +2138,7 @@ function NewGameModal() {
             ))}
           </div>
           {visibleTopics.length === 0 && (
-            <p className="mt-4 text-center text-sm text-[var(--glass-muted)]">No topics found</p>
+            <p className="mt-4 text-center text-sm text-muted">No topics found</p>
           )}
         </div>
       )}
@@ -2156,7 +2146,7 @@ function NewGameModal() {
       {/* ── Pick Genre ── */}
       {step === "genre" && (
         <div>
-          <button type="button" className="mb-3 text-xs font-bold text-cyan-200 underline" onClick={() => setStep("concept")}>
+          <button type="button" className="mb-3 text-xs font-bold text-tech underline" onClick={() => setStep("concept")}>
             ← Game Concept
           </button>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -2173,8 +2163,8 @@ function NewGameModal() {
                   className={cnJoin(
                     "flex flex-col items-center gap-2 rounded-xl border-2 px-2 py-3 text-center transition",
                     selected
-                      ? "border-cyan-300/80 bg-[rgba(20,40,55,0.92)] text-white shadow-[0_0_16px_rgba(60,220,240,0.25)]"
-                      : "border-white/15 bg-[rgba(12,22,32,0.88)] text-white/90 hover:border-cyan-200/40 hover:bg-[rgba(18,34,48,0.95)]",
+                      ? "border-cyan-300/80 bg-[rgba(20,40,55,0.92)] text-fg shadow-[0_0_16px_rgba(60,220,240,0.25)]"
+                      : "border-border bg-paper text-fg hover:border-accent hover:bg-elevated",
                   )}
                 >
                   <img
@@ -2196,7 +2186,7 @@ function NewGameModal() {
         <div className="space-y-3">
           <button
             type="button"
-            className="flex items-center gap-1 text-xs font-bold text-cyan-200"
+            className="flex items-center gap-1 text-xs font-bold text-tech"
             onClick={() => setStep("concept")}
           >
             ← Back
@@ -2227,8 +2217,8 @@ function NewGameModal() {
                   className={cnJoin(
                     "w-full overflow-hidden rounded-[1.35rem] border text-left transition active:scale-[0.99]",
                     selected
-                      ? "border-[var(--glass-cyan)] bg-[rgba(12,48,62,0.88)] shadow-[0_0_28px_rgba(77,240,255,0.28)]"
-                      : "border-white/20 bg-[rgba(10,36,48,0.82)] hover:border-cyan-300/50",
+                      ? "border-accent bg-accent/10 shadow-md"
+                      : "border-border-strong bg-[rgba(10,36,48,0.82)] hover:border-cyan-300/50",
                   )}
                 >
                   <div className="relative flex h-40 items-center justify-center bg-gradient-to-b from-white/10 to-transparent px-4 pt-4 sm:h-48">
@@ -2240,25 +2230,25 @@ function NewGameModal() {
                         draggable={false}
                       />
                     ) : (
-                      <div className="text-4xl font-black text-white/30">{p.short}</div>
+                      <div className="text-4xl font-black text-fg/30">{p.short}</div>
                     )}
                   </div>
                   <div className="px-5 pb-5 pt-1">
-                    <div className="text-center text-2xl font-black tracking-tight text-white">
+                    <div className="text-center text-2xl font-black tracking-tight text-fg">
                       {p.short || p.name}
                     </div>
                     <div className="mt-3 space-y-1.5 text-sm">
                       <div className="flex items-center justify-between">
-                        <span className="text-[var(--glass-muted)]">Dev. cost:</span>
-                        <span className="font-bold tabular text-[var(--glass-green)]">{formatCash(devCost)}</span>
+                        <span className="text-muted">Dev. cost:</span>
+                        <span className="font-bold tabular text-cash">{formatCash(devCost)}</span>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span className="text-[var(--glass-muted)]">Marketshare:</span>
-                        <span className="font-bold tabular text-white">{share.toFixed(1)} %</span>
+                        <span className="text-muted">Marketshare:</span>
+                        <span className="font-bold tabular text-fg">{share.toFixed(1)} %</span>
                       </div>
                     </div>
                     <div className="mt-3">
-                      <div className="mb-1.5 text-xs text-[var(--glass-muted)]">Genre match:</div>
+                      <div className="mb-1.5 text-xs text-muted">Genre match:</div>
                       <div className="flex flex-wrap justify-center gap-1.5">
                         {genres.map((g) => {
                           const fit = p.genreAffinity[g] ?? "ok";
@@ -2270,7 +2260,7 @@ function NewGameModal() {
                                 "flex w-[3.1rem] flex-col items-center gap-0.5 rounded-xl border px-1 py-1.5",
                                 hot
                                   ? "border-cyan-300/70 bg-cyan-400/15"
-                                  : "border-white/15 bg-black/25",
+                                  : "border-border bg-panel",
                               )}
                               title={`${getGenre(g).name}: ${fit}`}
                             >
@@ -2284,12 +2274,12 @@ function NewGameModal() {
                                 className={cnJoin(
                                   "rounded-md px-1 text-[10px] font-black leading-none",
                                   fit === "great"
-                                    ? "bg-emerald-500 text-white"
+                                    ? "bg-emerald-500 text-fg"
                                     : fit === "good"
-                                      ? "bg-teal-600 text-white"
+                                      ? "bg-teal-600 text-fg"
                                       : fit === "ok"
-                                        ? "bg-slate-600 text-white"
-                                        : "bg-slate-800 text-white/70",
+                                        ? "bg-slate-600 text-fg"
+                                        : "bg-slate-800 text-muted",
                                 )}
                               >
                                 {tierMark(fit)}
@@ -2305,7 +2295,7 @@ function NewGameModal() {
             })}
           </div>
           {platforms.length === 0 && (
-            <p className="text-center text-sm text-[var(--glass-muted)]">
+            <p className="text-center text-sm text-muted">
               No platforms unlocked yet — PC should be day one.
             </p>
           )}
@@ -2315,13 +2305,13 @@ function NewGameModal() {
       {/* ── Tech pack (graphics / sound) ── */}
       {step === "tech" && (
         <div className="space-y-4">
-          <button type="button" className="text-xs font-bold text-cyan-200 underline" onClick={() => setStep("concept")}>
+          <button type="button" className="text-xs font-bold text-tech underline" onClick={() => setStep("concept")}>
             ← Game Concept
           </button>
           <div>
             <div className="mb-2 flex items-center justify-between">
-              <h3 className="text-xs font-bold uppercase tracking-wide text-[var(--glass-muted)]">Graphics</h3>
-              <span className="text-xs font-bold text-amber-200">+{formatCash(featureCost)}</span>
+              <h3 className="text-xs font-bold uppercase tracking-wide text-muted">Graphics</h3>
+              <span className="text-xs font-bold text-warn">+{formatCash(featureCost)}</span>
             </div>
             <div className="grid grid-cols-2 gap-2">
               {graphicOptions.map((c) => {
@@ -2342,7 +2332,7 @@ function NewGameModal() {
                     className={chipBtn(on)}
                   >
                     <div>{c.name}</div>
-                    <div className="mt-1 text-[10px] text-cyan-200/80">{c.starting ? "Free" : "+$5.0K"}</div>
+                    <div className="mt-1 text-[10px] text-muted">{c.starting ? "Free" : "+$5.0K"}</div>
                   </button>
                 );
               })}
@@ -2350,7 +2340,7 @@ function NewGameModal() {
           </div>
           {soundOptions.length > 0 && (
             <div>
-              <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-[var(--glass-muted)]">Sound</h3>
+              <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">Sound</h3>
               <div className="grid grid-cols-2 gap-2">
                 {soundOptions.map((c) => {
                   const on = featureIds.includes(c.id);
@@ -2366,7 +2356,7 @@ function NewGameModal() {
                       className={chipBtn(on)}
                     >
                       <div>{c.name}</div>
-                      <div className="mt-1 text-[10px] text-cyan-200/80">{c.starting ? "Free" : "+$5.0K"}</div>
+                      <div className="mt-1 text-[10px] text-muted">{c.starting ? "Free" : "+$5.0K"}</div>
                     </button>
                   );
                 })}
