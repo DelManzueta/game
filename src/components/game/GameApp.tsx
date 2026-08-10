@@ -1,6 +1,6 @@
 /**
- * Studio Empire — GDT-inspired Garage presentation
- * Room-first layout. Domain mutations via useGame only.
+ * Studio Empire — stage shell (locked viewport, room world).
+ * Domain mutations via useGame only.
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
@@ -55,6 +55,20 @@ import type { AudienceId, DevField, GameSize, GenreId, ScreenId } from "@/lib/ga
 import { Badge, Button, Input, Modal, SearchField, cnJoin } from "@/components/ui/primitives";
 import { GarageLoopFlowchart, ScoringPipelineFlow } from "@/components/game/LoopFlowchart";
 import { MarketScreen } from "@/components/game/MarketScreen";
+import { SalesChart, salesPointsFromGame } from "@/components/game/SalesChart";
+import { CAMPAIGN_CATALOG } from "@/lib/game/commercial/marketing";
+import { HARDWARE_TIERS, type HardwareTierId } from "@/lib/game/tycoonLateMarket";
+import { DRM_TIERS, type DrmTier } from "@/lib/game/tycoonPiracy";
+import {
+  MEDIA_DRIVES,
+  GPU_PARTS,
+  consoleRdCost,
+  type MediaDriveId,
+  type GpuPartId,
+} from "@/lib/game/tycoonRiskAnalytics";
+import { getPlatformSpec, platformMarketState, weekToCampaignDay } from "@/lib/game/platforms/lifecycle";
+import { SYSTEM_UNLOCKS, describeUnlockRequirements } from "@/lib/game/progression/unlockRegistry";
+import { idealPhaseSliders } from "@/lib/game/classicGdt";
 import {
   FlaskConical,
   Gamepad2,
@@ -72,6 +86,9 @@ import {
   Palette,
   CalendarDays,
   Diamond,
+  Users,
+  Wallet,
+  TrendingUp,
 } from "lucide-react";
 
 const BAR_COLORS = ["#e86a4a", "#3aaa6a", "#3aa0d8", "#e8941a", "#9b6ad8", "#4ecb8a"];
@@ -127,7 +144,7 @@ function MainMenu() {
   }, []);
 
   return (
-    <div className="relative flex min-h-[100dvh] flex-col text-fg">
+    <div className="se-app relative text-fg">
       {/* Full-bleed 2D garage scene */}
       <div className="absolute inset-0 overflow-hidden">
         <img
@@ -142,10 +159,10 @@ function MainMenu() {
       <div className="relative z-10 flex flex-1 flex-col items-center justify-end px-4 pb-10 pt-16 sm:justify-center sm:pb-16">
         <div className="mb-5 flex flex-col items-center text-center">
           <p className="text-[11px] font-bold uppercase tracking-[0.28em] text-accent drop-shadow">Phase One · Garage</p>
-          <h1 className="mt-1 font-display text-4xl font-bold tracking-tight text-white drop-shadow sm:text-5xl">
+          <h1 className="mt-1 font-display text-4xl font-bold tracking-tight text-fg sm:text-5xl">
             Studio Empire
           </h1>
-          <p className="mx-auto mt-2 max-w-sm text-sm text-white/85">
+          <p className="mx-auto mt-2 max-w-sm text-sm text-fg/85">
             One founder. One garage. Ship games, grow fans, earn the office.
           </p>
         </div>
@@ -184,7 +201,7 @@ function MainMenu() {
                   className={cnJoin(
                     "rounded-lg border px-2 py-2 text-xs font-bold",
                     difficulty === id
-                      ? "border-accent bg-accent/20 text-white"
+                      ? "border-accent bg-accent/20 text-fg"
                       : "border-border text-muted hover:border-accent/50",
                   )}
                   onClick={() => setDifficulty(id)}
@@ -245,7 +262,7 @@ function GameOverScreen() {
   const published = useGame((s) => s.gamesPublished);
   const returnToMenu = useGame((s) => s.returnToMenu);
   return (
-    <div className="room-void flex min-h-[100dvh] flex-col items-center justify-center px-4">
+    <div className="se-app flex flex-col items-center justify-center px-4">
       <div className="w-full max-w-md rounded-2xl border border-border bg-paper p-8 text-center shadow-[var(--shadow-soft)]">
         <p className="text-xs font-bold uppercase tracking-widest text-bad">Bankrupt</p>
         <h1 className="mt-2 text-3xl font-bold">{company}</h1>
@@ -270,39 +287,63 @@ function PlayingShell() {
   const project = useGame((s) => s.currentProject);
   const phase = projectPhaseLabel(project);
   const forcePause = phase.needsPlayerInput && !!project;
-
-  // Secondary routes (library etc.) still work; home is always room-first garage
-  const showRoom = screen === "studio" || screen === "develop";
+  const secondary =
+    screen === "games" ||
+    screen === "research" ||
+    screen === "staff" ||
+    screen === "engines" ||
+    screen === "platforms" ||
+    screen === "finances" ||
+    screen === "market" ||
+    screen === "settings";
 
   return (
-    <div className="room-void flex min-h-[100dvh] flex-col text-fg" data-era={era}>
-      <GdtTopChrome forcePause={forcePause} />
-      <main className="relative flex-1 overflow-y-auto pb-20">
-        {showRoom && <GarageRoomView />}
-        {showRoom && <DevelopOverlay />}
-        {screen === "games" && <GamesScreen />}
-        {screen === "research" && <ResearchScreen />}
-        {screen === "staff" && <StaffScreen />}
-        {screen === "engines" && <EnginesScreen />}
-        {screen === "platforms" && <PlatformsScreen />}
-        {screen === "finances" && <FinancesScreen />}
-        {screen === "market" && <MarketScreen />}
-        {screen === "settings" && <SettingsScreen />}
-      </main>
-      <BottomDock />
+    <div className="se-app" data-era={era}>
+      <StudioTopBar forcePause={forcePause} />
+      <div className="se-stage">
+        {/* Always-on room world */}
+        <GarageRoomView immersive />
+        {/* Develop sheet over the room */}
+        {screen === "develop" && <DevelopOverlay sheet />}
+        {/* Department panels — scroll inside only */}
+        {secondary && (
+          <div className="se-panel">
+            <div className="se-panel-scroll">
+              {screen === "games" && <GamesScreen />}
+              {screen === "research" && <ResearchScreen />}
+              {screen === "staff" && <StaffScreen />}
+              {screen === "engines" && <EnginesScreen />}
+              {screen === "platforms" && <PlatformsScreen />}
+              {screen === "finances" && (
+        <div className="space-y-3">
+          <ContractsScreen />
+          <FinancesScreen />
+        </div>
+      )}
+              {screen === "market" && (
+        <div className="space-y-2">
+          <MarketingPanel />
+          <MarketScreen />
+        </div>
+      )}
+              {screen === "settings" && <SettingsScreen />}
+            </div>
+          </div>
+        )}
+      </div>
+      <StudioDock />
     </div>
   );
 }
 
 /* Top: project HUD center + vitals right + clock */
-function GdtTopChrome({ forcePause }: { forcePause: boolean }) {
+function StudioTopBar({ forcePause }: { forcePause: boolean }) {
   const company = useGame((s) => s.companyName);
   const week = useGame((s) => s.week);
   const year = useGame((s) => s.year);
   const month = useGame((s) => s.month);
   const cash = useGame((s) => s.cash);
   const fans = useGame((s) => s.fans);
-  const rp = useGame((s) => s.researchPoints);
   const speed = useGame((s) => s.speed);
   const setSpeed = useGame((s) => s.setSpeed);
   const setModal = useGame((s) => s.setModal);
@@ -312,351 +353,231 @@ function GdtTopChrome({ forcePause }: { forcePause: boolean }) {
   const unread = notifications.filter((n) => !n.read).length;
   const phase = projectPhaseLabel(project);
   const pct = Math.round((project?.stageProgress || 0) * 100);
-  const bugs = project?.bugs ?? 0;
-  // GDT-style dual orbs: design pair (left) + tech pair (right), grow while developing
-  const dBase = project?.designPoints ?? 0;
-  const tBase = project?.techPoints ?? 0;
-  const grow = project
-    ? Math.round((project.stageProgress || 0) * 18 + (project.weeksDev || 0) * 1.5)
-    : 0;
-  const designOrbA = project ? Math.max(0, Math.round(dBase * 0.45 + grow * 0.4)) : 0;
-  const designOrbB = project ? Math.max(0, Math.round(dBase * 0.55 + grow * 0.6)) : 0;
-  const techOrbA = project ? Math.max(0, Math.round(tBase * 0.5 + grow * 0.45)) : 0;
-  const techOrbB = project ? Math.max(0, Math.round(tBase * 0.5 + grow * 0.55)) : 0;
-  const phaseBarLabel = project
-    ? project.devPhase.includes("RUNNING")
-      ? phase.title
-      : phase.title
-    : "";
-
 
   return (
-    <header className="sticky top-0 z-30">
-      <div className="mx-auto flex max-w-6xl flex-wrap items-start justify-between gap-2 px-2 pt-2 sm:px-4">
-        {/* Menu */}
+    <header className="se-top relative">
+      <button
+        type="button"
+        className="shrink-0 text-left"
+        onClick={() => {
+          saveGame();
+          setModal("pauseMenu");
+        }}
+        aria-label="Menu"
+      >
+        <div className="text-[11px] font-bold tracking-wide text-white/90">{company || "Studio"}</div>
+        <div className="flex items-center gap-1.5 text-[11px] font-semibold tabular text-white/70">
+          <CalendarDays className="h-3.5 w-3.5 text-[#f0b24a]" aria-hidden />
+          {calendarHudLabel({ year, month, week })}
+        </div>
+      </button>
+
+      {project ? (
+        <div className="se-project-pill min-w-0 flex-1 sm:flex-none">
+          <span className="title">{project.title}</span>
+          <span className="meta">
+            {phase.title}
+            {project.devPhase.includes("RUNNING") ? ` · ${pct}%` : ""}
+          </span>
+        </div>
+      ) : (
+        <div className="hidden min-w-0 flex-1 se-metric-muted text-[11px] sm:block">Garage floor · ship to grow</div>
+      )}
+
+      <div className="ml-auto flex items-center gap-2 sm:gap-3">
+        <span className="se-metric se-metric-fans hidden sm:inline">{formatFans(fans)} fans</span>
+        <span className="se-metric se-metric-cash">{formatCash(cash)}</span>
+        <div className="se-speed" role="group" aria-label="Game speed">
+          {(
+            [
+              [0, Pause, "Pause"],
+              [1, Play, "Play"],
+              [2, FastForward, "Fast"],
+              [4, FastForward, "Max"],
+            ] as const
+          ).map(([s, Icon, label]) => (
+            <button
+              key={s}
+              type="button"
+              title={label}
+              aria-label={label}
+              data-active={speed === s}
+              onClick={() => setSpeed(s as 0 | 1 | 2 | 4)}
+            >
+              <Icon className="h-3.5 w-3.5" aria-hidden />
+            </button>
+          ))}
+        </div>
         <button
           type="button"
-          className="hud-chip flex h-11 items-center gap-2 px-2.5 pr-3 text-xs font-bold uppercase tracking-wide text-fg"
-          onClick={() => {
-            saveGame();
-            setModal("pauseMenu");
-          }}
-          aria-label="Menu"
+          className="relative flex h-8 w-8 items-center justify-center rounded-md border border-white/10 bg-white/[0.04] text-white/70"
+          aria-label={unread ? `Notifications, ${unread} unread` : "Notifications"}
+          onClick={() => setModal("notifications")}
         >
-          <span
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-accent/25 text-xs font-bold text-accent ring-2 ring-accent/40"
-            aria-hidden
-          >
-            {(company || "S").slice(0, 1).toUpperCase()}
-          </span>
-          <span className="max-w-[7rem] truncate">{company || "Menu"}</span>
+          <Bell className="h-3.5 w-3.5" />
+          {unread > 0 && (
+            <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-[#e8941a] px-0.5 text-[9px] font-bold text-[#1a1208]">
+              {unread > 9 ? "9+" : unread}
+            </span>
+          )}
         </button>
-
-        {/* Project HUD — GDT top-center orbs */}
-        <div className="order-last flex w-full flex-col items-center sm:order-none sm:w-auto">
-          <div className="flex items-end gap-1 sm:gap-2">
-            {/* Design orbs (warm) — classic GDT left pair */}
-            <Orb value={designOrbA} label="Design" color="var(--color-design)" Icon={Palette} active={!!project} />
-            <Orb value={designOrbB} label="Design" color="#e8941a" Icon={Palette} active={!!project} />
-            <div className="hud-chip mx-0.5 min-w-[9.5rem] max-w-[14rem] px-3 py-2 text-center sm:min-w-[12rem]">
-              {project ? (
-                <>
-                  <div className="truncate text-sm font-bold leading-tight">{project.title}</div>
-                  <div className="truncate text-[10px] text-muted">
-                    {getTopic(project.topicId)?.name} / {getGenre(project.genreId).name}
-                  </div>
-                  <div className="mt-1 rounded bg-panel px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-accent">
-                    {phaseBarLabel}
-                    {project.devPhase.includes("RUNNING") ? ` · ${pct}%` : ""}
-                  </div>
-                  {project.devPhase.includes("RUNNING") && (
-                    <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-panel">
-                      <div
-                        className="h-full rounded-full bg-accent transition-all duration-300"
-                        style={{ width: `${Math.max(pct > 0 ? 4 : 0, pct)}%` }}
-                      />
-                    </div>
-                  )}
-                </>
-              ) : (
-                <div className="py-0.5 text-sm font-semibold text-muted">No Project</div>
-              )}
-            </div>
-            {/* Tech orbs (cool) — classic GDT right pair */}
-            <Orb value={techOrbA} label="Tech" color="var(--color-tech)" Icon={Cpu} active={!!project} />
-            <Orb value={techOrbB} label="Tech" color="#4ecb8a" Icon={Cpu} active={!!project} />
-          </div>
-        </div>
-
-        {/* Vitals + clock */}
-        <div className="flex flex-col items-end gap-1">
-          <div className="hud-chip px-2.5 py-1.5 text-right text-[11px] leading-snug sm:text-xs">
-            <div className="font-semibold tabular text-fans">{formatFans(fans)} Fans</div>
-            <div className="tabular text-muted">
-              {calendarHudLabel({ year, month, week })}
-            </div>
-            <div className="font-bold tabular text-cash">Cash: {formatCash(cash)}</div>
-          </div>
-          <div className="flex items-center gap-0.5">
-            {(
-              [
-                [0, Pause, "Pause"],
-                [1, Play, "Play"],
-                [2, FastForward, "Faster"],
-                [4, FastForward, "Fastest"],
-              ] as const
-            ).map(([s, Icon, label]) => (
-              <button
-                key={s}
-                type="button"
-                title={label}
-                aria-label={label}
-                onClick={() => setSpeed(s as 0 | 1 | 2 | 4)}
-                className={cnJoin(
-                  "flex h-9 min-w-9 flex-col items-center justify-center gap-0 rounded-lg border px-1.5 transition-colors sm:min-w-[3.25rem] sm:flex-row sm:gap-1 sm:px-2",
-                  speed === s
-                    ? "border-accent bg-accent text-accent-fg"
-                    : "border-border bg-paper text-fg hover:border-border-strong",
-                )}
-              >
-                <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                <span className="text-[9px] font-bold leading-none sm:text-[10px]">{label}</span>
-              </button>
-            ))}
-            <button
-              type="button"
-              className="relative flex h-9 min-w-9 flex-col items-center justify-center gap-0 rounded-lg border border-border bg-paper px-1.5 text-fg hover:border-border-strong sm:min-w-[3.75rem] sm:flex-row sm:gap-1 sm:px-2"
-              aria-label={unread ? `Notifications, ${unread} unread` : "Notifications"}
-              title="Notifications"
-              onClick={() => setModal("notifications")}
-            >
-              <Bell className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              <span className="text-[9px] font-bold leading-none sm:text-[10px]">Inbox</span>
-              {unread > 0 && (
-                <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-accent-fg">
-                  {unread > 9 ? "9+" : unread}
-                </span>
-              )}
-            </button>
-          </div>
-        </div>
       </div>
       {forcePause && project && (
-        <div className="mx-auto mt-1 max-w-xl px-3 text-center text-[11px] font-semibold text-accent">
-          Desk decision — {phase.hint}
+        <div className="absolute left-0 right-0 top-full z-40 border-b border-amber-400/30 bg-amber-950/90 px-3 py-1 text-center text-[11px] font-semibold text-amber-100">
+          Decision needed — {phase.hint}
         </div>
       )}
     </header>
   );
 }
 
-function Orb({
-  value,
-  label,
-  color,
-  Icon,
-  active,
-  always,
-}: {
-  value: number;
-  label: string;
-  color: string;
-  Icon: typeof Bug;
-  active?: boolean;
-  always?: boolean;
-}) {
-  const show = always || active;
-  return (
-    <div className={cnJoin("flex flex-col items-center", !show && "opacity-25")}>
-      <div
-        className="flex h-10 w-10 items-center justify-center rounded-full border-2 bg-elevated text-xs font-bold tabular shadow-sm sm:h-11 sm:w-11 sm:text-sm"
-        style={{ borderColor: color, color }}
-        title={label}
-      >
-        {show ? value : "—"}
-      </div>
-      <span className="mt-0.5 max-w-[3.5rem] truncate text-center text-[9px] font-bold uppercase tracking-wide text-fg">
-        {label}
-      </span>
-    </div>
-  );
-}
-
-function BottomDock() {
+function StudioDock() {
   const screen = useGame((s) => s.screen);
   const setScreen = useGame((s) => s.setScreen);
-  const items: { id: ScreenId; label: string; icon: typeof Home }[] = [
-    { id: "studio", label: "Garage", icon: Home },
-    { id: "develop", label: "Desk", icon: Gamepad2 },
-    { id: "games", label: "Games", icon: History },
-    { id: "market", label: "Market", icon: CalendarDays },
-    { id: "research", label: "Research", icon: FlaskConical },
+  const office = useGame((s) => s.office);
+  const items: { id: typeof screen; label: string; icon: typeof Home }[] = [
+    { id: "studio", label: "Studio", icon: Home },
+    { id: "games", label: "Games", icon: Gamepad2 },
+    { id: "market", label: "Market", icon: TrendingUp },
+    { id: "platforms", label: "Systems", icon: Cpu },
+    { id: "research", label: "Lab", icon: FlaskConical },
     { id: "settings", label: "More", icon: Settings },
   ];
+  void office;
+  void Users;
+  void Wallet;
+
   return (
-    <nav className="fixed bottom-0 inset-x-0 z-30 border-t-2 border-border-strong bg-paper/95 shadow-[0_-8px_24px_rgba(60,40,20,0.12)] backdrop-blur-md">
-      <div className="mx-auto flex max-w-lg justify-around px-1 py-1.5 pb-[max(0.4rem,env(safe-area-inset-bottom))]">
-        {items.map(({ id, label, icon: Icon }) => {
-          const lit = screen === id;
-          return (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setScreen(id)}
-              className={cnJoin(
-                "flex min-h-12 min-w-[3.5rem] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg px-1 py-1.5 text-[10px] font-bold transition-colors",
-                lit ? "text-accent" : "text-muted hover:text-fg",
-              )}
-            >
-              <Icon className="h-4 w-4" />
-              {label}
-            </button>
-          );
-        })}
-      </div>
+    <nav className="se-dock" aria-label="Studio navigation">
+      {items.map(({ id, label, icon: Icon }) => (
+        <button
+          key={id}
+          type="button"
+          data-active={screen === id || (id === "studio" && screen === "develop")}
+          onClick={() => setScreen(id === "studio" ? "studio" : id)}
+        >
+          <Icon className="h-4 w-4" aria-hidden />
+          <span className="truncate">{label}</span>
+        </button>
+      ))}
     </nav>
   );
 }
 
 /* ═══════════════════════════ Garage room ═══════════════════════════ */
 
-function GarageRoomView() {
+function GarageRoomView({ immersive = false }: { immersive?: boolean }) {
   const state = useGame();
   const ov = studioOverview(state);
   const setModal = useGame((s) => s.setModal);
   const setScreen = useGame((s) => s.setScreen);
   const busy = !!state.currentProject?.devPhase.includes("RUNNING");
   const art = roomArtDefForOffice(state.office);
+  const screen = useGame((s) => s.screen);
+  // Room is always the world under chrome; hide action chrome on pure secondary screens
+  const showChrome = screen === "studio" || screen === "develop";
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col items-center px-2 pt-1 sm:px-4">
-      {/* 2D room stage — uses your photo ladder, not the cartoon garage */}
-      <button
-        type="button"
-        className="group relative w-full max-w-3xl overflow-hidden rounded-2xl border-2 border-border-strong shadow-[var(--shadow-soft)] outline-none ring-offset-2 focus-visible:ring-2 focus-visible:ring-focus"
-        onClick={() => {
-          if (state.currentProject) setScreen("develop");
-          else setModal("newGame");
-        }}
-        aria-label={state.currentProject ? "Open desk" : "Develop new game"}
-      >
-        <img
-          src={art.room}
-          alt=""
-          className="aspect-[3/2] w-full object-cover transition duration-300 group-hover:scale-[1.02] sm:aspect-[16/10]"
-          style={{ objectPosition: art.objectPosition }}
-          draggable={false}
-        />
-        {/* Ambient vignette */}
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/45 via-transparent to-black/10" />
+    <div className={immersive ? "se-room" : "relative mx-auto w-full max-w-5xl"}>
+      <img
+        src={art.room}
+        alt=""
+        className={immersive ? "se-room-img" : "aspect-[16/10] w-full rounded-xl object-cover"}
+        style={{ objectPosition: art.objectPosition || "center 48%" }}
+        draggable={false}
+      />
+      {immersive && <div className="se-room-vignette" />}
 
-        {/* Desk hotspot label */}
-        <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 flex-col items-center gap-1">
-          <span className="rounded-full border border-white/25 bg-black/55 px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-white shadow-md backdrop-blur-sm">
-            {state.currentProject
-              ? busy
-                ? art.hotspotBusy
-                : art.hotspotOpen
-              : art.hotspotIdle}
-          </span>
-        </div>
-
-        {/* Project plaque */}
-        {state.currentProject && (
-          <div className="absolute left-3 top-3 max-w-[70%] rounded-xl border border-white/20 bg-black/60 px-3 py-2 shadow-md backdrop-blur-sm">
-            <div className="truncate text-sm font-bold text-white">{state.currentProject.title}</div>
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-cyan-200">
-              {ov.phase.title}
+      {showChrome && immersive && (
+        <>
+          <div className="se-room-caption pointer-events-none">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#f0b24a]/95">
+              {state.currentProject
+                ? busy
+                  ? art.hotspotBusy
+                  : art.hotspotOpen
+                : art.hotspotIdle}
+            </p>
+            <div className="mt-1 flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h1 className="text-lg font-semibold tracking-tight text-white/90 sm:text-xl">
+                  {state.companyName}
+                </h1>
+                <p className="text-xs text-white/40">
+                  {state.office === 1
+                    ? "Garage · Phase One"
+                    : state.office === 2
+                      ? "Small office"
+                      : state.office >= 4
+                        ? "Global campus"
+                        : "Studio floor"}
+                </p>
+              </div>
+              {state.office === 1 && ov.officeGoal && !ov.officeGoal.activeMove && (
+                <p className="max-w-[16rem] text-right text-[12px] leading-snug text-white/50">
+                  <span className="text-[#f0b24a]/90">Next · </span>
+                  {ov.gamesPublished}/{ov.officeGoal.gamesNeed} games ·{" "}
+                  {formatFans(ov.fans)}/{formatFans(ov.officeGoal.fansNeed)} fans · hold{" "}
+                  {formatCash(ov.officeGoal.cashNeed)}
+                </p>
+              )}
             </div>
           </div>
-        )}
-      </button>
 
-      {/* Quick actions */}
-      <div className="mt-3 flex w-full max-w-md flex-wrap justify-center gap-2">
-        {!state.currentProject ? (
-          <Button size="lg" className="min-w-[12rem]" onClick={() => setModal("newGame")}>
-            Develop New Game
-          </Button>
-        ) : state.currentProject.devPhase === "READY_TO_RELEASE" ? (
-          <Button
-            size="lg"
-            className="min-w-[12rem] !bg-emerald-500 !text-white hover:!bg-emerald-400"
-            onClick={() => setScreen("develop")}
-          >
-            Finish · Release
-          </Button>
-        ) : state.currentProject.devPhase.includes("CONFIG") ? (
-          <Button size="lg" className="min-w-[12rem]" onClick={() => setScreen("develop")}>
-            Configure Stage
-          </Button>
-        ) : state.currentProject.devPhase === "POLISHING" ? (
-          <Button size="lg" className="min-w-[12rem]" onClick={() => setScreen("develop")}>
-            Finish · Polish
-          </Button>
-        ) : (
-          <Button size="lg" className="min-w-[12rem]" variant="secondary" onClick={() => setScreen("develop")}>
-            Open Desk · {ov.phase.title}
-          </Button>
-        )}
-        <Button size="md" variant="ghost" onClick={() => setModal("loopGuide")}>
-          How it works
-        </Button>
-      </div>
-
-      {/* Office goal card — bible proofs, no formulas computed here */}
-      {state.office === 1 && ov.officeGoal && (
-        <div className="game-panel mt-4 w-full max-w-md px-4 py-3 text-center text-xs">
-          <div className="mb-1 font-bold uppercase tracking-wide text-muted">
-            {ov.officeGoal.activeMove
-              ? "Move in progress"
-              : ov.officeGoal.offerState === "offered" || ov.officeGoal.offerState === "deferred"
-                ? "Office offer ready"
-                : "Office goal"}
+          {/* Master loop command strip (Module 6) */}
+          <div className="se-float-actions">
+            {!state.currentProject ? (
+              <button type="button" className="se-cta" onClick={() => setModal("newGame")}>
+                1 · Develop game
+              </button>
+            ) : state.currentProject.devPhase === "READY_TO_RELEASE" ? (
+              <button type="button" className="se-cta" onClick={() => setScreen("develop")}>
+                1 · Finish · Release
+              </button>
+            ) : state.currentProject.devPhase.includes("CONFIG") ? (
+              <button type="button" className="se-cta" onClick={() => setScreen("develop")}>
+                1 · Configure stage
+              </button>
+            ) : state.currentProject.devPhase === "POLISHING" ? (
+              <button type="button" className="se-cta" onClick={() => setScreen("develop")}>
+                1 · Polish build
+              </button>
+            ) : (
+              <button type="button" className="se-cta" onClick={() => setScreen("develop")}>
+                1 · Desk · {ov.phase.title}
+              </button>
+            )}
+            <button type="button" className="se-cta-secondary" onClick={() => setScreen("market")}>
+              2 · Marketing
+            </button>
+            <button type="button" className="se-cta-secondary" onClick={() => setScreen("finances")}>
+              3 · Contracts
+            </button>
+            <button type="button" className="se-cta-secondary" onClick={() => setScreen("platforms")}>
+              4 · Systems
+            </button>
+            <button type="button" className="se-cta-secondary" onClick={() => setScreen("engines")}>
+              5 · Engines
+            </button>
+            <button type="button" className="se-cta-secondary" onClick={() => setScreen("staff")}>
+              6 · People
+            </button>
+            <button type="button" className="se-cta-secondary" onClick={() => setModal("loopGuide")}>
+              How it works
+            </button>
+            {(ov.officeGoal?.offerState === "offered" ||
+              ov.officeGoal?.offerState === "deferred" ||
+              ov.officeGoal?.canMove) && (
+              <button type="button" className="se-cta-secondary" onClick={() => setModal("officeOffer")}>
+                Office offer
+              </button>
+            )}
           </div>
-          {ov.officeGoal.activeMove ? (
-            <p className="font-semibold text-fg">
-              Keys hand over week {ov.officeGoal.activeMove.completesWeek} (now W
-              {state.week}).
-            </p>
-          ) : (
-            <>
-              <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 font-semibold text-fg">
-                <span>
-                  Fans {formatFans(ov.fans)}/{formatFans(ov.officeGoal.fansNeed)}
-                </span>
-                <span>
-                  Games {ov.gamesPublished}/{ov.officeGoal.gamesNeed}
-                </span>
-                <span>
-                  Cash {formatCash(ov.cash)}/{formatCash(ov.officeGoal.cashNeed)}
-                </span>
-              </div>
-              {ov.officeGoal.proofs.length > 0 && (
-                <ul className="mt-2 space-y-0.5 text-left text-[11px] text-muted">
-                  {ov.officeGoal.proofs.map((p) => (
-                    <li key={p.id} className={p.met ? "text-good" : ""}>
-                      {p.met ? "✓" : "○"} {p.label}
-                      <span className="ml-1 opacity-70">({p.detail})</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {(ov.officeGoal.offerState === "offered" ||
-                ov.officeGoal.offerState === "deferred" ||
-                ov.officeGoal.offerState === "eligible" ||
-                ov.officeGoal.canMove) && (
-                <Button
-                  size="sm"
-                  className="mt-3"
-                  onClick={() => setModal("officeOffer")}
-                >
-                  View office offer
-                </Button>
-              )}
-            </>
-          )}
-        </div>
+          <p className="mt-2 text-center text-[10px] font-semibold tabular text-white/55">
+            Hype {Math.round(state.hype)} · RP {Math.floor(state.researchPoints)} · Staff{" "}
+            {state.staff.length}
+          </p>
+        </>
       )}
     </div>
   );
@@ -707,7 +628,7 @@ function TechReadinessPanel({
             <span>Runtime health · {profile.targetFps} FPS target</span>
             <span className="tabular">{Math.round(profile.overallHealth * 100)}%</span>
           </div>
-          <div className="h-2 overflow-hidden rounded-full bg-black/20">
+          <div className="h-2 overflow-hidden rounded-full bg-panel">
             <div
               className="h-full rounded-full bg-accent transition-all"
               style={{ width: `${Math.round(profile.overallHealth * 100)}%` }}
@@ -718,10 +639,10 @@ function TechReadinessPanel({
           </p>
           <ul className="mt-2 grid grid-cols-2 gap-1">
             {relevant.map((a) => (
-              <li key={a.axis} className="rounded-md border border-border/60 bg-black/10 px-1.5 py-1 text-[10px]">
+              <li key={a.axis} className="rounded-md border border-border/60 bg-panel px-1.5 py-1 text-[10px]">
                 <span className="font-semibold uppercase">{a.axis}</span>
                 <span className="float-right tabular text-muted">{Math.round(a.utilization * 100)}%</span>
-                <div className="mt-0.5 h-1 overflow-hidden rounded-full bg-black/20">
+                <div className="mt-0.5 h-1 overflow-hidden rounded-full bg-panel">
                   <div
                     className="h-full rounded-full"
                     style={{
@@ -795,43 +716,172 @@ function TechReadinessPanel({
 
 /* ═══════════════════════════ Desk overlay (stage + polish) ═══════════════════════════ */
 
-function DevelopOverlay() {
+
+function ProjectModsBar() {
+  const project = useGame((s) => s.currentProject);
+  const unlocked = useGame((s) => s.unlockedPlatforms);
+  const unlockedDrm = useGame((s) => s.unlockedDrm) ?? ["None"];
+  const toggleCrunchMode = useGame((s) => s.toggleCrunchMode);
+  const setSecondaryPlatforms = useGame((s) => s.setSecondaryPlatforms);
+  const setProjectDrm = useGame((s) => s.setProjectDrm);
+  const unlockDrm = useGame((s) => s.unlockDrm);
+  const toggleIllicitAssets = useGame((s) => s.toggleIllicitAssets);
+  const knownCombos = useGame((s) => s.knownCombos) ?? {};
+  const rp = useGame((s) => s.researchPoints);
+  const [msg, setMsg] = useState("");
+  if (!project) return null;
+  const secs = project.secondaryPlatformIds ?? [];
+  const candidates = unlocked.filter((id) => id !== project.platformId).slice(0, 8);
+
+  return (
+    <div className="mt-2 space-y-2 rounded-xl border border-white/10 bg-black/30 p-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-[10px] font-bold uppercase tracking-wide text-white/50">
+          Production mods · v2.2
+        </span>
+        {msg && <span className="text-[10px] text-amber-200/90">{msg}</span>}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          variant={project.crunchMode ? "danger" : "secondary"}
+          onClick={() => setMsg(toggleCrunchMode() ?? (project.crunchMode ? "Crunch off" : "Crunch on"))}
+        >
+          {project.crunchMode ? "Crunch ON · 1.45×" : "Crunch OFF"}
+        </Button>
+        <Button
+          size="sm"
+          variant={project.usedIllicitAssets ? "danger" : "secondary"}
+          onClick={() => setMsg(toggleIllicitAssets() ?? "Toggled")}
+        >
+          {project.usedIllicitAssets ? "Illicit assets ON" : "Clean assets"}
+        </Button>
+        {(project.crisisReviewPenalty ?? 0) > 0 && (
+          <span className="rounded-full border border-red-400/40 px-2 py-1 text-[10px] font-bold text-red-300">
+            Review pen −{project.crisisReviewPenalty}
+          </span>
+        )}
+        {(project.fluWeeksLeft ?? 0) > 0 && (
+          <span className="rounded-full border border-amber-400/40 px-2 py-1 text-[10px] font-bold text-amber-200">
+            Flu {project.fluWeeksLeft}w
+          </span>
+        )}
+      </div>
+      {knownCombos[`${project.topicId}:${project.genreId}`] && (
+        <p className="text-[11px] font-semibold text-accent">
+          Known combo: {knownCombos[`${project.topicId}:${project.genreId}`]}
+        </p>
+      )}
+      <div>
+        <p className="mb-1 text-[10px] font-bold uppercase text-white/45">
+          DRM / copy protection
+        </p>
+        <div className="flex flex-wrap gap-1.5">
+          {DRM_TIERS.map((d) => {
+            const have = unlockedDrm.includes(d.id) || d.id === "None";
+            const on = (project.drmTier ?? "None") === d.id;
+            return (
+              <button
+                key={d.id}
+                type="button"
+                className={cnJoin(
+                  "rounded-full border px-2 py-1 text-[10px] font-semibold",
+                  on
+                    ? "border-accent bg-accent/25 text-accent"
+                    : have
+                      ? "border-white/15 bg-white/5 text-white/70"
+                      : "border-white/10 text-white/35",
+                )}
+                onClick={() => {
+                  if (!have) {
+                    setMsg(unlockDrm(d.id as DrmTier) ?? `Unlocked ${d.label}`);
+                  } else {
+                    setMsg(setProjectDrm(d.id as DrmTier) ?? d.label);
+                  }
+                }}
+              >
+                {have ? d.label : `${d.label} (${d.rpUnlock} RP)`}
+              </button>
+            );
+          })}
+        </div>
+        <p className="mt-1 text-[10px] text-white/40">RP {Math.floor(rp)} · heavier DRM = less theft, more backlash</p>
+      </div>
+      {candidates.length > 0 && (
+        <div>
+          <p className="mb-1 text-[10px] font-bold uppercase text-white/45">
+            Secondary platforms (ports · max 2)
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {candidates.map((id) => {
+              const on = secs.includes(id);
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  className={cnJoin(
+                    "rounded-full border px-2.5 py-1 text-[11px] font-semibold",
+                    on
+                      ? "border-accent bg-accent/20 text-accent"
+                      : "border-white/15 bg-white/5 text-white/70",
+                  )}
+                  onClick={() => {
+                    const next = on ? secs.filter((x) => x !== id) : [...secs, id].slice(0, 2);
+                    setMsg(setSecondaryPlatforms(next) ?? (on ? "Removed" : "Added port"));
+                  }}
+                >
+                  {getPlatform(id)?.short ?? id}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DevelopOverlay({ sheet = false }: { sheet?: boolean }) {
   const screen = useGame((s) => s.screen);
   const project = useGame((s) => s.currentProject);
+  const setScreen = useGame((s) => s.setScreen);
   const office = useGame((s) => s.office);
   const deskArt = roomArtDefForOffice(office).desk;
-  // Show desk panel when on develop screen, or auto when config needed on studio
-  const needsDesk =
-    project &&
-    (screen === "develop" ||
-      project.devPhase.includes("CONFIG") ||
-      project.devPhase === "POLISHING" ||
-      project.devPhase === "READY_TO_RELEASE");
 
-  if (!needsDesk || !project) return null;
-  if (screen !== "develop" && !project.devPhase.includes("CONFIG") && project.devPhase !== "POLISHING" && project.devPhase !== "READY_TO_RELEASE") {
-    return null;
+  if (!project || screen !== "develop") return null;
+
+  if (sheet) {
+    return (
+      <div className="se-desk-sheet" role="dialog" aria-label="Development desk">
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-white/10 px-3 py-2">
+          <div className="min-w-0">
+            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#f0b24a]/95">Desk</p>
+            <p className="truncate text-sm font-bold text-white/90">{project.title}</p>
+          </div>
+          <button
+            type="button"
+            className="se-cta-secondary !min-h-9 !px-3 !text-xs"
+            onClick={() => setScreen("studio")}
+          >
+            Close
+          </button>
+        </div>
+        <div className="shrink-0 px-3 pt-2">
+          <ProjectModsBar />
+        </div>
+        <div className="relative h-20 shrink-0 overflow-hidden sm:h-24">
+          <img src={deskArt} alt="" className="h-full w-full object-cover object-center" draggable={false} />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
+        </div>
+        <div className="se-desk-scroll">
+          <DevelopPanel />
+        </div>
+      </div>
+    );
   }
-  // On studio with only RUNNING — don't force overlay
-  if (screen === "studio" && project.devPhase.includes("RUNNING")) return null;
 
   return (
     <div className="mx-auto mt-2 w-full max-w-lg px-3 pb-6">
-      <div className="relative mb-3 overflow-hidden rounded-2xl border-2 border-border-strong shadow-[var(--shadow-card)]">
-        <img
-          src={deskArt}
-          alt=""
-          className="aspect-[21/9] w-full object-cover object-[center_50%]"
-          draggable={false}
-        />
-        <div className="absolute inset-0 bg-gradient-to-r from-black/55 via-black/20 to-transparent" />
-        <div className="absolute bottom-2 left-3 right-3 flex items-end justify-between gap-2">
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-white/80">Work desk</p>
-            <p className="text-sm font-bold text-white drop-shadow">{project.title}</p>
-          </div>
-        </div>
-      </div>
       <DevelopPanel />
     </div>
   );
@@ -888,7 +938,17 @@ function DevelopPanel() {
       {isConfig && (
         <>
           <p className="mt-2 text-center text-xs text-muted">
-            Set time allocation for Stage {stageNum}. OK locks it in and starts work.
+            Set time allocation for Stage {stageNum}. Match the genre focus — flat sliders score worse.
+          </p>
+          <p className="mt-1 text-center text-[11px] text-[#f0b24a]/90">
+            {(() => {
+              const ideal = idealPhaseSliders(project.genreId, stageNum as 1 | 2 | 3);
+              const ranked = Object.entries(ideal)
+                .sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))
+                .slice(0, 2)
+                .map(([k]) => FIELD_LABELS[k as DevField] ?? k);
+              return `Genre focus: push ${ranked.join(" + ")}`;
+            })()}
           </p>
           <div className="mt-5 flex justify-center gap-4 sm:gap-6">
             {fields.map((f, i) => (
@@ -1145,51 +1205,214 @@ function VerticalAllocBar({
 
 /* ═══════════════════════════ Secondary screens ═══════════════════════════ */
 
+
+function PlatformLifecycleLine({ platformId, year }: { platformId: string; year: number }) {
+  const week = useGame((s) => s.week);
+  try {
+    const spec = getPlatformSpec(platformId);
+    const day = weekToCampaignDay(week);
+    const m = platformMarketState(spec, { day });
+    const launchYear = Math.floor(spec.launchDay / (48 * 7)) + 1982; // approximate from campaign day
+    const age = Math.max(0, year - (getPlatform(platformId)?.year ?? launchYear));
+    return (
+      <p className="mt-0.5 text-[11px] text-white/70">
+        Lifecycle: <span className="font-bold capitalize">{m.lifecycle.replace(/_/g, " ")}</span>
+        {m.isLegacy ? " · retired shelves" : ""} · live factor{" "}
+        {Math.round(m.lifecycleFactor * 100)}%
+        {age > 0 ? ` · age ${age}y` : ""}
+        {m.lifecycleFactor < 0.35 && !m.isLegacy ? " · late cycle (sales soft)" : ""}
+      </p>
+    );
+  } catch {
+    return null;
+  }
+}
+
+function MarketingPanel() {
+  const hype = useGame((s) => s.hype);
+  const cash = useGame((s) => s.cash);
+  const runStudioMarketing = useGame((s) => s.runStudioMarketing);
+  const project = useGame((s) => s.currentProject);
+  const [msg, setMsg] = useState("");
+  const tiers = CAMPAIGN_CATALOG.filter((c) =>
+    ["dev_blog", "magazine_ad", "g3_booth", "flyer_run", "demo_push"].includes(c.campaignId),
+  );
+
+  return (
+    <div className="game-panel mt-3 space-y-2 p-3">
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-bold text-fg">Marketing campaigns</h3>
+          <p className="text-xs text-muted">
+            Studio hype <span className="font-bold tabular text-accent">{Math.round(hype)}</span>
+            {" · "}decays ~12%/week · burns at launch · rivals every 6 weeks
+          </p>
+        </div>
+        {project && (
+          <span className="text-[10px] text-muted">Title spend {formatCash(project.marketingSpend ?? 0)}</span>
+        )}
+      </div>
+      {msg && <p className="text-xs text-warn">{msg}</p>}
+      <ul className="space-y-2">
+        {tiers.map((c) => (
+          <li
+            key={c.campaignId}
+            className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-elevated px-3 py-2"
+          >
+            <div className="min-w-0">
+              <div className="font-semibold text-fg">{c.name}</div>
+              <p className="text-[11px] text-muted">{c.description}</p>
+              <p className="text-[10px] text-subtle">
+                ~+{c.immediateHypePoints} hype · {formatCash(c.cost)}
+              </p>
+            </div>
+            <Button
+              size="sm"
+              disabled={cash < c.cost}
+              onClick={() => setMsg(runStudioMarketing(c.campaignId) ?? `${c.name} live.`)}
+            >
+              Run
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function GamesScreen() {
   const games = useGame((s) => s.releasedGames);
   const selectGame = useGame((s) => s.selectGame);
   const setModal = useGame((s) => s.setModal);
   const startTitleCampaign = useGame((s) => s.startTitleCampaign);
+  const year = useGame((s) => s.year);
   const [sel, setSel] = useState<string | null>(null);
   const [campMsg, setCampMsg] = useState("");
   const rows = libraryRows(games);
-  const selected = games.find((g) => g.id === sel);
+  const selected = games.find((g) => g.id === (sel ?? games[0]?.id));
+  const chartPts = selected ? salesPointsFromGame(selected) : [];
+  const isPlan =
+    !!selected &&
+    !(selected.weeklyHistory?.length) &&
+    (selected.weeklySalesLeft?.length ?? 0) > 0;
+
   return (
     <ScreenBackdrop screen="games">
-      <h2 className="text-center text-2xl font-bold text-white drop-shadow">Game History</h2>
-      <div className="mx-auto mt-1 h-px w-40 bg-cyan-400/50" />
-      {!rows.length && <p className="mt-8 text-center text-white/70">No releases yet.</p>}
-      <ul className="mt-4 space-y-2">
-        {rows.map((r) => (
-          <li key={r.id}>
-            <button
-              type="button"
-              onClick={() => setSel(r.id === sel ? null : r.id)}
-              className={cnJoin(
-                "w-full rounded-xl border p-4 text-left backdrop-blur-sm",
-                sel === r.id ? "border-cyan-300/60 bg-cyan-400/15" : "border-white/15 bg-black/55",
-              )}
-            >
-              <div className="flex justify-between gap-2">
-                <span className="font-bold text-white">{r.title}</span>
-                <span className="text-lg font-bold tabular text-cyan-200">{r.avgReview.toFixed(1)}</span>
-              </div>
-              <p className="mt-1 text-xs text-white/65">
-                {r.genre} · {r.sales.toLocaleString()} sold · {r.revenueLabel}
-              </p>
-            </button>
-          </li>
-        ))}
+      <div className="game-panel px-4 py-3 text-center">
+        <h2 className="text-2xl font-bold text-fg">Library</h2>
+        <p className="mt-0.5 text-sm text-muted">Sales graphs · reviews · campaigns</p>
+      </div>
+      {!rows.length && (
+        <p className="mt-6 text-center text-muted">
+          No releases yet. Ship your first title from the garage desk.
+        </p>
+      )}
+      <ul className="mt-3 space-y-2">
+        {rows.map((r) => {
+          const g = games.find((x) => x.id === r.id);
+          const thumb = g ? platformThumb(g.platformId, g.yearReleased ?? year) : undefined;
+          const on = (sel ?? games[0]?.id) === r.id;
+          return (
+            <li key={r.id}>
+              <button
+                type="button"
+                onClick={() => setSel(r.id)}
+                className={cnJoin(
+                  "flex w-full items-center gap-3 rounded-xl border p-3 text-left",
+                  on ? "border-accent bg-accent/15" : "border-border bg-paper",
+                )}
+              >
+                {thumb ? (
+                  <img
+                    src={thumb}
+                    alt=""
+                    className="h-12 w-12 shrink-0 rounded-lg object-cover ring-1 ring-white/15"
+                    draggable={false}
+                  />
+                ) : (
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-panel text-[10px] font-bold text-muted">
+                    {r.avgReview.toFixed(1)}
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="flex justify-between gap-2">
+                    <span className="truncate font-bold text-fg">{r.title}</span>
+                    <span className="tabular text-lg font-bold text-tech">{r.avgReview.toFixed(1)}</span>
+                  </div>
+                  <p className="mt-0.5 text-xs text-muted">
+                    {r.genre} · {r.platform} · {r.sales.toLocaleString()} sold · {r.revenueLabel}
+                  </p>
+                </div>
+              </button>
+            </li>
+          );
+        })}
       </ul>
+
       {selected && (
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Button size="sm" variant="secondary" onClick={() => { selectGame(selected.id); setModal("reviews"); }}>
-            Reviews
-          </Button>
-          <Button size="sm" variant="secondary" onClick={() => setCampMsg(startTitleCampaign(selected.id, "flyer_run") ?? "Flyer started.")}>
-            Flyer
-          </Button>
-          {campMsg && <p className="w-full text-xs text-white/70">{campMsg}</p>}
+        <div className="mt-3 space-y-3 rounded-2xl border border-border bg-paper p-3">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h3 className="text-lg font-bold text-fg">{selected.title}</h3>
+              <p className="text-xs text-muted">
+                {getGenre(selected.genreId).name} ·{" "}
+                {getPlatform(selected.platformId)?.name ?? selected.platformId} ·{" "}
+                {selected.yearReleased}
+              </p>
+            </div>
+            <div className="text-right">
+              <div className="text-2xl font-bold tabular text-accent">{selected.avgReview.toFixed(1)}</div>
+              <div className="text-[10px] font-bold uppercase text-muted">avg review</div>
+            </div>
+          </div>
+
+          <SalesChart
+            points={chartPts}
+            label={isPlan ? "Projected shelf (pre-sales)" : "Weekly units sold"}
+            emptyHint="Sales curve appears after release weeks tick."
+            height={140}
+          />
+
+          <div className="grid grid-cols-3 gap-2 text-center text-xs">
+            <div className="rounded-lg border border-border bg-elevated px-2 py-2">
+              <div className="font-bold tabular text-fg">{selected.sales.toLocaleString()}</div>
+              <div className="text-muted">Units</div>
+            </div>
+            <div className="rounded-lg border border-border bg-elevated px-2 py-2">
+              <div className="font-bold tabular text-good">{formatCash(selected.revenue)}</div>
+              <div className="text-muted">Revenue</div>
+            </div>
+            <div className="rounded-lg border border-border bg-elevated px-2 py-2">
+              <div className="font-bold tabular text-fg">{selected.weeksOnMarket}w</div>
+              <div className="text-muted">On sale</div>
+            </div>
+          </div>
+
+          <p className="text-xs text-muted">{explainSales(selected)}</p>
+
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                selectGame(selected.id);
+                setModal("reviews");
+              }}
+            >
+              Reviews
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() =>
+                setCampMsg(startTitleCampaign(selected.id, "flyer_run") ?? "Flyer started.")
+              }
+            >
+              Flyer campaign
+            </Button>
+            <PatchDlcButtons gameId={selected.id} onMsg={setCampMsg} />
+            {campMsg && <p className="w-full text-xs text-muted">{campMsg}</p>}
+          </div>
         </div>
       )}
     </ScreenBackdrop>
@@ -1197,7 +1420,7 @@ function GamesScreen() {
 }
 
 
-/** Full-bleed department still behind secondary screens — your photos only. */
+/** Soft room art behind paper department panels — one look with the garage. */
 function ScreenBackdrop({
   screen,
   children,
@@ -1209,23 +1432,11 @@ function ScreenBackdrop({
   const year = useGame((s) => s.year);
   const art = screenRoomArt(screen, office, year);
   return (
-    <div className="relative min-h-[calc(100dvh-8rem)]">
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <img
-          src={art.src}
-          alt=""
-          className="h-full w-full object-cover"
-          style={{ objectPosition: art.objectPosition }}
-          draggable={false}
-        />
-        <div className="absolute inset-0 bg-gradient-to-b from-black/55 via-black/50 to-black/70" />
-      </div>
-      <div className="relative z-10 mx-auto max-w-3xl px-3 pb-10 pt-4">
-        <p className="mb-1 text-center text-[10px] font-bold uppercase tracking-[0.2em] text-cyan-200/80">
-          {art.label}
-        </p>
-        {children}
-      </div>
+    <div className="mx-auto max-w-3xl space-y-3">
+      <p className="text-center text-[10px] font-bold uppercase tracking-[0.18em] text-white/40">
+        {art.label}
+      </p>
+      <div className="space-y-3">{children}</div>
     </div>
   );
 }
@@ -1252,14 +1463,15 @@ function ResearchScreen() {
 
   return (
     <ScreenBackdrop screen="research">
-      <h2 className="text-center text-2xl font-bold text-white drop-shadow">Research</h2>
-      <div className="mx-auto mt-1 h-px w-32 bg-cyan-400/50" />
-      <p className="mt-2 text-center text-sm text-white/80">
+      <div className="game-panel px-4 py-3 text-center">
+        <h2 className="text-2xl font-bold text-fg">Research</h2>
+      <p className="mt-1 text-sm text-muted">
         {Math.floor(researchPoints)} RP{active ? ` · ${active.name}` : ""}
       </p>
-      <p className="mx-auto mt-1 max-w-md text-center text-[11px] text-white/60">
-        Research is a pipeline — observe, research, prototype, integrate, ship, mature. Not a shop.
+      <p className="mx-auto mt-1 max-w-md text-[11px] text-muted">
+        Observe → research → prototype → integrate → ship. Not a shop.
       </p>
+      </div>
       <div className="mx-auto mt-3 flex max-w-sm gap-1">
         <Button size="sm" variant={tab === "pipeline" ? "primary" : "secondary"} className="flex-1" onClick={() => setTab("pipeline")}>
           Tech pipeline
@@ -1268,7 +1480,7 @@ function ResearchScreen() {
           Studio unlocks
         </Button>
       </div>
-      {msg && <p className="mt-2 text-center text-sm text-amber-200">{msg}</p>}
+      {msg && <p className="mt-2 text-center text-sm text-warn">{msg}</p>}
       {tab === "pipeline" ? (
         <ul className="mt-4 space-y-2">
           {pipeRows.slice(0, 28).map(({ def, state, maturity, uses }) => {
@@ -1280,14 +1492,14 @@ function ResearchScreen() {
             return (
               <li
                 key={def.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/15 bg-black/55 px-3 py-3 backdrop-blur-sm"
+                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-paper px-3 py-3 shadow-sm"
               >
                 <div className="min-w-0">
-                  <div className="font-semibold text-white">{def.name}</div>
-                  <div className="text-xs text-white/65">
+                  <div className="font-semibold text-fg">{def.name}</div>
+                  <div className="text-xs text-muted">
                     {def.category.replace(/_/g, " ")} · {def.researchRp} RP
                     {def.isDesignOnly ? " · design" : ""} ·{" "}
-                    <span className="text-cyan-200/90">{String(state).replace(/_/g, " ")}</span>
+                    <span className="text-tech">{String(state).replace(/_/g, " ")}</span>
                     {uses > 0 ? ` · ${uses} ships` : ""}
                     {maturity > 0 ? ` · mat ${Math.round(maturity * 100)}%` : ""}
                   </div>
@@ -1312,11 +1524,11 @@ function ResearchScreen() {
           {available.map((r) => (
             <li
               key={r.id}
-              className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/15 bg-black/55 px-3 py-3 backdrop-blur-sm"
+              className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-paper px-3 py-3 shadow-sm"
             >
               <div>
-                <div className="font-semibold text-white">{r.name}</div>
-                <div className="text-xs text-white/65">
+                <div className="font-semibold text-fg">{r.name}</div>
+                <div className="text-xs text-muted">
                   {r.category} · {r.cost} RP
                 </div>
               </div>
@@ -1352,30 +1564,61 @@ function StaffScreen() {
 
   return (
     <ScreenBackdrop screen="staff">
-      <h2 className="text-center text-2xl font-bold text-white drop-shadow">People</h2>
-      <p className="mt-2 text-center text-sm text-white/75">
+      <div className="game-panel px-4 py-3 text-center">
+        <h2 className="text-2xl font-bold text-fg">People</h2>
+      <p className="mt-1 text-sm text-muted">
         {hiringOpen ? "Hire up to your HQ seats · signing cap $2M" : "Garage is founder-led until First Office."}
       </p>
-      {msg && <p className="mt-2 text-center text-sm text-amber-200">{msg}</p>}
+      <p className="mt-1 text-xs font-semibold tabular text-fg/80">
+        Payroll {formatCash(staff.reduce((s, m) => s + (m.id === "founder" ? 0 : m.salary), 0))}/mo
+      </p>
+      </div>
+      {msg && <p className="mt-2 text-center text-sm text-warn">{msg}</p>}
 
       <ul className="mt-4 space-y-2">
         {staff.map((m) => (
-          <li key={m.id} className="rounded-xl border border-white/15 bg-black/55 px-4 py-3 backdrop-blur-sm">
+          <li key={m.id} className="rounded-xl border border-border bg-paper px-4 py-3 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div>
-                <div className="font-bold text-white">
+                <div className="font-bold text-fg">
                   {m.name}
                   {m.id === "founder" ? " (You)" : ""}
                 </div>
-                <div className="text-xs text-white/65">
+                <div className="text-xs text-muted">
                   Lv {m.level} · D{m.design} · T{m.tech} · S{m.speed}
                   {m.specialization ? ` · ${m.specialization}` : ""}
                   {(m.bugFixBonus ?? 0) > 0 ? ` · QA +${Math.round((m.bugFixBonus ?? 0) * 100)}%` : ""}
+                  {" · "}
+                  {formatCash(m.salary)}/mo
                 </div>
+                {m.id !== "founder" && (
+                  <div className="mt-1.5 max-w-[14rem]">
+                    <div className="mb-0.5 flex justify-between text-[10px] font-bold uppercase tracking-wide text-muted">
+                      <span>Energy</span>
+                      <span className="tabular">{Math.round(m.energy ?? 100)}%</span>
+                    </div>
+                    <div className="h-1.5 overflow-hidden rounded-full bg-panel">
+                      <div
+                        className={cnJoin(
+                          "h-full rounded-full transition-all",
+                          (m.energy ?? 100) <= 20
+                            ? "bg-bad"
+                            : (m.energy ?? 100) < 50
+                              ? "bg-warn"
+                              : "bg-good",
+                        )}
+                        style={{ width: `${Math.round(m.energy ?? 100)}%` }}
+                      />
+                    </div>
+                    {(m.energy ?? 100) <= 20 && (
+                      <p className="mt-0.5 text-[10px] text-warn">Resting — too exhausted to contribute</p>
+                    )}
+                  </div>
+                )}
                 {m.training && (
-                  <div className="mt-1 text-xs text-cyan-200">
+                  <div className="mt-1 text-xs text-tech">
                     Training… {m.training.weeksLeft}w left / {m.training.totalWeeks}w
-                    <div className="mt-0.5 h-1.5 max-w-[12rem] overflow-hidden rounded-full bg-white/10">
+                    <div className="mt-0.5 h-1.5 max-w-[12rem] overflow-hidden rounded-full bg-panel">
                       <div
                         className="h-full rounded-full bg-cyan-400 transition-all"
                         style={{
@@ -1405,12 +1648,12 @@ function StaffScreen() {
               </div>
             </div>
             {trainFor === m.id && (
-              <div className="mt-2 space-y-1.5 border-t border-white/10 pt-2">
+              <div className="mt-2 space-y-1.5 border-t border-border pt-2">
                 {courses.map((c) => (
                   <button
                     key={c.id}
                     type="button"
-                    className="flex w-full items-center justify-between gap-2 rounded-lg border border-white/10 bg-black/40 px-2 py-1.5 text-left text-xs text-white/90 hover:border-cyan-400/40"
+                    className="flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-elevated px-2 py-1.5 text-left text-xs text-fg hover:border-cyan-400/40"
                     onClick={() => {
                       const err = trainStaff(m.id, c.id);
                       setMsg(err ?? `${m.name} → ${c.name}`);
@@ -1419,14 +1662,14 @@ function StaffScreen() {
                   >
                     <span>
                       <span className="font-bold">{c.name}</span>
-                      <span className="block text-white/55">{c.description}</span>
+                      <span className="block text-muted">{c.description}</span>
                     </span>
-                    <span className="shrink-0 tabular text-white/70">
+                    <span className="shrink-0 tabular text-muted">
                       {c.weeks}w · {formatCash(c.cashCost)} · {c.rpCost} RP
                     </span>
                   </button>
                 ))}
-                <p className="text-[10px] text-white/50">
+                <p className="text-[10px] text-subtle">
                   Cash {formatCash(cash)} · RP {Math.floor(rp)}
                 </p>
               </div>
@@ -1438,7 +1681,7 @@ function StaffScreen() {
       {hiringOpen && (
         <div className="mt-6">
           <div className="mb-2 flex items-center justify-between gap-2">
-            <h3 className="text-sm font-bold uppercase tracking-wide text-white/80">Candidates</h3>
+            <h3 className="text-sm font-bold uppercase tracking-wide text-muted">Candidates</h3>
             <Button
               size="sm"
               variant="secondary"
@@ -1454,18 +1697,18 @@ function StaffScreen() {
             {cands.map((c) => (
               <li
                 key={c.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/15 bg-black/55 px-3 py-3 backdrop-blur-sm"
+                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-paper px-3 py-3 shadow-sm"
               >
                 <div className="min-w-0">
-                  <div className="font-semibold text-white">
+                  <div className="font-semibold text-fg">
                     {c.name}
                     {c.level >= 5 ? (
-                      <span className="ml-1 rounded bg-amber-400/20 px-1.5 py-0.5 text-[10px] font-bold text-amber-200">
+                      <span className="ml-1 rounded bg-amber-400/20 px-1.5 py-0.5 text-[10px] font-bold text-warn">
                         STAR
                       </span>
                     ) : null}
                   </div>
-                  <div className="text-xs text-white/65">
+                  <div className="text-xs text-muted">
                     Lv {c.level} · D{c.design} T{c.tech} S{c.speed}
                     {c.specialization ? ` · ${c.specialization}` : ""}
                   </div>
@@ -1526,37 +1769,37 @@ function EnginesScreen() {
 
   return (
     <ScreenBackdrop screen="engines">
-      <h2 className="text-center text-2xl font-bold text-white drop-shadow">Engine Workshop</h2>
-      <p className="mx-auto mt-1 max-w-lg text-center text-xs text-white/60">
-        Engines create capability and efficiency — your team turns that into games. Released versions
+      <h2 className="text-center text-2xl font-bold text-fg">Engine Workshop</h2>
+      <p className="mx-auto mt-1 max-w-lg text-center text-xs text-muted">
+        Bundle researched modules into a proprietary engine. Tech/Design bonuses multiply every future title. Released versions
         are immutable; each project freezes a snapshot.
       </p>
-      {msg && <p className="mt-2 text-center text-sm text-amber-200">{msg}</p>}
+      {msg && <p className="mt-2 text-center text-sm text-warn">{msg}</p>}
 
       {build && (
         <div className="mt-4 rounded-xl border border-cyan-400/30 bg-cyan-950/40 px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <div className="font-bold text-cyan-100">{build.name}</div>
-              <div className="text-xs text-cyan-100/70">
+              <div className="font-bold text-fg">{build.name}</div>
+              <div className="text-xs text-muted">
                 Phase: {build.phase.replace(/_/g, " ")} · Week {build.weeksElapsed}/~
                 {build.weeksEstimate}
               </div>
             </div>
             <Badge tone="accent">{Math.round(build.overallProgress * 100)}%</Badge>
           </div>
-          <div className="mt-2 h-2 overflow-hidden rounded-full bg-black/40">
+          <div className="mt-2 h-2 overflow-hidden rounded-full bg-elevated">
             <div
               className="h-full rounded-full bg-cyan-400 transition-all"
               style={{ width: `${Math.round(build.overallProgress * 100)}%` }}
             />
           </div>
           {build.conflicts.length > 0 && (
-            <p className="mt-2 text-xs text-amber-200/90">
+            <p className="mt-2 text-xs text-warn/90">
               Soft conflicts (extra work): {build.conflicts.join("; ")}
             </p>
           )}
-          <p className="mt-1 text-xs text-white/55">
+          <p className="mt-1 text-xs text-muted">
             Debt {Math.round(build.technicalDebt)} · Capacity {Math.round(build.weeklyCapacity)}/wk ·
             Work {Math.round(build.completedWork)}/{build.requiredWork}
           </p>
@@ -1564,7 +1807,7 @@ function EnginesScreen() {
       )}
 
       <section className="mt-4">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-white/70">Released versions</h3>
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-muted">Released versions</h3>
         <ul className="mt-2 space-y-2">
           {(versions.length ? versions : engines.map((e) => ({
               versionId: e.id,
@@ -1577,21 +1820,30 @@ function EnginesScreen() {
             }))).map((v) => (
             <li
               key={v.versionId}
-              className="rounded-xl border border-white/15 bg-black/55 px-4 py-3 backdrop-blur-sm"
+              className="rounded-xl border border-border bg-paper px-4 py-3 shadow-sm"
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="font-bold text-white">{v.label}</div>
+                <div className="font-bold text-fg">{v.label}</div>
                 <Badge tone="good">
                   {SUPPORT_STATE_LABEL[v.status as keyof typeof SUPPORT_STATE_LABEL] ?? v.status}
                   {v.immutable ? " · locked" : ""}
                 </Badge>
               </div>
-              <div className="mt-1 text-xs text-white/65">
+              <div className="mt-1 text-xs text-muted">
                 {(v.features ?? v.modules?.map((m) => m.moduleId) ?? []).slice(0, 8).join(" · ") ||
                   "Core runtime"}
               </div>
+              {(() => {
+                const eng = engines.find((e) => e.id === v.versionId || e.name === v.label);
+                if (!eng) return null;
+                return (
+                  <div className="mt-1 text-[11px] font-semibold text-accent">
+                    Tech +{eng.techBonus ?? 0} · Design +{eng.designBonus ?? 0} (boosts every game)
+                  </div>
+                );
+              })()}
               {"technicalDebt" in v && (
-                <div className="mt-1 text-[11px] text-white/45">
+                <div className="mt-1 text-[11px] text-subtle">
                   Tech debt {Math.round(Number(v.technicalDebt) || 0)}
                 </div>
               )}
@@ -1602,15 +1854,15 @@ function EnginesScreen() {
 
       {families.length > 0 && (
         <section className="mt-4">
-          <h3 className="text-sm font-semibold uppercase tracking-wide text-white/70">Families</h3>
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-muted">Families</h3>
           <ul className="mt-2 flex flex-wrap gap-2">
             {families.map((f) => (
               <li
                 key={f.familyId}
-                className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-white/80"
+                className="rounded-lg border border-border bg-elevated px-3 py-2 text-xs text-muted"
               >
-                <span className="font-semibold text-white">{f.name}</span>
-                <span className="text-white/50">
+                <span className="font-semibold text-fg">{f.name}</span>
+                <span className="text-subtle">
                   {" "}
                   · {PURPOSE_LABEL[f.purpose]} · {ARCH_LABEL[f.architecture]}
                 </span>
@@ -1621,9 +1873,9 @@ function EnginesScreen() {
       )}
 
       {!build && (
-        <section className="mt-5 overflow-hidden rounded-[1.5rem] border border-[var(--glass-border)] bg-[rgba(10,40,52,0.72)] p-4 shadow-[var(--glass-glow)] backdrop-blur-md sm:p-5">
+        <section className="mt-5 overflow-hidden rounded-[1.5rem] border border-border-strong bg-panel p-4 shadow-sm  sm:p-5">
           <div className="flex items-start justify-between gap-2">
-            <h3 className="text-xl font-black tracking-tight text-white sm:text-2xl">
+            <h3 className="text-xl font-black tracking-tight text-fg sm:text-2xl">
               Create a new Engine
             </h3>
           </div>
@@ -1659,21 +1911,21 @@ function EnginesScreen() {
               <>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <Input
-                    className="min-w-[10rem] flex-1 !border-white/25 !bg-[rgba(8,28,38,0.9)] !text-white"
+                    className="min-w-[10rem] flex-1 !border-border-strong !bg-[rgba(8,28,38,0.9)] !text-fg"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="Game Engine #1"
                   />
-                  <div className="flex items-center gap-1.5 rounded-xl border border-white/20 bg-black/35 px-3 py-2 text-sm font-bold text-cyan-100">
+                  <div className="flex items-center gap-1.5 rounded-xl border border-border-strong bg-panel px-3 py-2 text-sm font-bold text-fg">
                     Cost: {formatCash(totalCost)}
-                    <Diamond className="h-4 w-4 text-cyan-300" aria-hidden />
+                    <Diamond className="h-4 w-4 text-tech" aria-hidden />
                   </div>
                 </div>
                 <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                  <label className="block text-[11px] font-bold uppercase tracking-wide text-white/55">
+                  <label className="block text-[11px] font-bold uppercase tracking-wide text-muted">
                     Purpose
                     <select
-                      className="mt-1 w-full rounded-xl border border-white/20 bg-black/50 px-3 py-2.5 text-sm font-semibold text-white"
+                      className="mt-1 w-full rounded-xl border border-border-strong bg-paper px-3 py-2.5 text-sm font-semibold text-fg"
                       value={purpose}
                       onChange={(e) => setPurpose(e.target.value as EnginePurpose)}
                     >
@@ -1684,10 +1936,10 @@ function EnginesScreen() {
                       ))}
                     </select>
                   </label>
-                  <label className="block text-[11px] font-bold uppercase tracking-wide text-white/55">
+                  <label className="block text-[11px] font-bold uppercase tracking-wide text-muted">
                     Architecture
                     <select
-                      className="mt-1 w-full rounded-xl border border-white/20 bg-black/50 px-3 py-2.5 text-sm font-semibold text-white"
+                      className="mt-1 w-full rounded-xl border border-border-strong bg-paper px-3 py-2.5 text-sm font-semibold text-fg"
                       value={architecture}
                       onChange={(e) => setArchitecture(e.target.value as ArchitectureStyle)}
                     >
@@ -1707,9 +1959,9 @@ function EnginesScreen() {
                     return (
                       <div
                         key={key}
-                        className="rounded-2xl border border-white/15 bg-[rgba(8,30,40,0.55)] p-3"
+                        className="rounded-2xl border border-border bg-paper p-3"
                       >
-                        <h4 className="mb-2 text-base font-bold text-cyan-200">{label}</h4>
+                        <h4 className="mb-2 text-base font-bold text-tech">{label}</h4>
                         <div className={cnJoin("grid gap-2", isRender ? "grid-cols-2" : "grid-cols-1")}>
                           {list.map((m) => {
                             const on = selected.includes(m.id);
@@ -1722,12 +1974,12 @@ function EnginesScreen() {
                                 className={cnJoin(
                                   "flex items-center justify-between gap-2 rounded-xl border px-3 py-2.5 text-left text-sm transition",
                                   on
-                                    ? "border-cyan-300/70 bg-gradient-to-r from-cyan-500/25 to-teal-500/15 text-white shadow-[0_0_14px_rgba(77,240,255,0.2)]"
-                                    : "border-white/15 bg-[rgba(6,24,34,0.75)] text-white/80 hover:border-cyan-300/40",
+                                    ? "border-cyan-300/70 bg-gradient-to-r from-cyan-500/25 to-teal-500/15 text-fg shadow-[0_0_14px_rgba(77,240,255,0.2)]"
+                                    : "border-border bg-elevated text-muted hover:border-accent",
                                 )}
                               >
                                 <span className="min-w-0 font-semibold leading-snug">{m.name}</span>
-                                <span className="flex shrink-0 items-center gap-1 text-xs font-bold tabular text-cyan-200">
+                                <span className="flex shrink-0 items-center gap-1 text-xs font-bold tabular text-tech">
                                   {cost >= 1000 ? `${Math.round(cost / 1000)}K` : formatCash(cost)}
                                   <Diamond className="h-3.5 w-3.5" aria-hidden />
                                 </span>
@@ -1739,7 +1991,7 @@ function EnginesScreen() {
                     );
                   })}
                 </div>
-                <p className="mt-2 text-center text-[11px] text-white/50">
+                <p className="mt-2 text-center text-[11px] text-subtle">
                   Cash on hand {formatCash(cash)}. Modules set capability — not free review points.
                 </p>
                 <Button
@@ -1763,37 +2015,97 @@ function PlatformsScreen() {
   const year = useGame((s) => s.year);
   const licensePlatform = useGame((s) => s.licensePlatform);
   const [msg, setMsg] = useState("");
-  const list = PLATFORMS.filter((p) => p.year <= year + 1);
+  const [focus, setFocus] = useState<string | null>(null);
+  const list = PLATFORMS.filter((p) => p.year <= year + 3 && !(p as { isCustom?: boolean }).isCustom);
+  const focused =
+    list.find((p) => p.id === focus) ?? list.find((p) => unlocked.includes(p.id)) ?? list[0];
+
   return (
     <ScreenBackdrop screen="platforms">
-      <h2 className="text-center text-2xl font-bold text-white drop-shadow">Systems</h2>
-      {msg && <p className="mt-2 text-center text-sm text-amber-200">{msg}</p>}
-      <ul className="mt-4 space-y-2">
+      <div className="game-panel px-4 py-3 text-center">
+        <h2 className="text-2xl font-bold text-fg">Systems</h2>
+        <p className="mt-0.5 text-sm text-muted">Hardware you can ship on · product shots</p>
+      </div>
+      {msg && <p className="text-center text-sm text-warn">{msg}</p>}
+
+      {focused && (
+        <div className="overflow-hidden rounded-2xl border border-border bg-paper">
+          <div className="relative aspect-[16/9] bg-black/40">
+            <img
+              src={platformArt(focused.id, year) ?? platformThumb(focused.id, year) ?? ""}
+              alt={focused.name}
+              className="h-full w-full object-contain p-4"
+              draggable={false}
+            />
+            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent px-4 pb-3 pt-8">
+              <h3 className="text-xl font-bold text-white">{focused.name}</h3>
+              <p className="text-xs text-white/60">
+                {focused.year} · {unlocked.includes(focused.id) ? "Licensed" : "Not licensed"} · market{" "}
+                {Math.round(focused.marketSize * 100)}% base
+              </p>
+              <PlatformLifecycleLine platformId={focused.id} year={year} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ul className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
         {list.map((p) => {
           const owned = unlocked.includes(p.id);
           const thumb = platformThumb(p.id, year);
+          const lockedYear = p.year > year;
           return (
-            <li key={p.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/15 bg-black/55 px-3 py-3 backdrop-blur-sm">
-              <div className="flex min-w-0 items-center gap-3">
-                {thumb ? (
-                  <img src={thumb} alt="" className="h-12 w-12 shrink-0 rounded-lg object-cover ring-1 ring-white/20" draggable={false} />
-                ) : (
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-white/10 text-[10px] font-bold text-white/70">
-                    {p.short}
-                  </div>
+            <li key={p.id}>
+              <button
+                type="button"
+                onClick={() => setFocus(p.id)}
+                className={cnJoin(
+                  "flex w-full flex-col overflow-hidden rounded-xl border text-left",
+                  focus === p.id || (!focus && focused?.id === p.id)
+                    ? "border-accent ring-1 ring-accent/40"
+                    : "border-border",
+                  owned ? "bg-paper" : "bg-elevated/80",
                 )}
-                <div className="min-w-0">
-                  <div className="truncate font-semibold text-white">{p.name}</div>
-                  <div className="text-xs text-white/65">{p.year}</div>
+              >
+                <div className="aspect-square bg-black/30 p-2">
+                  {thumb ? (
+                    <img src={thumb} alt="" className="h-full w-full object-contain" draggable={false} />
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-xs font-bold text-muted">
+                      {p.short}
+                    </div>
+                  )}
                 </div>
-              </div>
-              {owned ? (
-                <Badge tone="good">Owned</Badge>
-              ) : (
-                <Button size="sm" onClick={() => setMsg(licensePlatform(p.id) ?? "Licensed.")}>
-                  License {formatCash(p.licenseCost)}
-                </Button>
-              )}
+                <div className="px-2 py-2">
+                  <div className="truncate text-xs font-bold text-fg">{p.name}</div>
+                  <div className="mt-0.5 flex items-center justify-between gap-1">
+                    <span className="text-[10px] text-muted">{p.year}</span>
+                    {owned ? (
+                      <Badge tone="good">Owned</Badge>
+                    ) : lockedYear ? (
+                      <span className="text-[10px] font-bold text-tech">Soon</span>
+                    ) : (
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        className="text-[10px] font-bold text-accent"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setMsg(licensePlatform(p.id) ?? "Licensed.");
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.stopPropagation();
+                            setMsg(licensePlatform(p.id) ?? "Licensed.");
+                          }
+                        }}
+                      >
+                        License
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </button>
             </li>
           );
         })}
@@ -1802,18 +2114,100 @@ function PlatformsScreen() {
   );
 }
 
+function UnlocksScreen({ embedded = false }: { embedded?: boolean }) {
+  const unlocks = useGame((s) => s.unlocks);
+  const researched = useGame((s) => s.researched);
+  const gamesPublished = useGame((s) => s.gamesPublished);
+  const office = useGame((s) => s.office);
+  const fans = useGame((s) => s.fans);
+  const year = useGame((s) => s.year);
+
+  const stateObj = useGame();
+  const rows = SYSTEM_UNLOCKS.map((u) => ({
+    def: u,
+    state: (unlocks[u.id] ?? (u.startOwned ? "owned" : "hidden")) as string,
+  }));
+  // Show owned/teased/discovered/researchable + a few locked previews with requirements
+  const open = rows.filter((r) => r.state !== "hidden");
+  const lockedPreview = rows
+    .filter((r) => r.state === "hidden")
+    .slice(0, 8)
+    .map((r) => ({ ...r, state: "teased" as string, preview: true as const }));
+  const visible = [...open, ...lockedPreview.filter((l) => !open.some((o) => o.def.id === l.def.id))];
+
+  const tone: Record<string, string> = {
+    owned: "border-good/40 bg-good/10 text-good",
+    researchable: "border-accent/40 bg-accent/15 text-accent",
+    discovered: "border-border bg-elevated text-fg",
+    teased: "border-border bg-panel text-muted",
+    hidden: "border-border/50 bg-panel/50 text-subtle",
+  };
+
+  const body = (
+    <>
+      {!embedded && (
+        <div className="game-panel px-4 py-3 text-center">
+          <h2 className="text-2xl font-bold text-fg">Unlocks</h2>
+          <p className="mt-0.5 text-sm text-muted">
+            Studio systems · {gamesPublished} games · office {office} · {formatFans(fans)} fans · {year}
+          </p>
+        </div>
+      )}
+      {embedded && (
+        <p className="text-xs text-muted">
+          Progress · {gamesPublished} games · office {office} · {year}
+        </p>
+      )}
+      <ul className="mt-3 max-h-[40dvh] space-y-2 overflow-y-auto pr-0.5">
+        {visible.map(({ def, state }) => (
+          <li key={def.id} className={cnJoin("rounded-xl border px-3 py-3", tone[state] ?? tone.hidden)}>
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <div className="font-bold">{def.label}</div>
+                <p className="mt-0.5 text-xs opacity-80">{def.ownNote}</p>
+                {(state === "teased" || state === "discovered") && (
+                  <p className="mt-1 text-[10px] opacity-70">
+                    {describeUnlockRequirements(def.id, stateObj)
+                      .slice(0, 3)
+                      .map((r) => (r.met ? "✓ " : "○ ") + r.label)
+                      .join(" · ") || "Keep shipping"}
+                  </p>
+                )}
+              </div>
+              <span className="shrink-0 rounded-full border border-current/30 px-2 py-0.5 text-[10px] font-bold uppercase">
+                {state}
+              </span>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <div className="mt-3 rounded-xl border border-border bg-paper p-3">
+        <h3 className="text-sm font-bold text-fg">Research owned</h3>
+        <p className="mt-1 text-xs text-muted">
+          {researched.length
+            ? researched.slice(0, 24).join(" · ")
+            : "None yet — earn RP while developing."}
+        </p>
+      </div>
+    </>
+  );
+
+  if (embedded) return <div className="space-y-1">{body}</div>;
+  return <ScreenBackdrop screen="research">{body}</ScreenBackdrop>;
+}
+
 function FinancesScreen() {
   const cash = useGame((s) => s.cash);
   const ledger = useGame((s) => s.ledger);
   const entries = ledger?.entries?.slice(-30).reverse() ?? [];
   return (
     <ScreenBackdrop screen="finances">
-      <h2 className="text-center text-2xl font-bold text-white drop-shadow">Finances</h2>
+      <h2 className="text-center text-2xl font-bold text-fg">Finances</h2>
       <p className="mt-2 text-center text-3xl font-bold tabular text-emerald-300">{formatCash(cash)}</p>
       <ul className="mt-4 space-y-1.5">
         {entries.map((e) => (
-          <li key={e.id} className="flex justify-between gap-3 rounded-lg border border-white/15 bg-black/55 px-3 py-2 text-sm backdrop-blur-sm">
-            <span className="truncate text-white/70">
+          <li key={e.id} className="flex justify-between gap-3 rounded-lg border border-border bg-paper px-3 py-2 text-sm backdrop-blur-sm">
+            <span className="truncate text-muted">
               W{e.week} · {e.label}
             </span>
             <span className={cnJoin("tabular font-bold", e.amount >= 0 ? "text-emerald-300" : "text-red-300")}>
@@ -1821,9 +2215,399 @@ function FinancesScreen() {
             </span>
           </li>
         ))}
-        {!entries.length && <li className="text-center text-sm text-white/60">No ledger entries yet.</li>}
+        {!entries.length && <li className="text-center text-sm text-muted">No ledger entries yet.</li>}
       </ul>
     </ScreenBackdrop>
+  );
+}
+
+
+function ContractsScreen() {
+  const board = useGame((s) => s.publishingBoard);
+  const activeId = useGame((s) => s.activePublisherDealId);
+  const contracts = useGame((s) => s.contracts);
+  const activeContract = useGame((s) => s.activeContract);
+  const fans = useGame((s) => s.fans);
+  const gamesPublished = useGame((s) => s.gamesPublished);
+  const acceptPublisherDeal = useGame((s) => s.acceptPublisherDeal);
+  const refreshPublisherBoard = useGame((s) => s.refreshPublisherBoard);
+  const clearPublisherDeal = useGame((s) => s.clearPublisherDeal);
+  const takeContract = useGame((s) => s.takeContract);
+  const unlocks = useGame((s) => s.unlocks);
+  const [msg, setMsg] = useState("");
+  const unlocked =
+    gamesPublished >= 2 ||
+    fans >= 500 ||
+    unlocks.publishing === "owned" ||
+    unlocks.contracts === "owned";
+  const deals = board?.deals ?? [];
+  const activeDeal = deals.find((d) => d.id === activeId) ?? null;
+
+  return (
+    <ScreenBackdrop screen="finances">
+      <div className="game-panel px-4 py-3 text-center">
+        <h2 className="text-2xl font-bold text-fg">Contracts</h2>
+        <p className="mt-0.5 text-sm text-muted">Publisher advances · freelance work</p>
+      </div>
+      {msg && <p className="text-center text-sm text-warn">{msg}</p>}
+
+      {activeDeal && (
+        <div className="rounded-xl border border-accent/40 bg-accent/10 p-3">
+          <div className="text-xs font-bold uppercase tracking-wide text-accent">Active publisher deal</div>
+          <div className="mt-1 font-bold text-fg">{activeDeal.publisherName}</div>
+          <p className="mt-1 text-xs text-muted">{activeDeal.description}</p>
+          <Button size="sm" variant="ghost" className="mt-2" onClick={() => { clearPublisherDeal(); setMsg("Deal cleared (advance kept)."); }}>
+            Drop deal
+          </Button>
+        </div>
+      )}
+
+      <div className="mt-3">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h3 className="text-sm font-bold uppercase tracking-wide text-muted">Publisher board</h3>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={!unlocked}
+            onClick={() => setMsg(refreshPublisherBoard() ?? "Board refreshed.")}
+          >
+            Refresh
+          </Button>
+        </div>
+        {!unlocked && (
+          <p className="text-sm text-muted">Ship 2 games or grow fans to unlock publisher offers.</p>
+        )}
+        {unlocked && !deals.length && (
+          <p className="text-sm text-muted">No offers this season — wait a few weeks or refresh.</p>
+        )}
+        <ul className="space-y-2">
+          {deals.map((d) => (
+            <li key={d.id} className="rounded-xl border border-border bg-paper p-3">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <div className="font-bold text-fg">{d.publisherName}</div>
+                  <p className="mt-1 text-xs text-muted">{d.description}</p>
+                  <p className="mt-1 text-[11px] text-subtle">
+                    Advance {formatCash(d.upfrontPayment)} · keep {Math.round(d.royaltyRate * 100)}% · need{" "}
+                    {d.minimumReviewScore}+ · expires W{d.expirationWeek}
+                    {d.genreRequirement ? ` · wants ${d.genreRequirement}` : ""}
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  disabled={!!activeId}
+                  onClick={() => setMsg(acceptPublisherDeal(d.id) ?? "Deal signed.")}
+                >
+                  Sign
+                </Button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      {(unlocks.contracts === "owned" || contracts.length > 0 || activeContract) && (
+        <div className="mt-5">
+          <h3 className="mb-2 text-sm font-bold uppercase tracking-wide text-muted">Freelance</h3>
+          {activeContract && (
+            <p className="mb-2 text-sm text-fg">
+              Active: {activeContract.title} · {activeContract.progress}/{activeContract.weeks}w
+            </p>
+          )}
+          <ul className="space-y-2">
+            {contracts.map((c) => (
+              <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-paper px-3 py-2">
+                <div>
+                  <div className="font-semibold text-fg">{c.title}</div>
+                  <div className="text-xs text-muted">
+                    {formatCash(c.reward)} · {c.researchReward} RP · {c.weeks}w
+                  </div>
+                </div>
+                <Button size="sm" disabled={!!activeContract} onClick={() => setMsg(takeContract(c.id) ?? "Accepted.")}>
+                  Take
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </ScreenBackdrop>
+  );
+}
+
+
+function PatchDlcButtons({ gameId, onMsg }: { gameId: string; onMsg: (s: string) => void }) {
+  const issuePatch = useGame((s) => s.issuePatch);
+  const buildDlc = useGame((s) => s.buildDlc);
+  const runPostMortem = useGame((s) => s.runPostMortem);
+  const g = useGame((s) => s.releasedGames.find((x) => x.id === gameId));
+  if (!g) return null;
+  const offShelf = !g.onSale || !(g.weeklySalesLeft?.length);
+  return (
+    <>
+      {(g.bugs ?? 0) > 0 && (
+        <Button size="sm" variant="secondary" onClick={() => onMsg(issuePatch(gameId) ?? "Patched.")}>
+          Patch (−10 RP)
+        </Button>
+      )}
+      {!g.hasDlc && ["medium", "large", "aaa"].includes(g.size) && (
+        <Button size="sm" variant="secondary" onClick={() => onMsg(buildDlc(gameId) ?? "DLC out.")}>
+          Ship DLC
+        </Button>
+      )}
+      {g.hasDlc && (
+        <span className="text-[10px] font-bold text-good">DLC live · {formatCash(g.dlcRevenue ?? 0)}</span>
+      )}
+      {offShelf && !g.postMortemDone && (
+        <Button size="sm" variant="secondary" onClick={() => onMsg(runPostMortem(gameId) ?? "Done.")}>
+          Post-mortem (−5 RP)
+        </Button>
+      )}
+      {g.postMortemDone && (
+        <span className="text-[10px] font-bold text-muted">Post-mortem filed</span>
+      )}
+    </>
+  );
+}
+
+
+function ConsoleConfigurator({
+  name,
+  setName,
+  onMsg,
+}: {
+  name: string;
+  setName: (s: string) => void;
+  onMsg: (s: string) => void;
+}) {
+  const startConfiguredConsole = useGame((s) => s.startConfiguredConsole);
+  const [media, setMedia] = useState<MediaDriveId>("High_Speed_CD");
+  const [gpu, setGpu] = useState<GpuPartId>("16_Bit_Copper");
+  const [price, setPrice] = useState(299);
+  const rd = consoleRdCost(media, gpu);
+  return (
+    <div className="rounded-xl border border-accent/30 bg-paper p-3">
+      <p className="text-sm font-bold text-fg">Component configurator</p>
+      <p className="mb-2 text-[11px] text-muted">Pick media + GPU · unit mfg = media + GPU + $15 assembly</p>
+      <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Console name" />
+      <label className="mt-2 block text-[10px] font-bold uppercase text-muted">Media drive</label>
+      <div className="flex flex-wrap gap-1.5">
+        {(Object.keys(MEDIA_DRIVES) as MediaDriveId[]).map((id) => (
+          <button
+            key={id}
+            type="button"
+            className={cnJoin(
+              "rounded-full border px-2 py-1 text-[10px] font-semibold",
+              media === id ? "border-accent bg-accent/20 text-accent" : "border-border text-muted",
+            )}
+            onClick={() => setMedia(id)}
+          >
+            {MEDIA_DRIVES[id].name} (${MEDIA_DRIVES[id].unit_cost})
+          </button>
+        ))}
+      </div>
+      <label className="mt-2 block text-[10px] font-bold uppercase text-muted">Graphics</label>
+      <div className="flex flex-wrap gap-1.5">
+        {(Object.keys(GPU_PARTS) as GpuPartId[]).map((id) => (
+          <button
+            key={id}
+            type="button"
+            className={cnJoin(
+              "rounded-full border px-2 py-1 text-[10px] font-semibold",
+              gpu === id ? "border-accent bg-accent/20 text-accent" : "border-border text-muted",
+            )}
+            onClick={() => setGpu(id)}
+          >
+            {GPU_PARTS[id].name} (${GPU_PARTS[id].unit_cost})
+          </button>
+        ))}
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-fg">
+        <span>
+          Unit cost <strong className="tabular">${rd.unitCost.toFixed(2)}</strong>
+        </span>
+        <span>
+          R&D <strong className="tabular text-accent">{formatCash(rd.cash)}</strong> · {rd.rp} RP
+        </span>
+        <span>
+          Share mod <strong>{rd.shareMod.toFixed(2)}×</strong>
+        </span>
+        <label className="flex items-center gap-1">
+          Retail
+          <input
+            type="number"
+            className="w-20 rounded border border-border bg-elevated px-1 py-0.5 tabular"
+            min={199}
+            max={599}
+            value={price}
+            onChange={(e) => setPrice(Number(e.target.value))}
+          />
+        </label>
+        {price < rd.unitCost && (
+          <span className="text-warn">Loss leader −${(rd.unitCost - price).toFixed(2)}/unit</span>
+        )}
+      </div>
+      <Button
+        className="mt-2 w-full"
+        onClick={() => onMsg(startConfiguredConsole(media, gpu, name, price) ?? "Building.")}
+      >
+        Fund component build
+      </Button>
+    </div>
+  );
+}
+
+function HardwareLabScreen() {
+  const consoles = useGame((s) => s.playerConsoles) ?? [];
+  const cash = useGame((s) => s.cash);
+  const office = useGame((s) => s.office);
+  const rp = useGame((s) => s.researchPoints);
+  const startPlayerConsole = useGame((s) => s.startPlayerConsole);
+  const setConsolePricing = useGame((s) => s.setConsolePricing);
+  const [msg, setMsg] = useState("");
+  const [name, setName] = useState("Forge Station");
+  const unlocked = office >= 3 || cash >= 7_500_000;
+
+  return (
+    <div className="space-y-3">
+      <div className="game-panel px-4 py-3 text-center">
+        <h2 className="text-xl font-bold text-fg">Hardware Lab</h2>
+        <p className="text-xs text-muted">
+          Module 13 · own console · first-party synergy · third-party royalties
+        </p>
+      </div>
+      {!unlocked && (
+        <p className="text-center text-sm text-muted">
+          Unlock near office 3+ with ~$15M capital. Cash now {formatCash(cash)}.
+        </p>
+      )}
+      {msg && <p className="text-center text-sm text-warn">{msg}</p>}
+      <ul className="space-y-2">
+        {consoles.map((c) => (
+          <li key={c.id} className="rounded-xl border border-border bg-paper p-3">
+            <div className="font-bold text-fg">{c.name}</div>
+            <p className="text-xs text-muted">
+              {c.status === "developing"
+                ? `Developing · ${c.weeksLeft}w left`
+                : `Shipping · share ${c.marketShare.toFixed(2)} · ${c.unitsSold.toLocaleString()} boxes`}
+              {c.unitMfgCost != null && (
+                <span className="block text-[10px] text-subtle">
+                  Mfg ${c.unitMfgCost.toFixed(2)} · retail ${c.retailPrice}
+                </span>
+              )}
+            </p>
+            {c.status === "shipping" && (
+              <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                <label className="flex items-center gap-1 text-muted">
+                  Price
+                  <input
+                    type="number"
+                    className="w-20 rounded border border-border bg-elevated px-1 py-0.5 tabular text-fg"
+                    value={c.retailPrice}
+                    min={199}
+                    max={599}
+                    onChange={(e) =>
+                      setConsolePricing(c.id, Number(e.target.value), c.royaltyRate)
+                    }
+                  />
+                </label>
+                <label className="flex items-center gap-1 text-muted">
+                  Royalty %
+                  <input
+                    type="number"
+                    className="w-16 rounded border border-border bg-elevated px-1 py-0.5 tabular text-fg"
+                    value={Math.round(c.royaltyRate * 100)}
+                    min={10}
+                    max={30}
+                    onChange={(e) =>
+                      setConsolePricing(c.id, c.retailPrice, Number(e.target.value) / 100)
+                    }
+                  />
+                </label>
+                <span className="text-subtle">
+                  {c.retailPrice < 299 ? "Loss-leader share boost" : "Margin play"}
+                </span>
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+      {unlocked && (
+        <ConsoleConfigurator name={name} setName={setName} onMsg={setMsg} />
+      )}
+      {unlocked && (
+        <div className="rounded-xl border border-border bg-elevated p-3">
+          <p className="mb-2 text-[10px] font-bold uppercase text-muted">Quick tiers (legacy)</p>
+          <div className="space-y-2">
+            {(Object.keys(HARDWARE_TIERS) as HardwareTierId[]).map((tier) => {
+              const def = HARDWARE_TIERS[tier];
+              return (
+                <button
+                  key={tier}
+                  type="button"
+                  className="flex w-full items-center justify-between rounded-lg border border-border bg-paper px-3 py-2 text-left text-sm"
+                  onClick={() => setMsg(startPlayerConsole(tier, name) ?? "Program started.")}
+                >
+                  <span className="font-bold text-fg">{def.name}</span>
+                  <span className="tabular font-bold text-accent">{formatCash(def.dev_cost)}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+function TEngineScreen() {
+  const engines = useGame((s) => s.engines);
+  const genreExp = useGame((s) => s.genreExp) ?? {};
+  const attachTEngineFramework = useGame((s) => s.attachTEngineFramework);
+  const [msg, setMsg] = useState("");
+  return (
+    <div className="space-y-3">
+      <div className="game-panel px-4 py-3 text-center">
+        <h2 className="text-xl font-bold text-fg">Engines · T-Framework</h2>
+        <p className="text-xs text-muted">$500k + 150 RP · −50% bugs · +0.5 review w/ 3D</p>
+      </div>
+      {msg && <p className="text-center text-sm text-warn">{msg}</p>}
+      <ul className="space-y-2">
+        {engines.map((e) => (
+          <li key={e.id} className="flex items-center justify-between gap-2 rounded-xl border border-border bg-paper px-3 py-2">
+            <div>
+              <div className="font-bold text-fg">{e.name}</div>
+              <div className="text-[11px] text-muted">
+                D+{e.designBonus} T+{e.techBonus}
+                {e.tEngineFramework ? " · T-Engine" : ""}
+              </div>
+            </div>
+            {!e.tEngineFramework && (
+              <Button size="sm" onClick={() => setMsg(attachTEngineFramework(e.id) ?? "Attached.")}>
+                Attach T-Engine
+              </Button>
+            )}
+            {e.tEngineFramework && <span className="text-[10px] font-bold text-good">Installed</span>}
+          </li>
+        ))}
+      </ul>
+      <div className="rounded-xl border border-border bg-elevated p-3">
+        <p className="mb-2 text-[10px] font-bold uppercase text-muted">Genre expertise</p>
+        <div className="flex flex-wrap gap-2">
+          {(["action", "adventure", "rpg", "simulation", "strategy", "casual"] as const).map((g) => {
+            const n = genreExp[g] ?? 0;
+            const lvl = 1 + Math.floor(n / 5);
+            return (
+              <span key={g} className="rounded-full border border-border bg-paper px-2.5 py-1 text-[11px] font-semibold text-fg">
+                {g} Lv{lvl} <span className="text-muted">({n})</span>
+              </span>
+            );
+          })}
+        </div>
+        <p className="mt-2 text-[10px] text-subtle">+5% production points per level · level up every 5 ships</p>
+      </div>
+    </div>
   );
 }
 
@@ -1832,42 +2616,76 @@ function SettingsScreen() {
   const setModal = useGame((s) => s.setModal);
   const returnToMenu = useGame((s) => s.returnToMenu);
   const setScreen = useGame((s) => s.setScreen);
+  const exportSaveMatrix = useGame((s) => s.exportSaveMatrix);
+  const [panel, setPanel] = useState<"unlocks" | "contracts" | "hardware" | "engines" | "none">("unlocks");
+  const [matrix, setMatrix] = useState("");
   return (
-    <div className="mx-auto max-w-lg px-3 pb-8 pt-4">
-      <h2 className="text-center text-2xl font-bold">More</h2>
-      <div className="mx-auto mt-1 h-px w-24 bg-border-strong" />
-      <div className="mt-4 space-y-2">
+    <div className="mx-auto max-w-lg space-y-3 px-1 pb-4 pt-1">
+      <div className="game-panel px-4 py-3 text-center">
+        <h2 className="text-2xl font-bold text-fg">More</h2>
+        <p className="text-sm text-muted">Unlocks · contracts · staff · engines</p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" variant={panel === "unlocks" ? "primary" : "secondary"} onClick={() => setPanel("unlocks")}>
+          Unlocks
+        </Button>
+        <Button size="sm" variant={panel === "contracts" ? "primary" : "secondary"} onClick={() => setPanel("contracts")}>
+          Contracts
+        </Button>
+        <Button size="sm" variant={panel === "hardware" ? "primary" : "secondary"} onClick={() => setPanel("hardware")}>
+          Hardware
+        </Button>
+        <Button size="sm" variant={panel === "engines" ? "primary" : "secondary"} onClick={() => setPanel("engines")}>
+          Engines
+        </Button>
+        <Button size="sm" variant="secondary" onClick={() => setScreen("staff")}>
+          People
+        </Button>
+        <Button size="sm" variant="secondary" onClick={() => setScreen("finances")}>
+          Books
+        </Button>
+        <Button size="sm" variant="secondary" onClick={() => setScreen("engines")}>
+          Engines
+        </Button>
+      </div>
+      {panel === "unlocks" && <UnlocksScreen embedded />}
+      {panel === "contracts" && <ContractsScreen />}
+      {panel === "hardware" && <HardwareLabScreen />}
+      {panel === "engines" && <TEngineScreen />}
+      <div className="space-y-2">
         <Button className="w-full" variant="secondary" onClick={() => saveGame()}>
           Save campaign
         </Button>
+        <Button
+          className="w-full"
+          variant="secondary"
+          onClick={() => {
+            const j = exportSaveMatrix();
+            setMatrix(j);
+            void navigator.clipboard?.writeText(j);
+          }}
+        >
+          Export save matrix (v2.2)
+        </Button>
+        {matrix && (
+          <pre className="max-h-32 overflow-auto rounded-lg border border-border bg-panel p-2 text-[10px] text-muted">
+            {matrix}
+          </pre>
+        )}
         <Button className="w-full" variant="secondary" onClick={() => setModal("pauseMenu")}>
           Pause menu
         </Button>
         <Button className="w-full" variant="secondary" onClick={() => setModal("cheats")}>
           CheatMod
         </Button>
-        <Button className="w-full" variant="secondary" onClick={() => setScreen("market")}>
-          Market
-        </Button>
-        <Button className="w-full" variant="secondary" onClick={() => setScreen("finances")}>
-          Finances
-        </Button>
-        <Button className="w-full" variant="secondary" onClick={() => setScreen("platforms")}>
-          Systems
-        </Button>
-        <Button className="w-full" variant="secondary" onClick={() => setScreen("staff")}>
-          People
-        </Button>
-        <Button className="w-full" variant="secondary" onClick={() => setScreen("engines")}>
-          Engines
-        </Button>
         <Button className="w-full" variant="ghost" onClick={() => returnToMenu()}>
-          Exit to title
+          Exit to menu
         </Button>
       </div>
     </div>
   );
 }
+
 
 /* ═══════════════════════════ Modals ═══════════════════════════ */
 
@@ -1958,8 +2776,8 @@ function NewGameModal() {
     cnJoin(
       "min-h-12 rounded-xl border-2 px-3 py-3 text-left text-sm font-bold transition active:scale-[0.98]",
       active
-        ? "border-[var(--glass-cyan)] bg-[rgba(77,240,255,0.18)] text-white shadow-[0_0_12px_rgba(77,240,255,0.25)]"
-        : "border-white/20 bg-[rgba(8,28,38,0.85)] text-white hover:border-[var(--glass-cyan)]/60",
+        ? "border-accent bg-accent/15 text-fg shadow-sm"
+        : "border-border bg-elevated text-fg hover:border-accent/50",
     );
 
   const canStart =
@@ -1980,7 +2798,7 @@ function NewGameModal() {
       {step === "concept" && (
         <div className="space-y-3">
           <div>
-            <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-[var(--glass-muted)]">
+            <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-muted">
               Working title
             </label>
             <Input
@@ -1988,23 +2806,23 @@ function NewGameModal() {
               placeholder={generateGameTitle(topicId, genreId)}
               onChange={(e) => setTitle(e.target.value)}
               maxLength={40}
-              className="!border-white/20 !bg-[rgba(8,28,38,0.9)] !text-white"
+              className="!border-border-strong !bg-[rgba(8,28,38,0.9)] !text-fg"
             />
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-            <span className="font-semibold text-[var(--glass-muted)]">Dev cost</span>
-            <span className={cnJoin("font-bold tabular", cash >= cost ? "text-cyan-200" : "text-red-300")}>
+            <span className="font-semibold text-muted">Dev cost</span>
+            <span className={cnJoin("font-bold tabular", cash >= cost ? "text-tech" : "text-red-300")}>
               {formatCash(cost)}
             </span>
           </div>
 
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <button type="button" className={chipBtn(!!topicId)} onClick={() => setStep("topic")}>
-              <div className="text-[10px] font-bold uppercase tracking-wide text-cyan-200/80">Topic</div>
+              <div className="text-[10px] font-bold uppercase tracking-wide text-muted">Topic</div>
               <div>{getTopic(topicId)?.name ?? "Pick Topic"}</div>
             </button>
             <button type="button" className={chipBtn(!!genreId)} onClick={() => setStep("genre")}>
-              <div className="text-[10px] font-bold uppercase tracking-wide text-cyan-200/80">Genre</div>
+              <div className="text-[10px] font-bold uppercase tracking-wide text-muted">Genre</div>
               <div className="flex items-center gap-2">
                 <img
                   src={genreIconSrc(genreId)}
@@ -2016,13 +2834,13 @@ function NewGameModal() {
               </div>
             </button>
             <button type="button" className={chipBtn(!!platformId)} onClick={() => setStep("platform")}>
-              <div className="text-[10px] font-bold uppercase tracking-wide text-cyan-200/80">Platform</div>
+              <div className="text-[10px] font-bold uppercase tracking-wide text-muted">Platform</div>
               <div className="flex items-center gap-2">
                 {(platformArt(platformId, year) || platformThumb(platformId, year)) && (
                   <img
                     src={platformArt(platformId, year) || platformThumb(platformId, year)}
                     alt=""
-                    className="h-8 w-10 shrink-0 rounded-md object-contain bg-black/30"
+                    className="h-8 w-10 shrink-0 rounded-md object-contain bg-panel"
                     draggable={false}
                   />
                 )}
@@ -2030,7 +2848,7 @@ function NewGameModal() {
               </div>
             </button>
             <button type="button" className={chipBtn(featureIds.length > 0)} onClick={() => setStep("tech")}>
-              <div className="text-[10px] font-bold uppercase tracking-wide text-cyan-200/80">Tech pack</div>
+              <div className="text-[10px] font-bold uppercase tracking-wide text-muted">Tech pack</div>
               <div className="truncate">
                 {featureIds
                   .map((id) => ENGINE_COMPONENTS.find((c) => c.id === id)?.name ?? id)
@@ -2042,7 +2860,7 @@ function NewGameModal() {
 
           {(unlocks.audience === "owned" || flags.audience) && (
             <div>
-              <label className="mb-1 block text-xs font-bold uppercase text-[var(--glass-muted)]">Audience</label>
+              <label className="mb-1 block text-xs font-bold uppercase text-muted">Audience</label>
               <div className="flex flex-wrap gap-2">
                 {AUDIENCES.map((a) => (
                   <button
@@ -2060,7 +2878,7 @@ function NewGameModal() {
 
           {sizes.length > 1 && (
             <div>
-              <label className="mb-1 block text-xs font-bold uppercase text-[var(--glass-muted)]">Size</label>
+              <label className="mb-1 block text-xs font-bold uppercase text-muted">Size</label>
               <div className="flex flex-wrap gap-2">
                 {sizes.map((s) => (
                   <button key={s} type="button" onClick={() => setSize(s)} className={chipBtn(size === s)}>
@@ -2071,11 +2889,11 @@ function NewGameModal() {
             </div>
           )}
 
-          <p className="text-center text-xs text-[var(--glass-muted)]">
+          <p className="text-center text-xs text-muted">
             Fit {combo.topicGenre}/{combo.platformGenre} · Cash {formatCash(cash)}
           </p>
           <div className="mt-2">
-            <p className="mb-1 text-center text-[10px] font-bold uppercase text-[var(--glass-muted)]">
+            <p className="mb-1 text-center text-[10px] font-bold uppercase text-muted">
               Project pillar
             </p>
             <div className="flex flex-wrap justify-center gap-1">
@@ -2122,7 +2940,7 @@ function NewGameModal() {
       {/* ── Pick Topic ── */}
       {step === "topic" && (
         <div>
-          <button type="button" className="mb-3 text-xs font-bold text-cyan-200 underline" onClick={() => setStep("concept")}>
+          <button type="button" className="mb-3 text-xs font-bold text-tech underline" onClick={() => setStep("concept")}>
             ← Game Concept
           </button>
           <SearchField
@@ -2148,7 +2966,7 @@ function NewGameModal() {
             ))}
           </div>
           {visibleTopics.length === 0 && (
-            <p className="mt-4 text-center text-sm text-[var(--glass-muted)]">No topics found</p>
+            <p className="mt-4 text-center text-sm text-muted">No topics found</p>
           )}
         </div>
       )}
@@ -2156,7 +2974,7 @@ function NewGameModal() {
       {/* ── Pick Genre ── */}
       {step === "genre" && (
         <div>
-          <button type="button" className="mb-3 text-xs font-bold text-cyan-200 underline" onClick={() => setStep("concept")}>
+          <button type="button" className="mb-3 text-xs font-bold text-tech underline" onClick={() => setStep("concept")}>
             ← Game Concept
           </button>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -2173,8 +2991,8 @@ function NewGameModal() {
                   className={cnJoin(
                     "flex flex-col items-center gap-2 rounded-xl border-2 px-2 py-3 text-center transition",
                     selected
-                      ? "border-cyan-300/80 bg-[rgba(20,40,55,0.92)] text-white shadow-[0_0_16px_rgba(60,220,240,0.25)]"
-                      : "border-white/15 bg-[rgba(12,22,32,0.88)] text-white/90 hover:border-cyan-200/40 hover:bg-[rgba(18,34,48,0.95)]",
+                      ? "border-cyan-300/80 bg-[rgba(20,40,55,0.92)] text-fg shadow-[0_0_16px_rgba(60,220,240,0.25)]"
+                      : "border-border bg-paper text-fg hover:border-accent hover:bg-elevated",
                   )}
                 >
                   <img
@@ -2196,7 +3014,7 @@ function NewGameModal() {
         <div className="space-y-3">
           <button
             type="button"
-            className="flex items-center gap-1 text-xs font-bold text-cyan-200"
+            className="flex items-center gap-1 text-xs font-bold text-tech"
             onClick={() => setStep("concept")}
           >
             ← Back
@@ -2227,8 +3045,8 @@ function NewGameModal() {
                   className={cnJoin(
                     "w-full overflow-hidden rounded-[1.35rem] border text-left transition active:scale-[0.99]",
                     selected
-                      ? "border-[var(--glass-cyan)] bg-[rgba(12,48,62,0.88)] shadow-[0_0_28px_rgba(77,240,255,0.28)]"
-                      : "border-white/20 bg-[rgba(10,36,48,0.82)] hover:border-cyan-300/50",
+                      ? "border-accent bg-accent/10 shadow-md"
+                      : "border-border-strong bg-[rgba(10,36,48,0.82)] hover:border-cyan-300/50",
                   )}
                 >
                   <div className="relative flex h-40 items-center justify-center bg-gradient-to-b from-white/10 to-transparent px-4 pt-4 sm:h-48">
@@ -2240,25 +3058,25 @@ function NewGameModal() {
                         draggable={false}
                       />
                     ) : (
-                      <div className="text-4xl font-black text-white/30">{p.short}</div>
+                      <div className="text-4xl font-black text-fg/30">{p.short}</div>
                     )}
                   </div>
                   <div className="px-5 pb-5 pt-1">
-                    <div className="text-center text-2xl font-black tracking-tight text-white">
+                    <div className="text-center text-2xl font-black tracking-tight text-fg">
                       {p.short || p.name}
                     </div>
                     <div className="mt-3 space-y-1.5 text-sm">
                       <div className="flex items-center justify-between">
-                        <span className="text-[var(--glass-muted)]">Dev. cost:</span>
-                        <span className="font-bold tabular text-[var(--glass-green)]">{formatCash(devCost)}</span>
+                        <span className="text-muted">Dev. cost:</span>
+                        <span className="font-bold tabular text-cash">{formatCash(devCost)}</span>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span className="text-[var(--glass-muted)]">Marketshare:</span>
-                        <span className="font-bold tabular text-white">{share.toFixed(1)} %</span>
+                        <span className="text-muted">Marketshare:</span>
+                        <span className="font-bold tabular text-fg">{share.toFixed(1)} %</span>
                       </div>
                     </div>
                     <div className="mt-3">
-                      <div className="mb-1.5 text-xs text-[var(--glass-muted)]">Genre match:</div>
+                      <div className="mb-1.5 text-xs text-muted">Genre match:</div>
                       <div className="flex flex-wrap justify-center gap-1.5">
                         {genres.map((g) => {
                           const fit = p.genreAffinity[g] ?? "ok";
@@ -2270,7 +3088,7 @@ function NewGameModal() {
                                 "flex w-[3.1rem] flex-col items-center gap-0.5 rounded-xl border px-1 py-1.5",
                                 hot
                                   ? "border-cyan-300/70 bg-cyan-400/15"
-                                  : "border-white/15 bg-black/25",
+                                  : "border-border bg-panel",
                               )}
                               title={`${getGenre(g).name}: ${fit}`}
                             >
@@ -2284,12 +3102,12 @@ function NewGameModal() {
                                 className={cnJoin(
                                   "rounded-md px-1 text-[10px] font-black leading-none",
                                   fit === "great"
-                                    ? "bg-emerald-500 text-white"
+                                    ? "bg-emerald-500 text-fg"
                                     : fit === "good"
-                                      ? "bg-teal-600 text-white"
+                                      ? "bg-teal-600 text-fg"
                                       : fit === "ok"
-                                        ? "bg-slate-600 text-white"
-                                        : "bg-slate-800 text-white/70",
+                                        ? "bg-slate-600 text-fg"
+                                        : "bg-slate-800 text-muted",
                                 )}
                               >
                                 {tierMark(fit)}
@@ -2305,7 +3123,7 @@ function NewGameModal() {
             })}
           </div>
           {platforms.length === 0 && (
-            <p className="text-center text-sm text-[var(--glass-muted)]">
+            <p className="text-center text-sm text-muted">
               No platforms unlocked yet — PC should be day one.
             </p>
           )}
@@ -2315,13 +3133,13 @@ function NewGameModal() {
       {/* ── Tech pack (graphics / sound) ── */}
       {step === "tech" && (
         <div className="space-y-4">
-          <button type="button" className="text-xs font-bold text-cyan-200 underline" onClick={() => setStep("concept")}>
+          <button type="button" className="text-xs font-bold text-tech underline" onClick={() => setStep("concept")}>
             ← Game Concept
           </button>
           <div>
             <div className="mb-2 flex items-center justify-between">
-              <h3 className="text-xs font-bold uppercase tracking-wide text-[var(--glass-muted)]">Graphics</h3>
-              <span className="text-xs font-bold text-amber-200">+{formatCash(featureCost)}</span>
+              <h3 className="text-xs font-bold uppercase tracking-wide text-muted">Graphics</h3>
+              <span className="text-xs font-bold text-warn">+{formatCash(featureCost)}</span>
             </div>
             <div className="grid grid-cols-2 gap-2">
               {graphicOptions.map((c) => {
@@ -2342,7 +3160,7 @@ function NewGameModal() {
                     className={chipBtn(on)}
                   >
                     <div>{c.name}</div>
-                    <div className="mt-1 text-[10px] text-cyan-200/80">{c.starting ? "Free" : "+$5.0K"}</div>
+                    <div className="mt-1 text-[10px] text-muted">{c.starting ? "Free" : "+$5.0K"}</div>
                   </button>
                 );
               })}
@@ -2350,7 +3168,7 @@ function NewGameModal() {
           </div>
           {soundOptions.length > 0 && (
             <div>
-              <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-[var(--glass-muted)]">Sound</h3>
+              <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">Sound</h3>
               <div className="grid grid-cols-2 gap-2">
                 {soundOptions.map((c) => {
                   const on = featureIds.includes(c.id);
@@ -2366,7 +3184,7 @@ function NewGameModal() {
                       className={chipBtn(on)}
                     >
                       <div>{c.name}</div>
-                      <div className="mt-1 text-[10px] text-cyan-200/80">{c.starting ? "Free" : "+$5.0K"}</div>
+                      <div className="mt-1 text-[10px] text-muted">{c.starting ? "Free" : "+$5.0K"}</div>
                     </button>
                   );
                 })}
@@ -2494,6 +3312,9 @@ function CheatsModal() {
   const year = useGame((s) => s.year);
   const cheatLog = useGame((s) => s.cheatLog);
   const cheatsEnabled = useGame((s) => s.cheatsEnabled);
+  const executeCheatCommand = useGame((s) => s.executeCheatCommand);
+  const [cheatCmd, setCheatCmd] = useState("");
+  const [cheatCmdMsg, setCheatCmdMsg] = useState("");
   const [tab, setTab] = useState<"main" | "dev" | "modes" | "modding">("main");
   const [cashField, setCashField] = useState("");
   const [fansField, setFansField] = useState("");
@@ -2537,6 +3358,32 @@ function CheatsModal() {
         Inspired by kristof1104's GDT CheatMod — safer than editing saves.
         {cheatsEnabled ? " Campaign marked modified." : ""}
       </p>
+      <div className="mt-2 rounded-lg border border-border bg-elevated p-2">
+        <p className="mb-1 text-[10px] font-bold uppercase text-muted">EXECUTE_CHEAT</p>
+        <div className="flex gap-2">
+          <Input
+            value={cheatCmd}
+            placeholder="/money_boost · /rp_max · /instafans · /bug_wipe"
+            onChange={(e) => setCheatCmd(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                setCheatCmdMsg(executeCheatCommand(cheatCmd) ?? "OK");
+                setCheatCmd("");
+              }
+            }}
+          />
+          <Button
+            size="sm"
+            onClick={() => {
+              setCheatCmdMsg(executeCheatCommand(cheatCmd) ?? "OK");
+              setCheatCmd("");
+            }}
+          >
+            Run
+          </Button>
+        </div>
+        {cheatCmdMsg && <p className="mt-1 text-[11px] text-muted">{cheatCmdMsg}</p>}
+      </div>
       <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted">
         <span className="tabular rounded-md bg-elevated px-2 py-1 font-semibold text-fg">
           {formatCash(cash)}

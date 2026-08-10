@@ -191,6 +191,8 @@ export interface EngineDef {
   cost: number;
   weeks: number;
   custom?: boolean;
+  /** Workshop Module A — T-Engine modular framework */
+  tEngineFramework?: boolean;
 }
 
 export interface StaffMember {
@@ -290,6 +292,22 @@ export interface GameProject {
   techSpec?: import("./optimization/types").ProjectTechSpec | null;
   /** Part 2: effective field importance snapshot at project start. */
   fieldImportance?: Partial<Record<DevField, number>> | null;
+  /** Module 8 — crunch mode (1.45× points, −18 energy, more crises). */
+  crunchMode?: boolean;
+  /** Module 9 — up to 2 secondary platforms. */
+  secondaryPlatformIds?: string[];
+  /** Module 8 — flat review penalty from crises (e.g. bug fest −1.5). */
+  /** Module 16 DRM for this title */
+  drmTier?: import("./tycoonPiracy").DrmTier;
+  /** Module 17 — stolen assets (+30% tech, litigation risk) */
+  usedIllicitAssets?: boolean;
+  /** Module 17 — week to roll litigation (release+2) */
+  litigationDueWeek?: number;
+  crisisReviewPenalty?: number;
+  /** Module 8 — flu: design gen multiplier weeks remaining. */
+  fluWeeksLeft?: number;
+  /** Module 8 — last crisis roll week (anti-spam). */
+  lastCrisisWeek?: number;
 }
 
 export interface WeeklySalePoint {
@@ -311,6 +329,18 @@ export interface ReleasedGame {
   genreId: GenreId;
   genre2Id?: GenreId | null;
   platformId: string;
+  /** Module 9 ports */
+  secondaryPlatformIds?: string[];
+  /** Module 12 */
+  patchSalesBoost?: number;
+  hasDlc?: boolean;
+  dlcRevenue?: number;
+  usedIllicitAssets?: boolean;
+  litigationDueWeek?: number;
+  litigationResolved?: boolean;
+  postMortemDone?: boolean;
+  sliderMissAtShip?: number;
+  telemetry?: import("./workshopMods").GameHistoryEntry;
   audience: AudienceId;
   size: GameSize;
   engineId: string;
@@ -378,7 +408,7 @@ export interface ReleasedGame {
    * Live weekly sales engine (v3). When set, residual weeks use calculateWeeklySales
    * instead of consuming precomputed weeklySalesLeft.
    */
-  salesEngine?: "plan_v2" | "weekly_v3";
+  salesEngine?: "plan_v2" | "weekly_v3" | "classic_gdt";
   /** Frozen commercial inputs for live weekly sales (set at release). */
   salesSnapshot?: {
     platformInstalledBase: number;
@@ -587,6 +617,26 @@ export interface GameState {
   researchPipeline?: import("./research/types").ResearchPipelineState;
   /** Part 2: campaign difficulty (economy/uncertainty only). */
   difficulty?: import("./research/types").DifficultyConfig;
+  /** Module 13 — proprietary consoles */
+  /** Module 16 unlocked DRM tiers */
+  unlockedDrm?: import("./tycoonPiracy").DrmTier[];
+  /** Module 18 post-mortems */
+  postMortems?: import("./tycoonRiskAnalytics").PostMortemRecord[];
+  /** Workshop Module B — genre ship counts (level = 1 + floor(n/5)) */
+  genreExp?: Partial<Record<GenreId, number>>;
+  /** Workshop Module D — immutable release telemetry */
+  gameHistoryLedger?: import("./workshopMods").GameHistoryEntry[];
+  /** Known combo labels after post-mortem */
+  knownCombos?: Record<string, import("./tycoonRiskAnalytics").MatchLabel>;
+  playerConsoles?: import("./tycoonLateMarket").PlayerConsole[];
+  /** Module 11 — last awards year resolved */
+  lastAwardsYear?: number;
+  /** Module 7 — last week a tycoon rival released (every 6w). */
+  lastRivalReleaseWeek?: number;
+  /** Module 7 — rotating rival index 0..2. */
+  rivalRotateIndex?: number;
+  /** Module 7 — genres currently saturated by rival releases. */
+  rivalGenrePressure?: Partial<Record<GenreId, number>>; // week until pressure ends
   /** Part 2: proprietary hardware projects (bottlenecked axes). */
   hardwareProjects?: import("./hardware/types").HardwareProject[];
   /** Series franchise reputation map. */

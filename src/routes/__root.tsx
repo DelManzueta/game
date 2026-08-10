@@ -16,12 +16,12 @@ export const Route = createRootRoute({
         content: "width=device-width, initial-scale=1, viewport-fit=cover",
       },
       {
-        title: "Studio Empire — Game Dev Tycoon",
+        title: "Studio Empire",
       },
       {
         name: "description",
         content:
-          "Build a game studio from a 1980s garage. Design games, research tech, hire staff, chase reviews.",
+          "From a garage to a hardware empire — build games, grow your studio.",
       },
     ],
     links: [

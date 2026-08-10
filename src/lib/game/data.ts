@@ -289,7 +289,8 @@ export const REVIEWER_NAMES = [
 export const OFFICE_INFO = {
   1: {
     name: "Founder Garage",
-    rent: 0,
+    /** TYCOON v2.1 monthly_rent — garage burn pressure */
+    rent: 8_000,
     /** Total HQ seats including founder (bible §2). */
     capacity: 1,
     upgradeCost: 150_000,
@@ -302,18 +303,18 @@ export const OFFICE_INFO = {
   },
   2: {
     name: "First Office",
-    rent: 2_000,
-    capacity: 4, // founder + 3
-    upgradeCost: 500_000,
+    rent: 8_000,
+    capacity: 5, // founder + 4 (blueprint tech park)
+    upgradeCost: 120_000,
     fanRequirement: 0,
     gamesRequirement: 0,
     cashRequirement: 0,
   },
   3: {
     name: "Upgraded Office",
-    rent: 5_000,
-    capacity: 5, // founder + 4
-    upgradeCost: 8_000_000,
+    rent: 25_000,
+    capacity: 7,
+    upgradeCost: 850_000,
     fanRequirement: 0,
     gamesRequirement: 0,
     cashRequirement: 0,
@@ -367,7 +368,19 @@ export function getGenre(id: GenreId) {
 }
 export function getPlatform(id: string) {
   if (id === CUSTOM_CONSOLE.id) return CUSTOM_CONSOLE;
-  return PLATFORMS.find((p) => p.id === id)!;
+  // Module 13 — first-party player consoles (dynamic ids)
+  if (id.startsWith("console_")) {
+    return {
+      ...CUSTOM_CONSOLE,
+      id,
+      name: "Studio Console",
+      short: "HW",
+      licenseCost: 0,
+      marketSize: 1.15,
+      year: 1990,
+    };
+  }
+  return PLATFORMS.find((p) => p.id === id) ?? PLATFORMS[0]!;
 }
 
 export function defaultSliders(genreId: GenreId): Record<DevField, number> {

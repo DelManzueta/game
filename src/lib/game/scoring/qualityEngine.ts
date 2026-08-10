@@ -156,9 +156,12 @@ export function generateWeekPoints(input: PointGenInput): PointGenResult {
   let techGain = 0;
 
   for (const member of input.staff) {
+    // Blueprint staff AI: energy ≤20 → forced rest (no points this week)
+    const energy = clamp(member.energy ?? 100, 0, 100);
+    if (energy <= 20 && member.id !== "founder") continue;
     const efficiency = clamp(
-      0.5 + member.speed / 200 + member.level * 0.01,
-      DEV_POINTS.efficiencyFloor,
+      (0.5 + member.speed / 200 + member.level * 0.01) * (energy / 100),
+      DEV_POINTS.efficiencyFloor * 0.55,
       DEV_POINTS.efficiencyCeil,
     );
     for (const field of fields) {

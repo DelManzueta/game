@@ -43,6 +43,9 @@ const PUBLISHERS = [
   { id: "arcade_house", name: "Arcade House", reach: 1.25, royalty: 0.48, upfront: 8000 },
   { id: "blue_chip", name: "Blue Chip Games", reach: 1.7, royalty: 0.35, upfront: 35000 },
   { id: "hobbyist_dist", name: "Hobbyist Distro", reach: 1.15, royalty: 0.55, upfront: 4000 },
+  { id: "vina", name: "Vina Games", reach: 1.4, royalty: 0.4, upfront: 18000 },
+  { id: "microsanft", name: "Microsanft", reach: 1.65, royalty: 0.34, upfront: 40000 },
+  { id: "nintendont", name: "Nintendon't", reach: 1.5, royalty: 0.4, upfront: 28000 },
 ];
 
 const GENRES: GenreId[] = ["action", "adventure", "rpg", "simulation", "strategy", "casual"];
@@ -195,6 +198,54 @@ export function tickPublishingBoard(
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
+}
+
+/** Settle active deal after reviews are known (blueprint Module 3). */
+export function evaluatePublisherDeal(opts: {
+  deal: PublishingDeal;
+  avgReview: number;
+  genreId: GenreId;
+  size: GameSize;
+  platformId: string;
+  grossRevenue: number;
+}): {
+  met: boolean;
+  cashDelta: number;
+  note: string;
+  royaltyPaid: number;
+  penalty: number;
+  requirementsMet: boolean;
+} {
+  const d = opts.deal;
+  let requirementsMet = true;
+  if (d.genreRequirement && d.genreRequirement !== opts.genreId) requirementsMet = false;
+  if (d.sizeRequirement && d.sizeRequirement !== opts.size) requirementsMet = false;
+  if (d.platformRequirement && d.platformRequirement !== opts.platformId) requirementsMet = false;
+
+  const scoreMet = opts.avgReview + 1e-6 >= d.minimumReviewScore;
+  const met = requirementsMet && scoreMet;
+
+  if (met) {
+    const royaltyPaid = opts.grossRevenue * d.royaltyRate;
+    return {
+      met: true,
+      cashDelta: royaltyPaid,
+      royaltyPaid,
+      penalty: 0,
+      requirementsMet,
+      note: `${d.publisherName}: contract met (${opts.avgReview.toFixed(1)} ≥ ${d.minimumReviewScore}). Royalties ${Math.round(d.royaltyRate * 100)}%.`,
+    };
+  }
+
+  const penalty = d.penalty > 0 ? d.penalty : Math.round(d.upfrontPayment * 0.5);
+  return {
+    met: false,
+    cashDelta: -penalty,
+    royaltyPaid: 0,
+    penalty,
+    requirementsMet,
+    note: `${d.publisherName}: contract failed (need ${d.minimumReviewScore}+, got ${opts.avgReview.toFixed(1)}). Fine -$${penalty.toLocaleString()}.`,
+  };
 }
 
 export { PUBLISHING_REFRESH_COST, PUBLISHING_SEASON_WEEKS };

@@ -145,10 +145,14 @@ export function calculateWeeklySales(sales: SalesInput): WeeklySalesResult {
   const hypeFactor = 0.8 + 0.7 * (clamp(sales.hype ?? 0, 0, 100) / 100);
   const priceFactor = priceFit(sales.price ?? 29.99, sales.referencePrice ?? 29.99);
 
+  // Installed base already encodes platform growth/decline — do NOT multiply by
+  // lifecycleFactor again (that double-penalized early PC to ~dozen units).
+  // Soft lifecycle dampener only when base is past-peak / tiny relative signal.
+  const lifeSoft = clamp(0.65 + 0.35 * clamp(sales.platformLifecycle, 0, 1), 0.65, 1);
   const marketPotential =
     Math.max(0, sales.platformInstalledBase) *
-    Math.max(0, sales.marketCapacityRate ?? 0.0016) *
-    clamp(sales.platformLifecycle, 0, 1) *
+    Math.max(0, sales.marketCapacityRate ?? 0.01) *
+    lifeSoft *
     clamp(sales.platformAvailability, 0, 1) *
     clamp(sales.audienceDemand, 0, 1) *
     clamp(sales.topicDemand, 0, 1) *

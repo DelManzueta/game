@@ -52,7 +52,7 @@ export const ROOM_ART_LADDER: RoomArtDef[] = [
     label: "Garage loft",
     room: "/art/room-garage.jpg",
     desk: "/art/desk-garage.jpg",
-    objectPosition: "center 55%",
+    objectPosition: "42% 58%",
     showFounderSprite: false,
     hotspotIdle: "Tap garage · start a game",
     hotspotBusy: "Code scrolling on the CRTs…",
