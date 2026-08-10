@@ -147,6 +147,24 @@ import {
   TYCOON_EXTENDED_VERSION,
 } from "./tycoonExtended";
 import {
+  isAwardsNight,
+  resolveAnnualAwards,
+  applyPatchMath,
+  canPatchTitle,
+  canBuildDlc,
+  dlcUnitsSold,
+  DLC,
+  PATCH,
+  HARDWARE_TIERS,
+  HARDWARE_UNLOCK,
+  FIRST_PARTY_SYNERGY,
+  startConsoleDev,
+  tickPlayerConsole,
+  hardwareUnlocked,
+  type HardwareTierId,
+  type EligibleTitle,
+} from "./tycoonLateMarket";
+import {
   startMarketingCampaign,
   getCampaignSpec,
   emptyMarketingState,
@@ -397,6 +415,8 @@ function initialState(): GameState {
     garageSlice: true,
     publishingBoard: null,
     activePublisherDealId: null,
+    playerConsoles: [],
+    lastAwardsYear: 0,
     lastRivalReleaseWeek: 0,
     rivalRotateIndex: 0,
     rivalGenrePressure: {},
@@ -940,8 +960,13 @@ function releaseProject(next: GameState, project: GameProject): GameState {
     audienceId: scored.audience,
   });
   const platformSnap = snapshotPlatformWeek(pMarket);
-  const platformMarket =
+  let platformMarket =
     pMarket.lifecycleFactor * Math.max(0.35, platform.marketSize);
+  // Module 13 first-party: use live console share, $0 license already
+  const ownHw = (next.playerConsoles ?? []).find((c) => c.id === scored.platformId);
+  if (ownHw?.status === "shipping") {
+    platformMarket = Math.max(platformMarket, ownHw.marketShare);
+  }
   const platformAgeYears = Math.max(0, (releaseDay - pSpec.launchDay) / (48 * 7));
 
   let sales = computeSalesCurve(hidden, {
@@ -1397,6 +1422,10 @@ interface Actions {
   toggleCrunchMode: () => string | null;
   setSecondaryPlatforms: (ids: string[]) => string | null;
   exportSaveMatrix: () => string;
+  issuePatch: (gameId: string) => string | null;
+  buildDlc: (gameId: string) => string | null;
+  startPlayerConsole: (tier: HardwareTierId, name?: string) => string | null;
+  setConsolePricing: (id: string, retailPrice: number, royaltyRate: number) => string | null;
   applyCheat: (cheat: string, arg?: string | number) => void;
   resolveEvent: (choiceIndex: number) => void;
   exportSave: () => string;
@@ -1970,6 +1999,18 @@ export const useGame = create<GameState & Actions>((set, get) => ({
             dGain *= CRUNCH.pointsMult;
             tGain *= CRUNCH.pointsMult;
           }
+          // Module 13 first-party synergy
+          if (
+            next.playerConsoles?.some(
+              (c) =>
+                c.status === "shipping" &&
+                (c.id === next.currentProject!.platformId ||
+                  next.currentProject!.platformId.startsWith("console_")),
+            )
+          ) {
+            dGain *= FIRST_PARTY_SYNERGY;
+            tGain *= FIRST_PARTY_SYNERGY;
+          }
           if ((next.currentProject.fluWeeksLeft ?? 0) > 0) {
             dGain *= 0.5;
           }
@@ -2149,6 +2190,26 @@ export const useGame = create<GameState & Actions>((set, get) => ({
           [rel.genreId]: next.week + 8,
         };
         next.notifications = pushNote(next, rel.note, "info");
+        // Module 13 — third-party royalty if they ship on our hardware (abstract share of rival)
+        const shippingHw = (next.playerConsoles ?? []).filter((c) => c.status === "shipping");
+        if (shippingHw.length) {
+          const c0 = shippingHw[0]!;
+          const rivalGross = rel.totalPoints * 800; // abstract
+          const cut = rivalGross * c0.royaltyRate;
+          next.cash += cut;
+          next.ledger = applyLedger(next.ledger, {
+            week: next.week,
+            amount: cut,
+            category: "sales",
+            label: `${c0.name} third-party royalty`,
+            ref: `royalty-${rel.rivalId}-w${next.week}`,
+          });
+          next.notifications = pushNote(
+            next,
+            `${c0.name} royalty from industry release: +${formatCash(cut)}.`,
+            "good",
+          );
+        }
         if (next.market) {
           next.market = {
             ...next.market,
@@ -2226,6 +2287,85 @@ export const useGame = create<GameState & Actions>((set, get) => ({
 
     next = tryFireEvent(next);
     next.hype = tycoonHypeDecay(next.hype); // v2.1 Module 4: MAX(1, INT(hype*0.12))
+
+    // Module 11 — Annual G3 Awards (Dec week 4)
+    {
+      const wom = ((next.week - 1) % 4) + 1;
+      if (
+        isAwardsNight(next.year, next.month, wom) &&
+        next.lastAwardsYear !== next.year
+      ) {
+        const titles: EligibleTitle[] = (next.releasedGames ?? []).map((g) => ({
+          id: g.id,
+          title: g.title,
+          avgReview: g.avgReview,
+          techPoints: g.techPoints,
+          designPoints: g.designPoints,
+          sales: g.sales,
+          isPlayer: true,
+          yearReleased: g.yearReleased ?? next.year,
+        }));
+        // Light rival synthetic entries so awards aren't empty early
+        if (titles.length) {
+          const awards = resolveAnnualAwards({ year: next.year, titles });
+          next.lastAwardsYear = next.year;
+          let fanGain = 0;
+          let rpGain = 0;
+          let cashGain = 0;
+          for (const a of awards) {
+            fanGain += a.fanDelta;
+            rpGain += a.rpDelta;
+            cashGain += a.cashDelta;
+            if (a.isPlayer || a.awardId === "Game_of_the_Year") {
+              next.notifications = pushNote(next, a.note, a.fanDelta < 0 ? "bad" : "good");
+            }
+          }
+          next.fans = Math.max(0, next.fans + fanGain);
+          next.researchPoints += rpGain;
+          next.cash += cashGain;
+          if (cashGain > 0) {
+            next.ledger = applyLedger(next.ledger, {
+              week: next.week,
+              amount: cashGain,
+              category: "sales",
+              label: "G3 Awards sales surge",
+              ref: `awards-${next.year}`,
+            });
+          }
+          next.pendingEvent = {
+            id: `g3_${next.year}`,
+            title: `G3 Awards ${next.year}`,
+            body: awards.map((a) => a.note).join("\n") || "Quiet awards season.",
+          };
+          next.modal = "event";
+          next.speed = 0;
+        }
+      }
+    }
+
+    // Module 13 — player console tick
+    if (next.playerConsoles?.length) {
+      const updated = [];
+      for (const c of next.playerConsoles) {
+        const r = tickPlayerConsole(c, next.week);
+        updated.push(r.console);
+        if (r.cashDelta !== 0) {
+          next.cash += r.cashDelta;
+          if (Math.abs(r.cashDelta) > 100) {
+            next.ledger = applyLedger(next.ledger, {
+              week: next.week,
+              amount: r.cashDelta,
+              category: r.cashDelta >= 0 ? "sales" : "other",
+              label: `${c.name} hardware`,
+              ref: `hw-${c.id}-w${next.week}`,
+            });
+          }
+        }
+        if (r.note) next.notifications = pushNote(next, r.note, "good");
+      }
+      next.playerConsoles = updated;
+    }
+
 
     if (
       !next.settings.disableBankruptcy &&
@@ -3096,6 +3236,8 @@ export const useGame = create<GameState & Actions>((set, get) => ({
   },
 
   clearPublisherDeal: () => set({ activePublisherDealId: null,
+    playerConsoles: [],
+    lastAwardsYear: 0,
     lastRivalReleaseWeek: 0,
     rivalRotateIndex: 0,
     rivalGenrePressure: {}, dirty: true }),
@@ -3240,6 +3382,159 @@ export const useGame = create<GameState & Actions>((set, get) => ({
               ref: `mp-kit-${p.id}`,
             })
           : state.ledger,
+    });
+    return null;
+  },
+
+
+  issuePatch: (gameId) => {
+    const state = get();
+    const g = state.releasedGames.find((x) => x.id === gameId);
+    if (!g) return "Game not found.";
+    if (!canPatchTitle(g)) return "Nothing to patch (no bugs or delisted).";
+    if (state.researchPoints < PATCH.rpCost) return `Need ${PATCH.rpCost} RP.`;
+    const math = applyPatchMath(g);
+    const patch = {
+      bugs: math.bugsAfter,
+      patchSalesBoost: (g.patchSalesBoost ?? 0) + math.salesBoost,
+    };
+    // Boost remaining weekly sales left
+    const weekly = (g.weeklySalesLeft ?? []).map((u) =>
+      Math.floor(u * (1 + math.salesBoost)),
+    );
+    set({
+      researchPoints: state.researchPoints - PATCH.rpCost,
+      releasedGames: state.releasedGames.map((x) =>
+        x.id === gameId ? { ...x, ...patch, weeklySalesLeft: weekly.length ? weekly : x.weeklySalesLeft } : x,
+      ),
+      activeSales: state.activeSales.map((x) =>
+        x.id === gameId ? { ...x, ...patch, weeklySalesLeft: weekly.length ? weekly : x.weeklySalesLeft } : x,
+      ),
+      dirty: true,
+      notifications: pushNote(state, math.note, "good"),
+    });
+    return null;
+  },
+
+  buildDlc: (gameId) => {
+    const state = get();
+    const g = state.releasedGames.find((x) => x.id === gameId);
+    if (!g) return "Game not found.";
+    if (!canBuildDlc(g)) {
+      return "DLC needs Medium+ title still on shelves, once per game.";
+    }
+    // Instant resolve after "2 weeks" abstracted as immediate for UX; cost is time opportunity - charge small cash
+    const units = dlcUnitsSold(g.sales, g.avgReview);
+    const revenue = units * DLC.price * 0.85;
+    set({
+      cash: state.cash + revenue,
+      releasedGames: state.releasedGames.map((x) =>
+        x.id === gameId
+          ? {
+              ...x,
+              hasDlc: true,
+              dlcRevenue: (x.dlcRevenue ?? 0) + revenue,
+              // shelf life extension: add 4 weeks residual if empty
+              weeklySalesLeft: [
+                ...(x.weeklySalesLeft ?? []),
+                ...Array.from({ length: 4 }, () => Math.max(10, Math.floor(units / 8))),
+              ],
+              onSale: true,
+              dormant: false,
+            }
+          : x,
+      ),
+      activeSales: (() => {
+        const updated = state.releasedGames
+          .map((x) =>
+            x.id === gameId
+              ? {
+                  ...x,
+                  hasDlc: true,
+                  dlcRevenue: (x.dlcRevenue ?? 0) + revenue,
+                  weeklySalesLeft: [
+                    ...(x.weeklySalesLeft ?? []),
+                    ...Array.from({ length: 4 }, () => Math.max(10, Math.floor(units / 8))),
+                  ],
+                  onSale: true,
+                  dormant: false,
+                }
+              : x,
+          )
+          .filter((x) => x.onSale && !x.dormant);
+        return updated;
+      })(),
+      dirty: true,
+      notifications: pushNote(
+        state,
+        `DLC for "${g.title}": ${units.toLocaleString()} packs · +${formatCash(revenue)}.`,
+        "good",
+      ),
+      ledger: applyLedger(state.ledger, {
+        week: state.week,
+        amount: revenue,
+        category: "sales",
+        label: `DLC: ${g.title}`,
+        gameId,
+        ref: `dlc-${gameId}`,
+      }),
+    });
+    return null;
+  },
+
+  startPlayerConsole: (tier, name) => {
+    const state = get();
+    if (!hardwareUnlocked(state.office, state.cash, state.flags.hardwareLab)) {
+      return `Need office ${HARDWARE_UNLOCK.minOffice}+ and serious capital (≈$${HARDWARE_UNLOCK.minCash.toLocaleString()}).`;
+    }
+    const t = HARDWARE_TIERS[tier];
+    if (state.cash < t.dev_cost) return `Need ${formatCash(t.dev_cost)}.`;
+    if (state.researchPoints < t.rp_cost) return `Need ${t.rp_cost} RP.`;
+    if ((state.playerConsoles ?? []).some((c) => c.status === "developing")) {
+      return "Already developing a console.";
+    }
+    const started = startConsoleDev({
+      tier,
+      customName: name,
+      week: state.week,
+      seed: hashSeed(state.campaignSeed, "console", state.week, tier),
+    });
+    // Register as platform for first-party shipping
+    const platId = started.console.id;
+    set({
+      cash: state.cash - started.cost,
+      researchPoints: state.researchPoints - started.rp,
+      playerConsoles: [...(state.playerConsoles ?? []), started.console],
+      unlockedPlatforms: state.unlockedPlatforms.includes(platId)
+        ? state.unlockedPlatforms
+        : [...state.unlockedPlatforms, platId],
+      flags: { ...state.flags, hardwareLab: true },
+      dirty: true,
+      notifications: pushNote(
+        state,
+        `Hardware program: ${started.console.name} (${started.console.weeksLeft}w, −${formatCash(started.cost)}).`,
+        "info",
+      ),
+      ledger: applyLedger(state.ledger, {
+        week: state.week,
+        amount: -started.cost,
+        category: "other",
+        label: `Console R&D: ${started.console.name}`,
+        ref: `console-${platId}`,
+      }),
+    });
+    return null;
+  },
+
+  setConsolePricing: (id, retailPrice, royaltyRate) => {
+    const state = get();
+    const price = Math.max(199, Math.min(599, retailPrice));
+    const roy = Math.max(0.1, Math.min(0.3, royaltyRate));
+    set({
+      playerConsoles: (state.playerConsoles ?? []).map((c) =>
+        c.id === id ? { ...c, retailPrice: price, royaltyRate: roy } : c,
+      ),
+      dirty: true,
     });
     return null;
   },

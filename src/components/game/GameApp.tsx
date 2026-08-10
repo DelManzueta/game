@@ -57,6 +57,7 @@ import { GarageLoopFlowchart, ScoringPipelineFlow } from "@/components/game/Loop
 import { MarketScreen } from "@/components/game/MarketScreen";
 import { SalesChart, salesPointsFromGame } from "@/components/game/SalesChart";
 import { CAMPAIGN_CATALOG } from "@/lib/game/commercial/marketing";
+import { HARDWARE_TIERS, type HardwareTierId } from "@/lib/game/tycoonLateMarket";
 import { getPlatformSpec, platformMarketState, weekToCampaignDay } from "@/lib/game/platforms/lifecycle";
 import { SYSTEM_UNLOCKS, describeUnlockRequirements } from "@/lib/game/progression/unlockRegistry";
 import { idealPhaseSliders } from "@/lib/game/classicGdt";
@@ -1348,6 +1349,7 @@ function GamesScreen() {
             >
               Flyer campaign
             </Button>
+            <PatchDlcButtons gameId={selected.id} onMsg={setCampMsg} />
             {campMsg && <p className="w-full text-xs text-muted">{campMsg}</p>}
           </div>
         </div>
@@ -2272,13 +2274,139 @@ function ContractsScreen() {
   );
 }
 
+
+function PatchDlcButtons({ gameId, onMsg }: { gameId: string; onMsg: (s: string) => void }) {
+  const issuePatch = useGame((s) => s.issuePatch);
+  const buildDlc = useGame((s) => s.buildDlc);
+  const g = useGame((s) => s.releasedGames.find((x) => x.id === gameId));
+  if (!g) return null;
+  return (
+    <>
+      {(g.bugs ?? 0) > 0 && (
+        <Button size="sm" variant="secondary" onClick={() => onMsg(issuePatch(gameId) ?? "Patched.")}>
+          Patch (−10 RP)
+        </Button>
+      )}
+      {!g.hasDlc && ["medium", "large", "aaa"].includes(g.size) && (
+        <Button size="sm" variant="secondary" onClick={() => onMsg(buildDlc(gameId) ?? "DLC out.")}>
+          Ship DLC
+        </Button>
+      )}
+      {g.hasDlc && (
+        <span className="text-[10px] font-bold text-good">DLC live · {formatCash(g.dlcRevenue ?? 0)}</span>
+      )}
+    </>
+  );
+}
+
+function HardwareLabScreen() {
+  const consoles = useGame((s) => s.playerConsoles) ?? [];
+  const cash = useGame((s) => s.cash);
+  const office = useGame((s) => s.office);
+  const rp = useGame((s) => s.researchPoints);
+  const startPlayerConsole = useGame((s) => s.startPlayerConsole);
+  const setConsolePricing = useGame((s) => s.setConsolePricing);
+  const [msg, setMsg] = useState("");
+  const [name, setName] = useState("Forge Station");
+  const unlocked = office >= 3 || cash >= 7_500_000;
+
+  return (
+    <div className="space-y-3">
+      <div className="game-panel px-4 py-3 text-center">
+        <h2 className="text-xl font-bold text-fg">Hardware Lab</h2>
+        <p className="text-xs text-muted">
+          Module 13 · own console · first-party synergy · third-party royalties
+        </p>
+      </div>
+      {!unlocked && (
+        <p className="text-center text-sm text-muted">
+          Unlock near office 3+ with ~$15M capital. Cash now {formatCash(cash)}.
+        </p>
+      )}
+      {msg && <p className="text-center text-sm text-warn">{msg}</p>}
+      <ul className="space-y-2">
+        {consoles.map((c) => (
+          <li key={c.id} className="rounded-xl border border-border bg-paper p-3">
+            <div className="font-bold text-fg">{c.name}</div>
+            <p className="text-xs text-muted">
+              {c.status === "developing"
+                ? `Developing · ${c.weeksLeft}w left`
+                : `Shipping · share ${c.marketShare.toFixed(2)} · ${c.unitsSold.toLocaleString()} boxes`}
+            </p>
+            {c.status === "shipping" && (
+              <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                <label className="flex items-center gap-1 text-muted">
+                  Price
+                  <input
+                    type="number"
+                    className="w-20 rounded border border-border bg-elevated px-1 py-0.5 tabular text-fg"
+                    value={c.retailPrice}
+                    min={199}
+                    max={599}
+                    onChange={(e) =>
+                      setConsolePricing(c.id, Number(e.target.value), c.royaltyRate)
+                    }
+                  />
+                </label>
+                <label className="flex items-center gap-1 text-muted">
+                  Royalty %
+                  <input
+                    type="number"
+                    className="w-16 rounded border border-border bg-elevated px-1 py-0.5 tabular text-fg"
+                    value={Math.round(c.royaltyRate * 100)}
+                    min={10}
+                    max={30}
+                    onChange={(e) =>
+                      setConsolePricing(c.id, c.retailPrice, Number(e.target.value) / 100)
+                    }
+                  />
+                </label>
+                <span className="text-subtle">
+                  {c.retailPrice < 299 ? "Loss-leader share boost" : "Margin play"}
+                </span>
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+      {unlocked && (
+        <div className="rounded-xl border border-border bg-elevated p-3">
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Console name" />
+          <div className="mt-2 space-y-2">
+            {(Object.keys(HARDWARE_TIERS) as HardwareTierId[]).map((tier) => {
+              const def = HARDWARE_TIERS[tier];
+              return (
+                <button
+                  key={tier}
+                  type="button"
+                  className="flex w-full items-center justify-between rounded-lg border border-border bg-paper px-3 py-2 text-left text-sm"
+                  onClick={() => setMsg(startPlayerConsole(tier, name) ?? "Program started.")}
+                >
+                  <span>
+                    <span className="font-bold text-fg">{def.name}</span>
+                    <span className="block text-[11px] text-muted">
+                      Share base {def.base_market_share} · {def.rp_cost} RP
+                    </span>
+                  </span>
+                  <span className="tabular font-bold text-accent">{formatCash(def.dev_cost)}</span>
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-2 text-[10px] text-subtle">RP {Math.floor(rp)} · first-party games free license + 1.15× points</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SettingsScreen() {
   const saveGame = useGame((s) => s.saveGame);
   const setModal = useGame((s) => s.setModal);
   const returnToMenu = useGame((s) => s.returnToMenu);
   const setScreen = useGame((s) => s.setScreen);
   const exportSaveMatrix = useGame((s) => s.exportSaveMatrix);
-  const [panel, setPanel] = useState<"unlocks" | "contracts" | "none">("unlocks");
+  const [panel, setPanel] = useState<"unlocks" | "contracts" | "hardware" | "none">("unlocks");
   const [matrix, setMatrix] = useState("");
   return (
     <div className="mx-auto max-w-lg space-y-3 px-1 pb-4 pt-1">
@@ -2293,6 +2421,9 @@ function SettingsScreen() {
         <Button size="sm" variant={panel === "contracts" ? "primary" : "secondary"} onClick={() => setPanel("contracts")}>
           Contracts
         </Button>
+        <Button size="sm" variant={panel === "hardware" ? "primary" : "secondary"} onClick={() => setPanel("hardware")}>
+          Hardware
+        </Button>
         <Button size="sm" variant="secondary" onClick={() => setScreen("staff")}>
           People
         </Button>
@@ -2305,6 +2436,7 @@ function SettingsScreen() {
       </div>
       {panel === "unlocks" && <UnlocksScreen embedded />}
       {panel === "contracts" && <ContractsScreen />}
+      {panel === "hardware" && <HardwareLabScreen />}
       <div className="space-y-2">
         <Button className="w-full" variant="secondary" onClick={() => saveGame()}>
           Save campaign

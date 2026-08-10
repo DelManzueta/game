@@ -323,6 +323,10 @@ export interface ReleasedGame {
   platformId: string;
   /** Module 9 ports */
   secondaryPlatformIds?: string[];
+  /** Module 12 */
+  patchSalesBoost?: number;
+  hasDlc?: boolean;
+  dlcRevenue?: number;
   audience: AudienceId;
   size: GameSize;
   engineId: string;
@@ -599,6 +603,10 @@ export interface GameState {
   researchPipeline?: import("./research/types").ResearchPipelineState;
   /** Part 2: campaign difficulty (economy/uncertainty only). */
   difficulty?: import("./research/types").DifficultyConfig;
+  /** Module 13 — proprietary consoles */
+  playerConsoles?: import("./tycoonLateMarket").PlayerConsole[];
+  /** Module 11 — last awards year resolved */
+  lastAwardsYear?: number;
   /** Module 7 — last week a tycoon rival released (every 6w). */
   lastRivalReleaseWeek?: number;
   /** Module 7 — rotating rival index 0..2. */

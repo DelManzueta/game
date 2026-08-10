@@ -368,7 +368,19 @@ export function getGenre(id: GenreId) {
 }
 export function getPlatform(id: string) {
   if (id === CUSTOM_CONSOLE.id) return CUSTOM_CONSOLE;
-  return PLATFORMS.find((p) => p.id === id)!;
+  // Module 13 — first-party player consoles (dynamic ids)
+  if (id.startsWith("console_")) {
+    return {
+      ...CUSTOM_CONSOLE,
+      id,
+      name: "Studio Console",
+      short: "HW",
+      licenseCost: 0,
+      marketSize: 1.15,
+      year: 1990,
+    };
+  }
+  return PLATFORMS.find((p) => p.id === id) ?? PLATFORMS[0]!;
 }
 
 export function defaultSliders(genreId: GenreId): Record<DevField, number> {
