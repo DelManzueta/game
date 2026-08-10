@@ -1,3 +1,5 @@
+import { BENCH_CATEGORIES, HIGH_DENSITY, type BenchCategoryId } from "./officeWorkbench";
+
 /**
  * Module 23 — Hardware Accessories & Physical Merchandise
  * Setup fees · unit cost · retail margin · 16-week shelf · loss-leader fans
@@ -49,7 +51,7 @@ export const HARDWARE_SHELF_WEEKS = 16;
 export type HardwareProduct = {
   id: string;
   name: string;
-  categoryId: AccessoryCategoryId;
+  categoryId: AccessoryCategoryId | string;
   categoryLabel: string;
   retailPrice: number;
   unitCost: number;
@@ -59,6 +61,10 @@ export type HardwareProduct = {
   unitsSold: number;
   marginEarned: number;
   lossLeader: boolean;
+  /** Module 23.5 — manual workbench (clutter tax, longer fab) */
+  workbenchMode?: boolean;
+  /** Weeks until first units ship (6 on workbench) */
+  fabWeeksLeft?: number;
 };
 
 /** Market adoption pool at launch. */
@@ -148,4 +154,61 @@ export function setupCostCheck(
   if (cash < c.setupCost) return `Need $${c.setupCost.toLocaleString()} setup.`;
   if (rp < c.rpCost) return `Need ${c.rpCost} RP.`;
   return null;
+}
+
+
+
+export function createWorkbenchProduct(opts: {
+  id: string;
+  name: string;
+  categoryId: BenchCategoryId;
+  retailPrice: number;
+  fans: number;
+}): HardwareProduct {
+  const cat = BENCH_CATEGORIES[opts.categoryId];
+  let pool = Math.round(300 + opts.fans * 0.35);
+  const lossLeader = opts.retailPrice < cat.unitCost;
+  if (lossLeader) pool = Math.round(pool * 1.7);
+  const life = HIGH_DENSITY.shelfWeeks;
+  return {
+    id: opts.id,
+    name: opts.name.trim() || cat.label,
+    categoryId: cat.id,
+    categoryLabel: cat.label,
+    retailPrice: opts.retailPrice,
+    unitCost: cat.unitCost,
+    remainingWeeks: life,
+    totalLifespan: life,
+    weeklyDistributionPoolBase: Math.max(1, Math.round(pool / life)),
+    unitsSold: 0,
+    marginEarned: 0,
+    lossLeader,
+    workbenchMode: true,
+    fabWeeksLeft: HIGH_DENSITY.fabWeeks,
+  };
+}
+
+/** Advance fab; only sell when fabWeeksLeft is 0. */
+export function processHardwareWeekWithFab(products: HardwareProduct[]): {
+  products: HardwareProduct[];
+  cashDelta: number;
+  fansDelta: number;
+  units: number;
+} {
+  const ready: HardwareProduct[] = [];
+  const fabricating: HardwareProduct[] = [];
+  for (const p of products) {
+    if ((p.fabWeeksLeft ?? 0) > 0) {
+      fabricating.push({ ...p, fabWeeksLeft: (p.fabWeeksLeft ?? 1) - 1 });
+    } else {
+      ready.push(p);
+    }
+  }
+  const sold = processHardwareWeek(ready);
+  return {
+    products: [...fabricating, ...sold.products],
+    cashDelta: sold.cashDelta,
+    fansDelta: sold.fansDelta,
+    units: sold.units,
+  };
 }

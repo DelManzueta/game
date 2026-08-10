@@ -166,6 +166,17 @@ import {
   sizesForOffice,
   PROGRESSION_STAGES,
 } from "./progressionStages";
+import {
+  HIGH_DENSITY,
+  canOfferHighDensity,
+  isHighDensity,
+  clutterTax,
+  staffCapForOffice,
+  RECRUIT,
+  BENCH_CATEGORIES,
+  type BenchCategoryId,
+} from "./officeWorkbench";
+import { createWorkbenchProduct, processHardwareWeekWithFab } from "./hardwareMerch";
 import { tycoonHypeDecay, tycoonStaffEnergyTick, TYCOON_DEFAULTS } from "./tycoonEngine";
 import {
   competitorRelease,
@@ -360,13 +371,13 @@ function mergeSlidersFromConfigs(cfg: GameProject["stageConfigs"]): Record<DevFi
 export function availableSizes(
   researched: string[],
   unlocks: Record<string, UnlockState>,
-  opts?: { office?: number; staffCount?: number },
+  opts?: { office?: number; staffCount?: number; officeSubTier?: number },
 ): GameSize[] {
   const office = opts?.office ?? 1;
   const staffCount = opts?.staffCount ?? 1;
   const byOffice = new Set(sizesForOffice(office));
   const sizes: GameSize[] = ["small"];
-  // Medium: office 2+ and (research OR custom engine later — research gate soft)
+  // Medium: office 2+
   if (
     byOffice.has("medium") &&
     (researched.includes("medium_games") ||
@@ -376,9 +387,11 @@ export function availableSizes(
   ) {
     sizes.push("medium");
   }
+  // Large: office 3+ OR High-Density 2.5 with research
+  const largeEarly = office === 2 && isHighDensity(opts?.officeSubTier);
   if (
-    byOffice.has("large") &&
-    (researched.includes("large_games") || unlocks.large_games === "owned") &&
+    (byOffice.has("large") || largeEarly) &&
+    (researched.includes("large_games") || unlocks.large_games === "owned" || largeEarly) &&
     staffCount >= 2
   ) {
     sizes.push("large");
@@ -494,6 +507,7 @@ function initialState(): GameState {
     hardwareProducts: [],
     officeEnteredYear: START_YEAR,
     officeEnteredMonth: 1,
+    officeSubTier: 2.0,
     knownCombos: {},
     playerConsoles: [],
     lastAwardsYear: 0,
@@ -1663,6 +1677,13 @@ interface Actions {
   refactorEngine: (engineId?: string) => string | null;
   sendStaffOnVacation: (staffId: string) => string | null;
   signOpsPublisher: (publisherId: string) => string | null;
+  renovateHighDensity: () => string | null;
+  launchWorkbenchAccessory: (
+    categoryId: BenchCategoryId,
+    name: string,
+    retailPrice: number,
+  ) => string | null;
+  runRecruitCampaign: (tier: "local" | "headhunter") => string | null;
   launchAccessory: (
     categoryId: AccessoryCategoryId,
     name: string,
@@ -2029,7 +2050,11 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     const payroll = next.staff.reduce((s, m) => s + m.salary, 0);
     next.cash -= payroll / 4;
     if (date.weekOfMonth === 1) {
-      const rent = OFFICE_INFO[next.office].rent;
+      const rent =
+          (next.office === 2 && isHighDensity(next.officeSubTier)
+            ? HIGH_DENSITY.rent
+            : OFFICE_INFO[next.office as 1 | 2 | 3 | 4 | 5].rent) +
+          clutterTax((next.hardwareProducts ?? []).filter((h) => (h.fabWeeksLeft ?? 0) <= 0 || h.workbenchMode).length);
       if (rent > 0) next.cash -= rent;
     }
 
@@ -2463,7 +2488,11 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         next.hype = Math.max(0, next.hype + crisis.hypeDelta);
       }
       if (crisis.chargeRentNow) {
-        const rent = OFFICE_INFO[next.office].rent;
+        const rent =
+          (next.office === 2 && isHighDensity(next.officeSubTier)
+            ? HIGH_DENSITY.rent
+            : OFFICE_INFO[next.office as 1 | 2 | 3 | 4 | 5].rent) +
+          clutterTax((next.hardwareProducts ?? []).filter((h) => (h.fabWeeksLeft ?? 0) <= 0 || h.workbenchMode).length);
         if (rent > 0) {
           next.cash -= rent;
           next.ledger = applyLedger(next.ledger, {
@@ -2800,6 +2829,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     const sizes = availableSizes(state.researched, state.unlocks, {
       office: state.office,
       staffCount: state.staff.length,
+      officeSubTier: state.officeSubTier,
     });
     if (!sizes.includes(partial.size)) return "Game size locked — research it first.";
     const cost = SIZE_STATS[partial.size].cost + (partial.marketingSpend ?? 0);
@@ -3283,7 +3313,11 @@ export const useGame = create<GameState & Actions>((set, get) => ({
   hireStaff: (candidate) => {
     const state = get();
     if (state.unlocks.hiring !== "owned" && state.office < 2) return "Hiring locked.";
-    const cap = OFFICE_INFO[state.office].capacity;
+    const cap = staffCapForOffice({
+      office: state.office,
+      officeSubTier: state.officeSubTier,
+      baseCapacity: OFFICE_INFO[state.office as 1 | 2 | 3 | 4 | 5].capacity,
+    });
     if (state.staff.length >= cap) return "No desk space.";
     // Signing package: 1× annual salary equivalent, hard cap $2M
     const packageCost = Math.min(Math.max(candidate.salary, 1), MAX_HIRE_BUDGET);
@@ -4111,6 +4145,100 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         category: "other",
         label: `Publisher advance: ${offer.company}`,
         ref: `ops-pub-${offer.id}`,
+      }),
+    });
+    return null;
+  },
+
+  renovateHighDensity: () => {
+    const state = get();
+    if (state.office !== 2) return "High-Density Bay is a Tech Park (Level 2) renovation.";
+    if (isHighDensity(state.officeSubTier)) return "Already renovated to High-Density Bay.";
+    if (state.cash < HIGH_DENSITY.cashCost) return `Need ${formatCash(HIGH_DENSITY.cashCost)}.`;
+    set({
+      cash: state.cash - HIGH_DENSITY.cashCost,
+      officeSubTier: 2.5,
+      dirty: true,
+      notifications: pushNote(
+        state,
+        `High-Density Bay online — seats ${HIGH_DENSITY.staffMax}, rent ${formatCash(HIGH_DENSITY.rent)}/mo, workbench unlocked.`,
+        "good",
+      ),
+      ledger: applyLedger(state.ledger, {
+        week: state.week,
+        amount: -HIGH_DENSITY.cashCost,
+        category: "other",
+        label: "High-Density Bay renovation",
+        ref: `hd-reno-w${state.week}`,
+      }),
+      unlocks: { ...state.unlocks, hiring: "owned" },
+    });
+    return null;
+  },
+
+  launchWorkbenchAccessory: (categoryId, name, retailPrice) => {
+    const state = get();
+    if (state.office < 2) return "Need Tech Park office.";
+    if (state.office === 2 && !isHighDensity(state.officeSubTier)) {
+      return "Renovate to High-Density Bay (L2.5) first.";
+    }
+    if (!(categoryId in BENCH_CATEGORIES)) return "Unknown bench category.";
+    if (!Number.isFinite(retailPrice) || retailPrice <= 0) return "Retail must be > 0.";
+    const cat = BENCH_CATEGORIES[categoryId as BenchCategoryId];
+    if (state.cash < cat.setupCost) return `Need ${formatCash(cat.setupCost)}.`;
+    if (state.researchPoints < cat.rpCost) return `Need ${cat.rpCost} RP.`;
+    const product = createWorkbenchProduct({
+      id: uid("hwb"),
+      name,
+      categoryId: categoryId as BenchCategoryId,
+      retailPrice,
+      fans: state.fans,
+    });
+    set({
+      cash: state.cash - cat.setupCost,
+      researchPoints: state.researchPoints - cat.rpCost,
+      hardwareProducts: [product, ...(state.hardwareProducts ?? [])],
+      dirty: true,
+      notifications: pushNote(
+        state,
+        `Workbench fab: "${product.name}" — ${HIGH_DENSITY.fabWeeks}w hand assembly · +${formatCash(HIGH_DENSITY.clutterTaxPerLine)}/mo clutter.`,
+        "info",
+      ),
+      ledger: applyLedger(state.ledger, {
+        week: state.week,
+        amount: -cat.setupCost,
+        category: "research",
+        label: `Workbench setup: ${cat.label}`,
+        ref: `bench-${product.id}`,
+      }),
+    });
+    return null;
+  },
+
+  runRecruitCampaign: (tier) => {
+    const state = get();
+    const cfg = tier === "headhunter" ? RECRUIT.headhunter : RECRUIT.local;
+    if (tier === "headhunter" && state.office === 2 && !isHighDensity(state.officeSubTier)) {
+      return "Headhunter requires High-Density Bay (L2.5).";
+    }
+    if (tier === "headhunter" && state.office < 2) return "Headhunter needs Tech Park+.";
+    if (state.cash < cfg.cost) return `Need ${formatCash(cfg.cost)}.`;
+    const refresh = get().refreshCandidates;
+    if (typeof refresh === "function") refresh();
+    set({
+      cash: get().cash - cfg.cost,
+      dirty: true,
+      notifications: pushNote(
+        get(),
+        `${cfg.label} campaign (−${formatCash(cfg.cost)}). Check People for applicants.`,
+        "info",
+      ),
+      ledger: applyLedger(get().ledger, {
+        week: get().week,
+        amount: -cfg.cost,
+        category: "other",
+        label: cfg.label,
+        ref: `recruit-${tier}-w${get().week}`,
       }),
     });
     return null;

@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Studio OS v3.7.0 // Workbench Lab</title>
+<style>
+:root{--bg:#020204;--panel:rgba(7,7,13,.96);--box:#0b0b14;--border:#18182b;--cyan:#00f0ff;--violet:#a600ff;--lime:#00ff66;--rose:#ff0055;--gold:#ffcc00;--text:#f0f0f5;--dim:#5c5c75}
+*{box-sizing:border-box}body{margin:0;padding:16px;font-family:system-ui,sans-serif;background:linear-gradient(145deg,#0a0416,#020204 60%);color:var(--text)}
+h1{font-size:1.1rem;letter-spacing:1px;text-transform:uppercase;border-bottom:1px solid var(--border);padding-bottom:10px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
+.grid{display:grid;grid-template-columns:minmax(260px,380px) 1fr;gap:16px;max-width:1600px;margin:0 auto}
+@media(max-width:900px){.grid{grid-template-columns:1fr}}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px}
+.hud{display:grid;grid-template-columns:1fr 1fr;gap:8px}.tile{background:var(--box);border:1px solid var(--border);border-left:4px solid var(--violet);padding:10px;border-radius:8px}
+.tile.lime{border-left-color:var(--lime)}.tile.cyan{border-left-color:var(--cyan)}.tile.gold{border-left-color:var(--gold)}
+.lbl{font-size:.62rem;color:var(--dim);text-transform:uppercase;font-weight:700}.val{font:900 1.05rem monospace}
+.tabs{display:flex;flex-wrap:wrap;gap:4px;background:#0006;padding:4px;border-radius:6px;border:1px solid var(--border);margin:12px 0}
+.tab{flex:1;min-width:4.5rem;background:0;border:0;color:var(--dim);padding:10px 4px;font-size:.65rem;font-weight:800;text-transform:uppercase;cursor:pointer;border-radius:4px}
+.tab.on{background:#131326;color:var(--cyan)}
+.btn{width:100%;padding:12px;border:0;border-radius:6px;font-weight:800;font-size:.72rem;text-transform:uppercase;cursor:pointer;background:linear-gradient(135deg,#0044ff,var(--cyan));color:#fff;margin-top:8px}
+.btn.ghost{background:#131326;border:1px solid var(--border)}.btn.violet{background:linear-gradient(135deg,var(--violet),#4a0072)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+label{display:block;font-size:.62rem;color:var(--dim);font-weight:700;margin:10px 0 4px;text-transform:uppercase}
+input,select{width:100%;padding:10px;background:#080811;color:#fff;border:1px solid var(--border);border-radius:6px}
+.row{background:var(--box);border:1px solid var(--border);border-radius:8px;padding:12px;display:grid;grid-template-columns:2fr 1fr auto;gap:8px;align-items:center;margin-bottom:8px;font-size:.8rem}
+.log{height:160px;overflow:auto;background:#020204;border:1px solid var(--border);border-radius:8px;padding:10px;font:11px monospace;margin-top:12px}
+.ok{color:var(--lime)}.err{color:var(--rose)}.warn{color:var(--gold)}.view{display:none}.view.on{display:block}
+.alert{display:none;padding:12px;background:rgba(166,0,255,.15);border:1px solid var(--violet);border-radius:8px;margin:12px 0}
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.card{background:var(--box);border:1px solid var(--border);border-radius:6px;padding:10px;text-align:center;cursor:pointer;font-size:.72rem}
+.card.on{border-color:var(--cyan);box-shadow:0 0 10px #00f0ff33}
+</style></head><body>
+<h1><span>CORE ENGINE v3.7.0 // WORKBENCH</span><span id="clock" style="font-family:monospace;color:var(--dim)">Y1 M1 W1</span></h1>
+<div class="grid">
+<div class="panel">
+  <div class="hud">
+    <div class="tile lime"><div class="lbl">Capital</div><div class="val" id="cash">$460,000</div></div>
+    <div class="tile"><div class="lbl">RP</div><div class="val" id="rp">55</div></div>
+    <div class="tile cyan"><div class="lbl">Fans</div><div class="val" id="fans">4,500</div></div>
+    <div class="tile gold"><div class="lbl">Office</div><div class="val" id="tier">Tech Park L1</div></div>
+  </div>
+  <div class="alert" id="renoAlert">
+    <b style="font-size:.75rem">EXPANSION: High-Density Bay</b>
+    <p style="font-size:.7rem;margin:6px 0">Seats 6 · workbench · headhunter · rent $42k. Cost $120k.</p>
+    <button class="btn violet" onclick="renovate()">Renovate (−$120k)</button>
+  </div>
+  <div style="background:var(--box);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:.8rem;margin-top:10px">
+    Staff <span id="staff" style="color:var(--cyan);font-family:monospace">1 / 5</span><br>
+    <span id="rent" style="color:var(--dim)">Monthly burn: $25,000</span>
+  </div>
+  <div class="log" id="log"></div>
+</div>
+<div class="panel">
+  <div class="tabs">
+    <button class="tab on" onclick="tab('dev',this)">Sandbox</button>
+    <button class="tab" onclick="tab('staff',this)">Personnel</button>
+    <button class="tab" id="benchTab" onclick="tab('bench',this)">🔒 Workbench</button>
+    <button class="tab" onclick="tab('store',this)">Store</button>
+    <button class="tab" onclick="tab('save',this)">Save</button>
+  </div>
+  <div id="dev" class="view on">
+    <label>Title</label><input id="title" value="Project Alpha"/>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div><label>Topic</label><select id="topic"><option>Sci-Fi</option><option>City</option></select></div>
+      <div><label>Genre</label><select id="genre"><option>Action</option><option>Simulation</option></select></div>
+    </div>
+    <label>Size</label>
+    <select id="size"><option value="Small">Small (4w)</option><option value="Medium">Medium (8w)</option><option value="Large" id="optLarge" disabled>Large (needs L2.5)</option></select>
+    <button class="btn" onclick="ship()">Compile & Ship</button>
+    <button class="btn ghost" onclick="tick(1)">Idle week</button>
+  </div>
+  <div id="staff" class="view">
+    <button class="btn" onclick="recruit('local')">Local Job Ad ($15k)</button>
+    <button class="btn ghost" id="hh" disabled onclick="recruit('hh')">Headhunter ($40k) — L2.5</button>
+    <div id="pool" style="margin-top:12px"></div>
+  </div>
+  <div id="bench" class="view">
+    <p style="font-size:.75rem;color:var(--dim)">Manual fab 6 weeks · +$1,500 clutter/line/mo · 12w shelf</p>
+    <div class="cards">
+      <div class="card on" id="b0" onclick="pickB(0)">Apparel<br>$12k · $2.50</div>
+      <div class="card" id="b1" onclick="pickB(1)">Arcade Stick<br>$65k · $11.50</div>
+      <div class="card" id="b2" onclick="pickB(2)">Gamepad<br>$85k · $14</div>
+    </div>
+    <label>SKU</label><input id="hwName" value="Studio Merch"/>
+    <label>Retail</label><input id="hwPrice" type="number" step="0.01" value="19.99"/>
+    <button class="btn" onclick="spinBench()">Spin Workbench (6w)</button>
+  </div>
+  <div id="store" class="view"><div id="shelf"></div></div>
+  <div id="save" class="view">
+    <button class="btn" onclick="dl()">Download JSON</button>
+    <textarea id="paste" rows="6" style="width:100%;margin-top:8px;background:#080811;color:#fff;border:1px solid var(--border);border-radius:6px;font:11px monospace"></textarea>
+    <button class="btn ghost" onclick="ld()">Load</button>
+  </div>
+</div>
+</div>
+<script>
+const BENCH=[
+  {setup:12000,rp:20,unit:2.5,label:'Studio Apparel'},
+  {setup:65000,rp:50,unit:11.5,label:'Arcade Joystick'},
+  {setup:85000,rp:60,unit:14,label:'Pro Gamepad'}
+];
+let bi=0;
+let S={
+  year:1,month:1,week:1,cash:460000,rp:55,fans:4500,trailing:35,
+  officeStage:2.0,maxStaff:5,baseRent:25000,payroll:25000,staff:1,
+  engineUses:0,engineAge:0,market:[],hardware:[],pool:[]
+};
+function log(m,c){const e=document.getElementById('log');const d=document.createElement('div');d.className=c||'';d.textContent='[Y'+S.year+' M'+S.month+' W'+S.week+'] '+m;e.appendChild(d);e.scrollTop=e.scrollHeight}
+function clutter(){return S.hardware.length*1500}
+function burn(){return (S.officeStage>=2.5?42000:S.baseRent)+clutter()}
+function hud(){
+  clock.textContent='Y'+S.year+' M'+S.month+' W'+S.week;
+  cash.textContent='$'+Math.round(S.cash).toLocaleString();
+  rp.textContent=S.rp;fans.textContent=Math.floor(S.fans).toLocaleString();
+  tier.textContent=S.officeStage>=2.5?'Tech Park L2.5':'Tech Park L1';
+  staff.textContent=S.staff+' / '+S.maxStaff;
+  rent.textContent='Monthly burn: $'+(burn()+Math.max(0,S.payroll-25000)).toLocaleString()+' (incl clutter $'+clutter()+')';
+  renoAlert.style.display=(S.officeStage===2&&S.cash>=450000)?'block':'none';
+  const hd=S.officeStage>=2.5;
+  optLarge.disabled=!hd;
+  hh.disabled=!hd;hh.textContent=hd?'Headhunter ($40k)':'Headhunter — L2.5';
+  benchTab.textContent=hd?'Workbench':'🔒 Workbench';
+  shelfUI();
+}
+function tab(id,btn){
+  if(id==='bench'&&S.officeStage<2.5){alert('Need High-Density Bay (L2.5)');return}
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('on'));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
+  document.getElementById(id).classList.add('on');btn.classList.add('on');
+}
+function tick(n){
+  for(let i=0;i<n;i++){
+    S.week++;
+    // fab countdown
+    S.hardware.forEach(h=>{if(h.fab>0)h.fab--});
+    if(S.week>4){
+      S.week=1;S.month++;
+      const b=burn()+Math.max(0,S.payroll-25000);
+      S.cash-=b;log('Overhead −$'+b.toLocaleString(),'warn');
+      sellWeek();
+    }
+    if(S.month>12){S.month=1;S.year++;S.engineAge++}
+  }
+  hud();
+}
+function renovate(){
+  if(S.cash<120000)return;
+  S.cash-=120000;S.officeStage=2.5;S.maxStaff=6;S.baseRent=42000;
+  log('High-Density Bay renovated. Workbench + headhunter unlocked.','ok');tick(1);
+}
+function pickB(i){bi=i;document.querySelectorAll('.card').forEach((c,j)=>c.classList.toggle('on',j===i))}
+function spinBench(){
+  if(S.officeStage<2.5){alert('L2.5 required');return}
+  const b=BENCH[bi];const price=+hwPrice.value;const name=hwName.value||b.label;
+  if(!(price>0))return;
+  if(S.cash<b.setup||S.rp<b.rp){log('Setup denied','err');return}
+  S.cash-=b.setup;S.rp-=b.rp;
+  let pool=Math.round(300+S.fans*0.35);
+  if(price<b.unit){pool=Math.round(pool*1.7);log('Loss-leader volume','ok')}
+  S.hardware.push({name,label:b.label,price,unit:b.unit,fab:6,weeks:12,base:Math.max(1,Math.round(pool/12)),sold:0});
+  log('Workbench fab: '+name+' (6w) · +$1500 clutter','ok');tick(1);
+}
+function recruit(kind){
+  const cost=kind==='hh'?40000:15000;
+  if(kind==='hh'&&S.officeStage<2.5){log('Headhunter locked','err');return}
+  if(S.cash<cost){log('No cash','err');return}
+  S.cash-=cost;S.pool=[];
+  const min=kind==='hh'?55:15,max=kind==='hh'?85:35;
+  const names=['Alex Rivera','Jordan Lee','Sam Ortiz','Casey Kim'];
+  for(let i=0;i<3;i++){
+    const t=min+Math.floor(Math.random()*(max-min+1));
+    const d=min+Math.floor(Math.random()*(max-min+1));
+    S.pool.push({name:names[i],tech:t,design:d,salary:Math.round((t+d)*12.5)});
+  }
+  log((kind==='hh'?'Headhunter':'Local')+' campaign complete','ok');
+  poolUI();hud();
+}
+function poolUI(){
+  const el=document.getElementById('pool');
+  if(!S.pool.length){el.innerHTML='<div style="color:var(--dim);font-style:italic;padding:12px;text-align:center">No applicants.</div>';return}
+  el.innerHTML='';
+  S.pool.forEach((c,i)=>{
+    const r=document.createElement('div');r.className='row';
+    r.innerHTML='<div><b>'+c.name+'</b><br><span style="font-size:.7rem;color:var(--dim)">T'+c.tech+' D'+c.design+'</span></div><div style="color:var(--gold)">$'+c.salary.toLocaleString()+'/mo</div>';
+    const b=document.createElement('button');b.className='btn';b.style.width='auto';b.style.margin=0;b.style.padding='6px 10px';b.textContent='Hire';
+    b.onclick=()=>{
+      if(S.staff>=S.maxStaff){alert('Staff cap');return}
+      S.pool.splice(i,1);S.staff++;S.payroll+=c.salary;log('Hired '+c.name,'ok');poolUI();hud();
+    };
+    r.appendChild(b);el.appendChild(r);
+  });
+}
+function ship(){
+  const size=document.getElementById('size').value;
+  let w={Small:4,Medium:8,Large:12}[size];
+  if(size==='Large'&&S.officeStage>=2.5){w=14;log('Large on L2.5: +2w density lag','warn')}
+  if(size==='Large'&&S.officeStage<2.5){alert('Large locked');return}
+  const topic=topic.value,genre=genre.value,title=document.getElementById('title').value;
+  let pts=35+Math.random()*20;
+  const combo=((genre==='Action'&&topic==='Sci-Fi')||(genre==='Simulation'&&topic==='City'))?1.3:0.7;
+  pts*=combo;
+  let score=Math.max(1,Math.min(10,Math.round(((pts/S.trailing)*7)*10)/10));
+  S.trailing=S.trailing*0.7+pts*0.3;S.engineUses++;
+  const base=pts*Math.pow(score,2.3)*22;
+  S.market.push({title,info:topic+'/'+genre+' ['+size+']',score,weeks:12,base:Math.round(base/12)});
+  S.rp+=6+Math.floor(Math.random()*6);
+  log('Shipped '+title+' ★'+score,'ok');tick(w);
+}
+function sellWeek(){
+  S.market.forEach(g=>{
+    if(g.weeks<=0)return;g.weeks--;
+    S.cash+=g.base*9.99*0.85;
+    S.fans=Math.max(0,S.fans+Math.round(g.base*0.03*((g.score-5.5)/4.5)));
+  });
+  S.market=S.market.filter(g=>g.weeks>0);
+  S.hardware.forEach(h=>{
+    if(h.fab>0||h.weeks<=0)return;
+    const decay=Math.pow(h.weeks/12,1.8);
+    let u=Math.max(1,Math.round(h.base*decay));
+    h.weeks--;h.sold+=u;
+    S.cash+=u*(h.price-h.unit);
+    S.fans=Math.max(0,S.fans+Math.round(u*(h.price<h.unit?0.06:0.01)));
+  });
+  S.hardware=S.hardware.filter(h=>h.weeks>0||h.fab>0);
+}
+function shelfUI(){
+  const el=document.getElementById('shelf');
+  if(!S.market.length&&!S.hardware.length){el.innerHTML='<div style="text-align:center;color:var(--dim);padding:30px">Empty shelves.</div>';return}
+  el.innerHTML='';
+  S.market.forEach(p=>{
+    const d=document.createElement('div');d.className='row';
+    d.innerHTML='<div><b>[SW] '+p.title+'</b><br><span style="font-size:.7rem;color:var(--dim)">'+p.info+'</span></div><div style="color:var(--cyan);font-weight:800">★ '+p.score+'</div><div style="color:var(--rose);font-size:.7rem">'+p.weeks+'w</div>';
+    el.appendChild(d);
+  });
+  S.hardware.forEach(h=>{
+    const d=document.createElement('div');d.className='row';
+    const st=h.fab>0?('FAB '+h.fab+'w'):(h.weeks+'w left');
+    d.innerHTML='<div><b>[HW] '+h.name+'</b><br><span style="font-size:.7rem;color:var(--dim)">'+h.label+' · '+h.sold+' sold</span></div><div style="color:var(--lime)">$'+(h.price-h.unit).toFixed(2)+'/u</div><div style="color:var(--gold);font-size:.7rem">'+st+'</div>';
+    el.appendChild(d);
+  });
+}
+function dl(){
+  const payload={system_version:'3.7.0',chronometer:{year:S.year,month:S.month,week:S.week},balances:{cash_liquidity:S.cash,research_units:S.rp,fan_footprints:S.fans},office_progression:{tier_level_index:S.officeStage,max_staff_capacity:S.maxStaff,monthly_base_rent:S.baseRent},hardware_workbench_ledger:S.hardware,state:S};
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}));a.download='studio_os_v37.json';a.click();
+}
+function ld(){try{const d=JSON.parse(document.getElementById('paste').value);if(d.state)S=d.state;log('Loaded','ok');hud()}catch(e){log('Bad JSON','err')}}
+log('Peripheral workbench routing linked to L2.5 layer.','ok');hud();
+</script></body></html>

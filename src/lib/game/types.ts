@@ -641,6 +641,8 @@ export interface GameState {
   /** Calendar year when current office level was entered */
   officeEnteredYear?: number;
   officeEnteredMonth?: number;
+  /** 2.0 base Tech Park · 2.5 High-Density Bay (Module 23.5) */
+  officeSubTier?: number;
   /** Known combo labels after post-mortem */
   knownCombos?: Record<string, import("./tycoonRiskAnalytics").MatchLabel>;
   playerConsoles?: import("./tycoonLateMarket").PlayerConsole[];

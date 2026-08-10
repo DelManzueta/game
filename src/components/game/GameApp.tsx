@@ -274,6 +274,14 @@ function MainMenu() {
           >
             Studio OS v3.5 · accessory factory
           </a>
+          <a
+            href="/studio-os-v37.html"
+            target="_blank"
+            rel="noreferrer"
+            className="block w-full rounded-lg border border-border bg-elevated px-3 py-2.5 text-center text-xs font-bold uppercase tracking-wide text-muted transition hover:border-accent hover:text-accent"
+          >
+            Studio OS v3.7 · High-Density workbench
+          </a>
         </div>
       </div>
     </div>
@@ -2560,16 +2568,18 @@ function HardwareLabScreen() {
   const setConsolePricing = useGame((s) => s.setConsolePricing);
   const [msg, setMsg] = useState("");
   const [name, setName] = useState("Forge Station");
-  const accessoriesOpen = office >= 3;
+  const officeSubTier = useGame((s) => s.officeSubTier) ?? 2;
+  const highDensity = office === 2 && officeSubTier >= 2.5;
+  const accessoriesOpen = office >= 3 || highDensity;
   const consoleOpen = office >= 4;
-  const unlocked = accessoriesOpen || consoleOpen;
+  const unlocked = accessoriesOpen || consoleOpen || office === 2;
 
   return (
     <div className="space-y-3">
       <div className="game-panel px-4 py-3 text-center">
         <h2 className="text-xl font-bold text-fg">Hardware Lab</h2>
         <p className="text-xs text-muted">
-          L3 Mega-Complex: accessories · L4 R&D: own consoles & royalties
+          L2.5 workbench · L3 factory · L4 consoles
         </p>
       </div>
       {!unlocked && (
@@ -2652,7 +2662,130 @@ function HardwareLabScreen() {
           </div>
         </div>
       )}
-      {accessoriesOpen && <AccessoryFactoryPanel onMsg={setMsg} />}
+      <HighDensityAndWorkbench msg={msg} setMsg={setMsg} />
+      {office >= 3 && <AccessoryFactoryPanel onMsg={setMsg} />}
+    </div>
+  );
+}
+
+function HighDensityAndWorkbench({
+  msg,
+  setMsg,
+}: {
+  msg: string;
+  setMsg: (m: string) => void;
+}) {
+  const office = useGame((s) => s.office);
+  const cash = useGame((s) => s.cash);
+  const officeSubTier = useGame((s) => s.officeSubTier) ?? 2;
+  const renovateHighDensity = useGame((s) => s.renovateHighDensity);
+  const launchWorkbenchAccessory = useGame((s) => s.launchWorkbenchAccessory);
+  const runRecruitCampaign = useGame((s) => s.runRecruitCampaign);
+  const products = useGame((s) => s.hardwareProducts) ?? [];
+  const highDensity = office === 2 && officeSubTier >= 2.5;
+  const [cat, setCat] = useState<"apparel" | "arcade_stick" | "gamepad">("apparel");
+  const [sku, setSku] = useState("Workbench Drop");
+  const [price, setPrice] = useState(19.99);
+  const cats = [
+    { id: "apparel" as const, label: "Studio Apparel", setup: 12000, rp: 20, unit: 2.5 },
+    { id: "arcade_stick" as const, label: "Arcade Joystick", setup: 65000, rp: 50, unit: 11.5 },
+    { id: "gamepad" as const, label: "Pro Gamepad", setup: 85000, rp: 60, unit: 14 },
+  ];
+  const sel = cats.find((c) => c.id === cat)!;
+  const margin = price - sel.unit;
+
+  if (office !== 2 && office < 3) return null;
+
+  return (
+    <div className="space-y-2">
+      {office === 2 && !highDensity && cash >= 450_000 && (
+        <div className="rounded-xl border border-accent/40 bg-accent/10 p-3">
+          <p className="text-xs font-bold text-fg">High-Density Bay (L2.5)</p>
+          <p className="mt-1 text-[11px] text-muted">
+            −$120k · seats 6 · rent $42k · workbench + headhunter · +$1.5k clutter/line/mo · 6w fab
+          </p>
+          <Button
+            className="mt-2 w-full"
+            size="sm"
+            onClick={() => setMsg(renovateHighDensity() ?? "Renovated.")}
+          >
+            Renovate (−$120,000)
+          </Button>
+        </div>
+      )}
+      {highDensity && (
+        <>
+          <p className="text-center text-[11px] font-semibold text-good">
+            High-Density Bay · workbench + headhunter online
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="secondary" onClick={() => setMsg(runRecruitCampaign("local") ?? "Local ads.")}>
+              Local ads $15k
+            </Button>
+            <Button size="sm" onClick={() => setMsg(runRecruitCampaign("headhunter") ?? "Headhunter.")}>
+              Headhunter $40k
+            </Button>
+          </div>
+          <div className="rounded-xl border border-border bg-elevated p-3 space-y-2">
+            <p className="text-[10px] font-bold uppercase text-muted">Module 23.5 · Manual Workbench</p>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              {cats.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  className={cnJoin(
+                    "rounded-lg border px-2 py-2 text-left text-xs",
+                    cat === c.id ? "border-accent bg-accent/15 text-fg" : "border-border text-muted",
+                  )}
+                  onClick={() => {
+                    setCat(c.id);
+                    setPrice(c.id === "apparel" ? 19.99 : c.id === "arcade_stick" ? 39.99 : 49.99);
+                  }}
+                >
+                  <div className="font-bold">{c.label}</div>
+                  <div className="text-[10px]">
+                    {formatCash(c.setup)} · {c.rp} RP · unit ${c.unit.toFixed(2)}
+                  </div>
+                </button>
+              ))}
+            </div>
+            <Input value={sku} onChange={(e) => setSku(e.target.value)} />
+            <label className="flex items-center justify-between gap-2 text-xs text-muted">
+              Retail $
+              <input
+                type="number"
+                step="0.01"
+                className="w-28 rounded border border-border bg-paper px-2 py-1 tabular text-fg"
+                value={price}
+                onChange={(e) => setPrice(Number(e.target.value))}
+              />
+            </label>
+            <p className={cnJoin("text-[11px] font-semibold", margin >= 0 ? "text-good" : "text-bad")}>
+              Margin ${margin.toFixed(2)} · 6w fab · 12w shelf
+            </p>
+            <Button
+              className="w-full"
+              onClick={() =>
+                setMsg(launchWorkbenchAccessory(cat, sku, price) ?? "Workbench spinning.")
+              }
+            >
+              Spin workbench (−{formatCash(sel.setup)})
+            </Button>
+            {products.filter((p) => p.workbenchMode).length > 0 && (
+              <ul className="space-y-1 text-xs">
+                {products.filter((p) => p.workbenchMode).map((p) => (
+                  <li key={p.id} className="rounded border border-border bg-paper px-2 py-1">
+                    <b>{p.name}</b> ·{" "}
+                    {(p.fabWeeksLeft ?? 0) > 0
+                      ? `fab ${p.fabWeeksLeft}w left`
+                      : `${p.unitsSold} sold · ${p.remainingWeeks}w`}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }
