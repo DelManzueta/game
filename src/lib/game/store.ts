@@ -175,6 +175,13 @@ import {
   type ConventionFocus,
 } from "./netflixEdition";
 import {
+  consoleLaunchWeekUnits,
+  getReviewerQuotes,
+  processMmoMonth,
+  rollQualityCrisis,
+  type MmoRuntime,
+} from "./hardcoreEngines";
+import {
   canAdvanceOffice,
   normalizeOfficeLevel,
   stageForOffice,
@@ -526,6 +533,7 @@ function initialState(): GameState {
     activeIpLicense: emptyIp(),
     streamerHypeWeeksLeft: 0,
     ipRoyaltyGameIds: [],
+    activeMmos: [],
     knownCombos: {},
     playerConsoles: [],
     lastAwardsYear: 0,
@@ -1019,6 +1027,19 @@ function releaseProject(next: GameState, project: GameProject): GameState {
       productQuality,
     } as unknown as ReturnType<typeof computeReviews>;
 
+    // Dynamic reviewer quotes (Definitive 4.0)
+    {
+      const quotes = getReviewerQuotes(reviews.avg);
+      reviews = {
+        ...reviews,
+        criticReviews: quotes.map((q) => ({
+          name: q.outlet,
+          score: q.score,
+          comment: q.quote,
+        })),
+      } as typeof reviews;
+    }
+
     // Netflix Edition — franchise IP match on ship
     {
       const ipm = ipShipModifiers({
@@ -1483,6 +1504,32 @@ function releaseProject(next: GameState, project: GameProject): GameState {
     ).ipRoyaltyRate;
     (released as { ipLicensed?: boolean }).ipLicensed = true;
   }
+  // MMO lifecycle registration (research mmo + large/aaa or explicit flag)
+  {
+    const mmoOwned =
+      next.researched.includes("mmo") ||
+      next.researched.includes("mmo_games") ||
+      next.unlocks.mmo === "owned" ||
+      !!(scored as { isMmo?: boolean }).isMmo;
+    if (mmoOwned && (scored.size === "large" || scored.size === "aaa" || !!(scored as { isMmo?: boolean }).isMmo)) {
+      const planTotal = (released.weeklySalesLeft ?? []).reduce((a, b) => a + b, 0);
+      const mmo: MmoRuntime = {
+        gameId: released.id,
+        title: released.title,
+        initialUnits: Math.max(2000, planTotal || Math.floor(released.avgReview * 8000)),
+        monthsOnMarket: 0,
+        active: true,
+        lifetimeSubRevenue: 0,
+        lifetimeUpkeep: 0,
+      };
+      next.activeMmos = [mmo, ...(next.activeMmos ?? [])];
+      next.notifications = pushNote(
+        next,
+        `MMO servers online for "${released.title}" — monthly subs $4.99 vs upkeep.`,
+        "info",
+      );
+    }
+  }
   
   // Publisher deal settlement (advance already paid on accept)
   if (next.activePublisherDealId && next.publishingBoard) {
@@ -1761,6 +1808,9 @@ interface Actions {
     ticketPrice: number,
     focus: ConventionFocus,
   ) => string | null;
+  shutdownMmo: (gameId: string) => string | null;
+  acceptCopySettlement: () => string | null;
+  refuseCopySettlement: () => string | null;
   launchAccessory: (
     categoryId: AccessoryCategoryId,
     name: string,
@@ -2845,11 +2895,30 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       }
     }
 
+    // MMO monthly economics (on month boundary — week 1 of month)
+    if (((next.week - 1) % 4) === 0 && (next.activeMmos ?? []).some((m) => m.active)) {
+      const mmo = processMmoMonth(next.activeMmos ?? []);
+      next.activeMmos = mmo.mmos;
+      if (mmo.cashDelta !== 0) {
+        next.cash += mmo.cashDelta;
+        next.ledger = applyLedger(next.ledger, {
+          week: next.week,
+          amount: mmo.cashDelta,
+          category: mmo.cashDelta >= 0 ? "sales" : "other",
+          label: "MMO subs / server upkeep",
+          ref: `mmo-month-w${next.week}`,
+        });
+      }
+      for (const n of mmo.notes) {
+        next.notifications = pushNote(next, n, "warn");
+      }
+    }
+
     // Module 13 — player console tick
     if (next.playerConsoles?.length) {
       const updated = [];
       for (const c of next.playerConsoles) {
-        const r = tickPlayerConsole(c, next.week);
+        const r = tickPlayerConsole(c, next.week, next.fans);
         updated.push(r.console);
         if (r.cashDelta !== 0) {
           next.cash += r.cashDelta;
@@ -3066,12 +3135,78 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       stageNum,
     );
     if (planned.error) return planned.error;
+    let project = planned.project;
+    let cash = state.cash;
+    let notes = pushNote(state, `Stage ${stageNum} started.`, "info");
+    let modal: GameState["modal"] = null;
+    let pendingEvent: GameState["pendingEvent"] = state.pendingEvent;
+
+    // Quality crisis table once per project at Stage 1 start
+    if (stageNum === 1 && !(project as { qualityCrisisRolled?: boolean }).qualityCrisisRolled) {
+      const crisis = rollQualityCrisis(() => Math.random());
+      (project as { qualityCrisisRolled?: boolean }).qualityCrisisRolled = true;
+      if (crisis.code !== "EVT_CLEAN") {
+        if (crisis.hypeDelta) {
+          // applied on state below
+        }
+        if (crisis.rpDelta) {
+          // researchPoints adjust
+        }
+        if (crisis.extraWeeks) {
+          project = {
+            ...project,
+            weeksDev: (project.weeksDev ?? 0) - crisis.extraWeeks,
+          };
+        }
+        if (crisis.code === "EVT_COPY") {
+          (project as { pendingCopyCrisis?: boolean }).pendingCopyCrisis = true;
+          pendingEvent = {
+            id: `crisis_${crisis.code}_${state.week}`,
+            title: crisis.title,
+            body: `${crisis.note} Use More → accept/refuse settlement ($45k vs −1.5 score).`,
+          };
+          modal = "event";
+        } else {
+          pendingEvent = {
+            id: `crisis_${crisis.code}_${state.week}`,
+            title: crisis.title,
+            body: crisis.note,
+          };
+          modal = "event";
+        }
+        notes = pushNote({ ...state, notifications: notes }, crisis.note, "warn");
+        set({
+          cash: cash + crisis.cashDelta,
+          researchPoints: Math.max(0, state.researchPoints + crisis.rpDelta),
+          hype: Math.max(0, state.hype + crisis.hypeDelta),
+          currentProject: project,
+          speed: crisis.code === "EVT_COPY" ? 0 : 1,
+          screen: "develop",
+          dirty: true,
+          notifications: notes,
+          modal,
+          pendingEvent,
+          ledger:
+            crisis.cashDelta !== 0
+              ? applyLedger(state.ledger, {
+                  week: state.week,
+                  amount: crisis.cashDelta,
+                  category: "other",
+                  label: crisis.title,
+                  ref: `qcrisis-${crisis.code}-w${state.week}`,
+                })
+              : state.ledger,
+        });
+        return null;
+      }
+    }
+
     set({
-      currentProject: planned.project,
+      currentProject: project,
       speed: 1,
       screen: "develop",
       dirty: true,
-      notifications: pushNote(state, `Stage ${stageNum} started.`, "info"),
+      notifications: notes,
     });
     return null;
   },
@@ -4255,6 +4390,71 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         ref: `hd-reno-w${state.week}`,
       }),
       unlocks: { ...state.unlocks, hiring: "owned" },
+    });
+    return null;
+  },
+
+
+  shutdownMmo: (gameId) => {
+    const state = get();
+    const list = state.activeMmos ?? [];
+    const m = list.find((x) => x.gameId === gameId);
+    if (!m) return "MMO not found.";
+    if (!m.active) return "Servers already offline.";
+    set({
+      activeMmos: list.map((x) =>
+        x.gameId === gameId ? { ...x, active: false } : x,
+      ),
+      dirty: true,
+      notifications: pushNote(state, `MMO servers shut down: ${m.title}.`, "warn"),
+    });
+    return null;
+  },
+
+  acceptCopySettlement: () => {
+    const state = get();
+    const p = state.currentProject;
+    if (!p || !(p as { pendingCopyCrisis?: boolean }).pendingCopyCrisis) {
+      return "No patent scare pending.";
+    }
+    if (state.cash < 45000) return "Need $45,000 for settlement.";
+    set({
+      cash: state.cash - 45000,
+      currentProject: {
+        ...p,
+        pendingCopyCrisis: false,
+      } as typeof p,
+      dirty: true,
+      notifications: pushNote(state, "Paid $45k patent settlement — score safe.", "info"),
+      ledger: applyLedger(state.ledger, {
+        week: state.week,
+        amount: -45000,
+        category: "other",
+        label: "Patent settlement",
+        ref: `copy-settle-w${state.week}`,
+      }),
+    });
+    return null;
+  },
+
+  refuseCopySettlement: () => {
+    const state = get();
+    const p = state.currentProject;
+    if (!p || !(p as { pendingCopyCrisis?: boolean }).pendingCopyCrisis) {
+      return "No patent scare pending.";
+    }
+    set({
+      currentProject: {
+        ...p,
+        pendingCopyCrisis: false,
+        crisisReviewPenalty: (p.crisisReviewPenalty ?? 0) + 1.5,
+      } as typeof p,
+      dirty: true,
+      notifications: pushNote(
+        state,
+        "Refused settlement — final score −1.5 when you ship.",
+        "warn",
+      ),
     });
     return null;
   },

@@ -649,6 +649,8 @@ export interface GameState {
   streamerHypeWeeksLeft?: number;
   /** Released titles carrying IP royalty */
   ipRoyaltyGameIds?: string[];
+  /** Active MMO server runtimes */
+  activeMmos?: import("./hardcoreEngines").MmoRuntime[];
   /** Known combo labels after post-mortem */
   knownCombos?: Record<string, import("./tycoonRiskAnalytics").MatchLabel>;
   playerConsoles?: import("./tycoonLateMarket").PlayerConsole[];

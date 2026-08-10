@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>NEONCORE Engine v4.0.0 // Definitive</title>
+<style>
+:root{--bg:#020204;--panel:rgba(6,6,12,.97);--box:#090914;--border:#161626;--cyan:#00f0ff;--violet:#a600ff;--lime:#00ff66;--rose:#ff0055;--gold:#ffcc00;--text:#f0f0f5;--dim:#4e4e63}
+*{box-sizing:border-box}body{margin:0;padding:16px;font-family:system-ui,sans-serif;background:linear-gradient(145deg,#070314,#020204 60%);color:var(--text)}
+h1{font-size:1.05rem;letter-spacing:1px;text-transform:uppercase;border-bottom:1px solid var(--border);padding-bottom:10px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
+.grid{display:grid;grid-template-columns:minmax(260px,380px) 1fr;gap:16px;max-width:1700px;margin:0 auto}
+@media(max-width:900px){.grid{grid-template-columns:1fr}}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px}
+.hud{display:grid;grid-template-columns:1fr 1fr;gap:8px}.tile{background:var(--box);border:1px solid var(--border);border-left:4px solid var(--violet);padding:10px;border-radius:8px}
+.tile.lime{border-left-color:var(--lime)}.tile.cyan{border-left-color:var(--cyan)}.tile.gold{border-left-color:var(--gold)}
+.lbl{font-size:.62rem;color:var(--dim);text-transform:uppercase;font-weight:700}.val{font:900 1.05rem monospace}
+.tabs{display:flex;flex-wrap:wrap;gap:4px;background:#0008;padding:4px;border-radius:6px;border:1px solid var(--border);margin:12px 0}
+.tab{flex:1;min-width:4rem;background:0;border:0;color:var(--dim);padding:10px 4px;font-size:.62rem;font-weight:800;text-transform:uppercase;cursor:pointer;border-radius:4px}
+.tab.on{background:#121224;color:var(--cyan)}
+.btn{width:100%;padding:12px;border:0;border-radius:6px;font-weight:800;font-size:.72rem;text-transform:uppercase;cursor:pointer;background:linear-gradient(135deg,#003cdb,var(--cyan));color:#fff;margin-top:8px}
+.btn.ghost{background:#121224;border:1px solid var(--border)}
+label{display:block;font-size:.62rem;color:var(--dim);font-weight:700;margin:10px 0 4px;text-transform:uppercase}
+input,select{width:100%;padding:10px;background:#05050a;color:#fff;border:1px solid var(--border);border-radius:6px}
+.row{background:var(--box);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px;font-size:.8rem}
+.log{height:180px;overflow:auto;background:#010102;border:1px solid var(--border);border-radius:8px;padding:10px;font:11px monospace;margin-top:12px}
+.ok{color:var(--lime)}.err{color:var(--rose)}.warn{color:var(--gold)}.info{color:var(--cyan)}.view{display:none}.view.on{display:block}
+</style></head><body>
+<h1><span>NEONCORE v4.0.0 // DEFINITIVE</span><span id="clock" style="font-family:monospace;color:var(--dim)">Y1 M1 W1</span></h1>
+<div class="grid">
+<div class="panel">
+  <div class="hud">
+    <div class="tile lime"><div class="lbl">Capital</div><div class="val" id="cash">$150,000</div></div>
+    <div class="tile"><div class="lbl">RP</div><div class="val" id="rp">60</div></div>
+    <div class="tile cyan"><div class="lbl">Fans</div><div class="val" id="fans">1,500</div></div>
+    <div class="tile gold"><div class="lbl">Hype</div><div class="val" id="hype">0</div></div>
+  </div>
+  <div style="background:var(--box);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:.8rem;margin-top:10px">
+    IP: <b style="color:var(--gold)" id="ip">None</b><br>
+    Console share: <span id="cshare" style="font-family:monospace">—</span><br>
+    MMO net: <span id="mmonet" style="font-family:monospace">$0</span>
+  </div>
+  <div class="log" id="log"></div>
+</div>
+<div class="panel">
+  <div class="tabs">
+    <button class="tab on" onclick="tab('dev',this)">Dev</button>
+    <button class="tab" onclick="tab('hw',this)">Console</button>
+    <button class="tab" onclick="tab('mmo',this)">MMO</button>
+    <button class="tab" onclick="tab('store',this)">Store</button>
+    <button class="tab" onclick="tab('save',this)">Save</button>
+  </div>
+  <div id="dev" class="view on">
+    <label>Title</label><input id="title" value="Neon Odyssey"/>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div><label>Topic</label><select id="topic"><option>Sci-Fi</option><option>City</option></select></div>
+      <div><label>Genre</label><select id="genre"><option>Action</option><option>Simulation</option></select></div>
+    </div>
+    <label>Size</label>
+    <select id="size"><option value="Small">Small 4w</option><option value="Medium">Medium 8w</option><option value="Large">Large 14w</option><option value="MMO">MMO (indefinite)</option></select>
+    <button class="btn" onclick="ship()">Build + Crisis Roll + Ship</button>
+    <button class="btn ghost" onclick="tick(1)">Idle week</button>
+  </div>
+  <div id="hw" class="view">
+    <p style="font-size:.72rem;color:var(--dim)">Launch units = (fans/4)×(tierBase/price) · loss-leader ×2.5</p>
+    <label>Console name</label><input id="cname" value="Forge One"/>
+    <label>Retail price</label><input id="cprice" type="number" value="299"/>
+    <label>Mfg cost</label><input id="cmfg" type="number" value="220"/>
+    <label>Tier base</label><input id="ctier" type="number" value="280"/>
+    <button class="btn" onclick="launchConsole()">Launch console (week 1)</button>
+  </div>
+  <div id="mmo" class="view">
+    <p style="font-size:.72rem;color:var(--dim)">Subs = init×(1−months/48) · $4.99 · upkeep $150/1k</p>
+    <div id="mmolist"></div>
+    <button class="btn ghost" onclick="mmoMonth()">Force month tick</button>
+  </div>
+  <div id="store" class="view"><div id="shelf"></div></div>
+  <div id="save" class="view">
+    <button class="btn" onclick="dl()">Download JSON</button>
+    <textarea id="paste" rows="5" style="width:100%;margin-top:8px;background:#05050a;color:#fff;border:1px solid var(--border);border-radius:6px;font:11px monospace"></textarea>
+    <button class="btn ghost" onclick="ld()">Load</button>
+  </div>
+</div>
+</div>
+<script>
+const quotes={
+  All_Games_Beta:{excellent:"An absolute masterpiece. Instant classic.",mediocre:"Good framework, but lacking polish.",terrible:"A disaster of mismatched design decisions."},
+  Game_Hero:{excellent:"Brilliant! Genre redefined.",mediocre:"Fun weekend, plays it safe.",terrible:"More crash loops than gameplay."}
+};
+let S={year:1,month:1,week:1,cash:150000,rp:60,fans:1500,hype:0,trailing:35,rent:42000,ip:'None',ipTopic:'',market:[],console:null,mmos:[]};
+function log(m,c){const e=document.getElementById('log');const d=document.createElement('div');d.className=c||'info';d.textContent='[Y'+S.year+' M'+S.month+' W'+S.week+'] '+m;e.appendChild(d);e.scrollTop=e.scrollHeight}
+function hud(){
+  clock.textContent='Y'+S.year+' M'+S.month+' W'+S.week;
+  cash.textContent='$'+Math.round(S.cash).toLocaleString();
+  rp.textContent=S.rp;fans.textContent=Math.floor(S.fans).toLocaleString();hype.textContent=Math.round(S.hype);
+  ip.textContent=S.ip;
+  cshare.textContent=S.console?((S.console.share*100).toFixed(1)+'% · '+S.console.units.toLocaleString()+' boxes'):'—';
+  let net=0;S.mmos.forEach(m=>{if(m.active){const sub=m.init*(1-m.months/48);net+=sub*4.99-(sub/1000)*150}});
+  mmonet.textContent='$'+Math.round(net).toLocaleString();
+  shelfUI();mmoUI();
+}
+function tab(id,btn){document.querySelectorAll('.view').forEach(v=>v.classList.remove('on'));document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));document.getElementById(id).classList.add('on');btn.classList.add('on')}
+function crisis(){
+  const r=Math.floor(Math.random()*100)+1;
+  if(r<=10){S.rp=Math.max(0,S.rp-15);S.hype+=40;log('EVT_LEAK: +40 hype −15 RP','warn');return 0}
+  if(r<=20){log('EVT_CRASH: +2 weeks slip','err');return 2}
+  if(r<=30){S.cash-=45000;log('EVT_COPY: −$45k settlement','err');return 0}
+  log('EVT_CLEAN: stable compile','ok');return 0;
+}
+function ship(){
+  const title=document.getElementById('title').value,topic=topic.value,genre=genre.value,size=document.getElementById('size').value;
+  let weeks={Small:4,Medium:8,Large:14,MMO:12}[size];
+  weeks+=crisis();
+  let pts=(38+Math.random()*20)*(((genre==='Action'&&topic==='Sci-Fi')||(genre==='Simulation'&&topic==='City'))?1.3:0.7);
+  let buff=0,sm=1;
+  if(S.ip!=='None'){if(S.ipTopic===topic){buff=1.5;sm=1.4;log('IP synergy '+S.ip,'ok')}else{buff=-0.8;sm=0.8;log('IP mismatch','err')}}
+  let score=Math.max(1,Math.min(10,Math.round(((pts/S.trailing)*7+buff)*10)/10));
+  S.trailing=S.trailing*0.7+pts*0.3;
+  const tier=score>=8.5?'excellent':score>=5.5?'mediocre':'terrible';
+  log('All Games Beta: "'+quotes.All_Games_Beta[tier]+'"','info');
+  log('Game Hero: "'+quotes.Game_Hero[tier]+'"','info');
+  const pool=pts*Math.pow(score,2.3)*25*sm;
+  const isMmo=size==='MMO';
+  S.market.push({title,info:topic+'/'+genre,score,weeks:isMmo?999:12,base:Math.round(pool/12),lic:S.ip!=='None',mmo:isMmo});
+  if(isMmo){S.mmos.push({title,init:Math.max(2000,Math.round(pool)),months:0,active:true});log('MMO servers spun up','ok')}
+  S.rp+=8;log('Shipped '+title+' ★'+score,'ok');tick(weeks);
+}
+function launchConsole(){
+  const price=+cprice.value,mfg=+cmfg.value,tier=+ctier.value;
+  let units=Math.round((S.fans/4)*(tier/Math.max(1,price)));
+  units=Math.max(50,units);
+  const loss=price<mfg;
+  if(loss)units=Math.round(units*2.5);
+  const cash=units*(price-mfg);
+  S.cash+=cash;
+  S.console={name:cname.value,units,share:Math.min(0.55,Math.max(0.05,units/200000)),price,mfg};
+  log((loss?'LOSS-LEADER ':'')+cname.value+' launch: '+units.toLocaleString()+' boxes · Δ$'+Math.round(cash).toLocaleString(),loss?'warn':'ok');
+  hud();
+}
+function mmoMonth(){
+  S.mmos.forEach(m=>{
+    if(!m.active)return;
+    m.months++;
+    const sub=Math.max(0,m.init*(1-m.months/48));
+    const rev=sub*4.99,up=(sub/1000)*150,net=rev-up;
+    S.cash+=net;
+    if(sub<=0){m.active=false;log('MMO '+m.title+' pop zero','warn')}
+    else if(rev<up)log('MMO '+m.title+' underwater net $'+Math.round(net),'err');
+    else log('MMO '+m.title+' +$'+Math.round(net)+' ('+Math.floor(sub)+' subs)','ok');
+  });
+  hud();
+}
+function mmoUI(){
+  const el=document.getElementById('mmolist');
+  if(!S.mmos.length){el.innerHTML='<div style="color:var(--dim);padding:12px">No MMOs.</div>';return}
+  el.innerHTML='';
+  S.mmos.forEach((m,i)=>{
+    const d=document.createElement('div');d.className='row';
+    d.innerHTML='<b>'+m.title+'</b> · '+(m.active?'ONLINE':'OFF')+' · m'+m.months+
+      (m.active?' <button class="btn ghost" style="width:auto;display:inline;padding:4px 8px;margin:0 0 0 8px" onclick="S.mmos['+i+'].active=false;log(\'Shutdown '+m.title+'\',\'warn\');hud()">Kill</button>':'');
+    el.appendChild(d);
+  });
+}
+function tick(n){
+  for(let i=0;i<n;i++){
+    S.week++;S.hype=Math.max(0,Math.floor(S.hype*0.88));
+    if(S.week>4){S.week=1;S.month++;S.cash-=S.rent;log('Rent −$'+S.rent.toLocaleString(),'warn');sell();mmoMonth()}
+    if(S.month>12){S.month=1;S.year++}
+  }
+  hud();
+}
+function sell(){
+  S.market.forEach(g=>{
+    if(g.weeks<=0&&!g.mmo)return;
+    if(!g.mmo)g.weeks--;
+    const u=Math.max(5,Math.round(g.base*Math.pow((g.mmo?1:g.weeks/12),2)));
+    S.cash+=u*9.99*(g.lic?0.7:0.85);
+    S.fans=Math.max(0,S.fans+Math.round(u*0.04*((g.score-5.5)/4.5)));
+  });
+  S.market=S.market.filter(g=>g.mmo||g.weeks>0);
+}
+function shelfUI(){
+  const el=document.getElementById('shelf');
+  if(!S.market.length){el.innerHTML='<div style="text-align:center;color:var(--dim);padding:30px">Empty shelves</div>';return}
+  el.innerHTML='';S.market.forEach(p=>{const d=document.createElement('div');d.className='row';d.innerHTML='<b>'+p.title+'</b> ★'+p.score+(p.mmo?' · MMO':'')+' · '+(p.mmo?'∞':p.weeks+'w');el.appendChild(d)});
+}
+function dl(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify({system_version:'4.0.0',state:S},null,2)],{type:'application/json'}));a.download='neoncore_v40.json';a.click()}
+function ld(){try{const d=JSON.parse(document.getElementById('paste').value);if(d.state)S=d.state;log('Loaded','ok');hud()}catch(e){log('Bad JSON','err')}}
+// fiction IP quick
+window.buyIP=function(n,t,c){if(S.cash<c)return;S.cash-=c;S.ip=n;S.ipTopic=t;log('IP '+n,'ok');hud()};
+log('Definitive v4.0 — console formula, quotes, MMO, crisis table.','ok');hud();
+</script>
+<p style="max-width:1700px;margin:16px auto 0;font-size:.7rem;color:var(--dim)">
+  Fiction IP: <button class="btn ghost" style="width:auto;display:inline;padding:4px 8px" onclick="buyIP('Echo Chamber','Sci-Fi',50000)">Echo Chamber $50k</button>
+  <button class="btn ghost" style="width:auto;display:inline;padding:4px 8px" onclick="buyIP('Nightshade Prep','City',35000)">Nightshade $35k</button>
+  <button class="btn ghost" style="width:auto;display:inline;padding:4px 8px" onclick="S.ip='None';S.ipTopic='';hud()">Clear</button>
+</p>
+</body></html>

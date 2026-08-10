@@ -290,6 +290,14 @@ function MainMenu() {
           >
             Studio OS v3.8 · Netflix IDE
           </a>
+          <a
+            href="/neoncore-v40.html"
+            target="_blank"
+            rel="noreferrer"
+            className="block w-full rounded-lg border border-border bg-elevated px-3 py-2.5 text-center text-xs font-bold uppercase tracking-wide text-muted transition hover:border-accent hover:text-accent"
+          >
+            NEONCORE v4.0 · Definitive IDE
+          </a>
         </div>
       </div>
     </div>
@@ -2982,6 +2990,55 @@ function NetflixEditionScreen() {
             </Button>
           </>
         )}
+      </div>
+      <MmoServerPanel />
+      <CopyCrisisActions />
+    </div>
+  );
+}
+
+function MmoServerPanel() {
+  const mmos = useGame((s) => s.activeMmos) ?? [];
+  const shutdownMmo = useGame((s) => s.shutdownMmo);
+  const [msg, setMsg] = useState("");
+  if (!mmos.length) return null;
+  return (
+    <div className="rounded-xl border border-border bg-elevated p-3 space-y-2">
+      <p className="text-[10px] font-bold uppercase text-muted">MMO servers</p>
+      {msg && <p className="text-[11px] text-warn">{msg}</p>}
+      {mmos.map((m) => (
+        <div key={m.gameId} className="rounded-lg border border-border bg-paper px-2 py-1.5 text-xs">
+          <div className="font-bold text-fg">{m.title}</div>
+          <div className="text-muted">
+            {m.active ? "ONLINE" : "OFFLINE"} · month {m.monthsOnMarket} · init {m.initialUnits.toLocaleString()} ·
+            life ${Math.round(m.lifetimeSubRevenue - m.lifetimeUpkeep).toLocaleString()}
+          </div>
+          {m.active && (
+            <Button size="sm" className="mt-1" variant="secondary" onClick={() => setMsg(shutdownMmo(m.gameId) ?? "Offline.")}>
+              Shut down servers
+            </Button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CopyCrisisActions() {
+  const p = useGame((s) => s.currentProject);
+  const acceptCopySettlement = useGame((s) => s.acceptCopySettlement);
+  const refuseCopySettlement = useGame((s) => s.refuseCopySettlement);
+  const pending = !!(p as { pendingCopyCrisis?: boolean } | null)?.pendingCopyCrisis;
+  if (!pending) return null;
+  return (
+    <div className="rounded-xl border border-bad/40 bg-bad/10 p-3 space-y-2">
+      <p className="text-xs font-bold text-fg">Patent infringement scare</p>
+      <p className="text-[11px] text-muted">Pay $45k or take −1.5 final review score.</p>
+      <div className="flex gap-2">
+        <Button size="sm" onClick={() => acceptCopySettlement()}>Pay $45k</Button>
+        <Button size="sm" variant="secondary" onClick={() => refuseCopySettlement()}>
+          Refuse (−1.5)
+        </Button>
       </div>
     </div>
   );

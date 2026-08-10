@@ -5,6 +5,7 @@
 
 import type { GameSize, GenreId, ReleasedGame } from "./types";
 import { hashSeed } from "./scoring/rng";
+import { consoleLaunchWeekUnits, HARDWARE_TIER_BASE } from "./hardcoreEngines";
 
 export const TYCOON_LATE_VERSION = "2.3.0" as const;
 
@@ -199,6 +200,7 @@ export const HARDWARE_UNLOCK = {
 
 export const FIRST_PARTY_SYNERGY = 1.15;
 
+
 export type PlayerConsole = {
   id: string;
   tier: HardwareTierId;
@@ -251,20 +253,40 @@ export function startConsoleDev(opts: {
 export function tickPlayerConsole(
   c: PlayerConsole,
   week: number,
+  fans = 0,
 ): { console: PlayerConsole; cashDelta: number; note?: string } {
   if (c.status === "developing") {
     const left = c.weeksLeft - 1;
     if (left <= 0) {
+      const mfg = c.unitMfgCost ?? HARDWARE_TIERS[c.tier].mfgCost;
+      const tierBase =
+        c.tier === "tier_1"
+          ? HARDWARE_TIER_BASE.retro
+          : c.tier === "tier_2"
+            ? HARDWARE_TIER_BASE.optical
+            : HARDWARE_TIER_BASE.silicon;
+      const launch = consoleLaunchWeekUnits({
+        fans,
+        retailPrice: c.retailPrice,
+        unitMfgCost: mfg,
+        tierBaseValue: tierBase ?? HARDWARE_TIER_BASE.default,
+      });
       return {
         console: {
           ...c,
           status: "shipping",
           weeksLeft: 0,
           launchedWeek: week,
-          marketShare: HARDWARE_TIERS[c.tier].base_market_share * 0.35,
+          marketShare: Math.max(
+            HARDWARE_TIERS[c.tier].base_market_share * 0.25,
+            launch.marketShareHint,
+          ),
+          unitsSold: launch.units,
         },
-        cashDelta: 0,
-        note: `${c.name} launches! First-party platform online.`,
+        cashDelta: launch.cashDelta,
+        note: launch.lossLeader
+          ? `${c.name} launches LOSS-LEADER: ${launch.units.toLocaleString()} boxes · 2.5× demand · ${launch.cashDelta < 0 ? "cash bleed" : "ok"}.`
+          : `${c.name} launches: ${launch.units.toLocaleString()} week-1 boxes · share ~${(launch.marketShareHint * 100).toFixed(1)}%.`,
       };
     }
     return { console: { ...c, weeksLeft: left }, cashDelta: 0 };
@@ -277,7 +299,6 @@ export function tickPlayerConsole(
     800 * c.marketShare * (1 + (hashSeed(week, c.id) % 40) / 100) * shareGrowth,
   );
   const margin = c.retailPrice - mfg;
-  // Module 19: loss per unit hits bank when retail < mfg
   const cashDelta = baseUnits * margin;
   const nextShare = Math.min(
     HARDWARE_TIERS[c.tier].base_market_share * 1.2,
