@@ -220,7 +220,7 @@ export function processStorefrontWeek(list: StorefrontTitle[]): {
     const progress = t / Math.max(1, game.totalLifespan);
     const decay = Math.pow(Math.max(0, 1 - progress), 2.2);
     let weeklyUnits = Math.round((game.salesPoolBase / game.totalLifespan) * decay);
-    weeklyUnits = Math.max(5, weeklyUnits);
+    weeklyUnits = Math.max(0, weeklyUnits); // Foundation Lock: weak titles may sell <5
     const g = {
       ...game,
       accumulatedUnitsSold: game.accumulatedUnitsSold + weeklyUnits,

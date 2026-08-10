@@ -233,14 +233,14 @@ export function evaluatePublisherDeal(opts: {
   const met = requirementsMet && scoreMet;
 
   if (met) {
-    const royaltyPaid = opts.grossRevenue * d.royaltyRate;
+    // Foundation Lock: royalties paid from actual weekly sales, not projected lifetime gross.
     return {
       met: true,
-      cashDelta: royaltyPaid,
-      royaltyPaid,
+      cashDelta: 0,
+      royaltyPaid: 0,
       penalty: 0,
       requirementsMet,
-      note: `${d.publisherName}: contract met (${opts.avgReview.toFixed(1)} ≥ ${d.minimumReviewScore}). Royalties ${Math.round(d.royaltyRate * 100)}%.`,
+      note: `${d.publisherName}: contract met (${opts.avgReview.toFixed(1)} ≥ ${d.minimumReviewScore}). Weekly revenue share applies on sales ticks.`,
     };
   }
 

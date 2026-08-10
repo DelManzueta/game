@@ -1,3 +1,5 @@
+import { hashSeed } from "../scoring/rng";
+let _engIdSeq = 0;
 /**
  * Create engine families, versions, garage starter, and build projects.
  * Released versions are immutable snapshots.
@@ -31,7 +33,7 @@ import type {
 } from "./types";
 
 function uid(prefix: string): string {
-  return `${prefix}_${Math.random().toString(36).slice(2, 9)}`;
+  return `${prefix}_${hashSeed(prefix, ++_engIdSeq).toString(16)}`;
 }
 
 export function emptyWorkshop(): EngineWorkshopState {

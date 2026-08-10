@@ -26,6 +26,13 @@ export const FEATURE_FLAGS = {
   futureEndless: false,
   /** Checkpoint 10 — final vertical UX. */
   verticalUxPass: false,
+  /** Quarantined until post–Phase One (Foundation Lock). */
+  netflixEdition: false,
+  streamerMarketing: false,
+  studioConventions: false,
+  digitalStorefront: false,
+  hardwareMerch: false,
+  qualityCrisisEvents: false,
 } as const;
 
 export type FeatureFlagId = keyof typeof FEATURE_FLAGS;

@@ -194,6 +194,13 @@ import {
   type ContentPack,
 } from "./digitalStorefront";
 import {
+  isGaragePhaseOne,
+  lateSystemAllowed,
+  PHASE_ONE_MARKETING_PER_YEAR,
+  marketingYearIndex,
+} from "./phaseOne";
+import { applyCashTransaction, moneyRound } from "./finance/transaction";
+import {
   canAdvanceOffice,
   normalizeOfficeLevel,
   stageForOffice,
@@ -409,9 +416,10 @@ export function availableSizes(
 ): GameSize[] {
   const office = opts?.office ?? 1;
   const staffCount = opts?.staffCount ?? 1;
+  // Foundation Lock: Garage (office 1) is small games only.
+  if (office <= 1) return ["small"];
   const byOffice = new Set(sizesForOffice(office));
   const sizes: GameSize[] = ["small"];
-  // Medium: office 2+
   if (
     byOffice.has("medium") &&
     (researched.includes("medium_games") ||
@@ -421,11 +429,10 @@ export function availableSizes(
   ) {
     sizes.push("medium");
   }
-  // Large: office 3+ OR High-Density 2.5 with research
-  const largeEarly = office === 2 && isHighDensity(opts?.officeSubTier);
+  // High-Density early large is quarantined from Phase One product surface.
   if (
-    (byOffice.has("large") || largeEarly) &&
-    (researched.includes("large_games") || unlocks.large_games === "owned" || largeEarly) &&
+    byOffice.has("large") &&
+    (researched.includes("large_games") || unlocks.large_games === "owned") &&
     staffCount >= 2
   ) {
     sizes.push("large");
@@ -438,6 +445,29 @@ export function availableSizes(
     sizes.push("aaa");
   }
   return sizes;
+}
+
+
+function countMarketingInYear(state: GameState, yearIndex: number): number {
+  return (state.ledger?.entries ?? []).filter(
+    (e) =>
+      e.category === "marketing" &&
+      marketingYearIndex(e.week) === yearIndex &&
+      e.amount < 0,
+  ).length;
+}
+
+/** Garage Phase One: ≤2 marketing spends/year; year after a 2-spend year is closed. */
+function canPurchaseMarketing(state: GameState): string | null {
+  if (!isGaragePhaseOne(state)) return null;
+  const y = marketingYearIndex(state.week);
+  if (countMarketingInYear(state, y - 1) >= PHASE_ONE_MARKETING_PER_YEAR) {
+    return "Marketing dark year — last year used both opportunities.";
+  }
+  if (countMarketingInYear(state, y) >= PHASE_ONE_MARKETING_PER_YEAR) {
+    return "Already used both marketing opportunities this year.";
+  }
+  return null;
 }
 
 export function hasSave(): boolean {
@@ -1055,43 +1085,27 @@ function releaseProject(next: GameState, project: GameProject): GameState {
       } as typeof reviews;
     }
 
-    // Netflix Edition — franchise IP match on ship
-    {
+    // Netflix Edition quarantined (Foundation Lock): never mutates critic scores.
+    // Commercial IP effects only when late systems allowed.
+    if (lateSystemAllowed(next, "netflixEdition") && next.activeIpLicense) {
       const ipm = ipShipModifiers({
         active: next.activeIpLicense,
         topicId: scored.topicId,
         genreId: scored.genreId,
       });
       if (ipm.licensed) {
-        const boosted = Math.max(
-          1,
-          Math.min(10, Math.round((reviews.avg + ipm.reviewBoost) * 10) / 10),
-        );
-        const scale = reviews.avg > 0 ? boosted / reviews.avg : 1;
-        reviews.avg = boosted;
-        reviews.scores = reviews.scores.map((x) =>
-          Math.max(1, Math.min(10, Math.round(x * scale * 10) / 10)),
-        );
-        hidden = Math.max(1, Math.min(10, hidden + ipm.reviewBoost * 0.85));
-        productQuality = hidden * 10;
         (scored as { ipLicensed?: boolean; ipMatched?: boolean; ipRoyaltyRate?: number; ipHypeMult?: number }).ipLicensed =
           true;
         (scored as { ipMatched?: boolean }).ipMatched = ipm.matched;
         (scored as { ipRoyaltyRate?: number }).ipRoyaltyRate = ipm.royaltyRate;
         (scored as { ipHypeMult?: number }).ipHypeMult = ipm.hypeMult;
-        // Hype mult applied into launch hype burn path via next.hype scale
+        // Awareness only — never review points
         if (ipm.matched) {
           next.hype = Math.round(next.hype * ipm.hypeMult);
           next.notifications = pushNote(
             next,
-            `Franchise synergy: ${next.activeIpLicense?.name} — +${ipm.reviewBoost} score · ${ipm.hypeMult}× hype.`,
+            `Franchise awareness: ${next.activeIpLicense?.name} — ${ipm.hypeMult}× hype (no review boost).`,
             "good",
-          );
-        } else {
-          next.notifications = pushNote(
-            next,
-            `Franchise mismatch vs ${next.activeIpLicense?.name} — theme penalty.`,
-            "warn",
           );
         }
       }
@@ -1458,6 +1472,18 @@ function releaseProject(next: GameState, project: GameProject): GameState {
   } satisfies OutcomeTrace;
 
   // Live weekly sales + marketing init (reviews already frozen above)
+  let distType: "self" | "publisher" = "self";
+  let royalty = 0.7;
+  if (next.activePublisherDealId && next.publishingBoard) {
+    const deal = next.publishingBoard.deals.find((d) => d.id === next.activePublisherDealId);
+    if (deal) {
+      distType = "publisher";
+      royalty = deal.royaltyRate;
+      released.distributionType = "publisher";
+      released.publisherId = deal.publisherId;
+      released.publisherRoyalty = deal.royaltyRate;
+    }
+  }
   const commercial = initReleasedCommercial({
     released,
     state: next,
@@ -1469,8 +1495,8 @@ function releaseProject(next: GameState, project: GameProject): GameState {
     installedBase: platformSnap.installedBase,
     topicRep,
     comboMult,
-    distType: "self",
-    royalty: 0.7,
+    distType,
+    royalty,
     planUnits,
     productQuality,
     avgReview: reviews.avg,
@@ -1489,14 +1515,11 @@ function releaseProject(next: GameState, project: GameProject): GameState {
     };
   }
   {
-    const classicFans = classicFansFromRelease(
-      sales.totalUnits ?? 0,
-      reviews.avg,
-    );
-    // Prefer blueprint fan curve when commercial delta is tiny
-    // GDT canon fans can fall on flops (score < 5.5)
-    const fanGain = classicFans !== 0 ? classicFans : commercial.fansDelta;
-    next.fans = Math.max(0, next.fans + fanGain);
+    // Foundation Lock: no projected lifetime fans at release.
+    // Small bounded review-reaction only (independent of shelf plan units).
+    const reaction =
+      reviews.avg >= 8.5 ? 25 : reviews.avg >= 7 ? 10 : reviews.avg >= 5.5 ? 0 : -5;
+    next.fans = Math.max(0, next.fans + reaction);
   }
   if (commercial.notification) {
     next.notifications = pushNote(
@@ -1519,8 +1542,8 @@ function releaseProject(next: GameState, project: GameProject): GameState {
     ).ipRoyaltyRate;
     (released as { ipLicensed?: boolean }).ipLicensed = true;
   }
-  // IP infringement schedule (2 weeks) if title uses blocked trademarks without license
-  {
+  // IP infringement schedule — quarantined in Garage
+  if (lateSystemAllowed(next, "ipLitigation")) {
     const licensed = !!(next.activeIpLicense && next.activeIpLicense.licenseId !== "clear");
     if (titleLooksInfringing(released.title, licensed)) {
       next.infringementDue = [
@@ -1535,8 +1558,8 @@ function releaseProject(next: GameState, project: GameProject): GameState {
     }
   }
 
-  // MMO lifecycle registration (research mmo + large/aaa or explicit flag)
-  {
+  // MMO lifecycle registration — quarantined in Garage
+  if (lateSystemAllowed(next, "mmoLifecycle")) {
     const mmoOwned =
       next.researched.includes("mmo") ||
       next.researched.includes("mmo_games") ||
@@ -1562,35 +1585,33 @@ function releaseProject(next: GameState, project: GameProject): GameState {
     }
   }
   
-  // Publisher deal settlement (advance already paid on accept)
+  // Publisher: score/obligation check only — no projected lifetime royalty cash.
   if (next.activePublisherDealId && next.publishingBoard) {
     const deal = next.publishingBoard.deals.find((d) => d.id === next.activePublisherDealId);
     if (deal) {
-      const gross = (sales.totalUnits ?? 0) * (sales.price ?? 9.99);
       const result = evaluatePublisherDeal({
         deal,
         avgReview: reviews.avg,
         genreId: scored.genreId,
         size: scored.size,
         platformId: scored.platformId,
-        grossRevenue: gross,
+        grossRevenue: 0,
       });
-      next.cash += result.cashDelta;
-      next.ledger = applyLedger(next.ledger, {
-        week: next.week,
-        amount: result.cashDelta,
-        category: result.met ? "sales" : "other",
-        label: result.met
-          ? `Publisher royalties: ${deal.publisherName}`
-          : `Publisher penalty: ${deal.publisherName}`,
-        gameId: scored.id,
-        ref: `pub-${deal.id}-${scored.id}`,
-      });
-      next.notifications = pushNote(
-        next,
-        result.note,
-        result.met ? "good" : "bad",
-      );
+      if (result.cashDelta !== 0) {
+        const txn = applyCashTransaction(next.cash, next.ledger, {
+          week: next.week,
+          amount: result.cashDelta,
+          category: result.met ? "publisher" : "other",
+          label: result.met
+            ? `Publisher contract met: ${deal.publisherName}`
+            : `Publisher penalty: ${deal.publisherName}`,
+          gameId: scored.id,
+          ref: `pub-${deal.id}-${scored.id}`,
+        });
+        next.cash = txn.cash;
+        next.ledger = txn.ledger;
+      }
+      next.notifications = pushNote(next, result.note, result.met ? "good" : "bad");
       released.distributionType = "publisher";
       released.publisherId = deal.publisherId;
       released.publisherRoyalty = deal.royaltyRate;
@@ -2803,8 +2824,8 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     }
 
 
-    // Trademark infringement (banned names without license)
-    if ((next.infringementDue ?? []).length) {
+    // Trademark infringement (banned names without license) — quarantined in Garage
+    if (lateSystemAllowed(next, "ipLitigation") && (next.infringementDue ?? []).length) {
       const due = next.infringementDue ?? [];
       const remain = [];
       for (const item of due) {
@@ -2812,7 +2833,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
           remain.push(item);
           continue;
         }
-        const lit = rollInfringementLitigation(() => Math.random());
+        const lit = rollInfringementLitigation(() => hashSeed(next.campaignSeed, "litigation", item.gameId, next.week) / 4294967296);
         let sales = [...next.activeSales];
         let games = [...next.releasedGames];
         if (lit.salesHalted) {
@@ -2941,7 +2962,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
           yearReleased: g.yearReleased ?? next.year,
         }));
         // Light rival synthetic entries so awards aren't empty early
-        if (titles.length) {
+        if (lateSystemAllowed(next, "awardsG3") && titles.length) {
           const awards = resolveAnnualAwards({ year: next.year, titles });
           next.lastAwardsYear = next.year;
           let fanGain = 0;
@@ -2978,9 +2999,15 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       }
     }
 
-    // NeonStore monthly rival royalties
-    if (((next.week - 1) % 4) === 0 && next.digitalStorefront?.active) {
-      const roy = monthlyPlatformRoyalties(next.fans, () => Math.random());
+    // NeonStore monthly rival royalties — quarantined in Garage / flag off
+    if (
+      lateSystemAllowed(next, "digitalStorefront") &&
+      ((next.week - 1) % 4) === 0 &&
+      next.digitalStorefront?.active
+    ) {
+      const roy = monthlyPlatformRoyalties(next.fans, () =>
+        hashSeed(next.campaignSeed, "store-royalty", next.week) / 4294967296,
+      );
       next.cash += roy.revenue;
       next.digitalStorefront = {
         ...next.digitalStorefront,
@@ -3005,8 +3032,12 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       }
     }
 
-    // MMO monthly economics (on month boundary — week 1 of month)
-    if (((next.week - 1) % 4) === 0 && (next.activeMmos ?? []).some((m) => m.active)) {
+    // MMO monthly economics — quarantined in Garage
+    if (
+      lateSystemAllowed(next, "mmoLifecycle") &&
+      ((next.week - 1) % 4) === 0 &&
+      (next.activeMmos ?? []).some((m) => m.active)
+    ) {
       const mmo = processMmoMonth(next.activeMmos ?? []);
       next.activeMmos = mmo.mmos;
       if (mmo.cashDelta !== 0) {
@@ -3024,8 +3055,8 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       }
     }
 
-    // Module 13 — player console tick
-    if (next.playerConsoles?.length) {
+    // Module 13 — player console tick — quarantined in Garage
+    if (lateSystemAllowed(next, "playerConsoles") && next.playerConsoles?.length) {
       const updated = [];
       for (const c of next.playerConsoles) {
         const r = tickPlayerConsole(c, next.week, next.fans);
@@ -3251,9 +3282,15 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     let modal: GameState["modal"] = null;
     let pendingEvent: GameState["pendingEvent"] = state.pendingEvent;
 
-    // Quality crisis table once per project at Stage 1 start
-    if (stageNum === 1 && !(project as { qualityCrisisRolled?: boolean }).qualityCrisisRolled) {
-      const crisis = rollQualityCrisis(() => Math.random());
+    // Quality crisis — quarantined in Garage Phase One (Foundation Lock)
+    if (
+      lateSystemAllowed(state, "qualityCrisisEvents") &&
+      stageNum === 1 &&
+      !(project as { qualityCrisisRolled?: boolean }).qualityCrisisRolled
+    ) {
+      const crisis = rollQualityCrisis(
+        () => hashSeed(state.campaignSeed, project.id, "quality-crisis", state.week) / 4294967296,
+      );
       (project as { qualityCrisisRolled?: boolean }).qualityCrisisRolled = true;
       if (crisis.code !== "EVT_CLEAN") {
         if (crisis.hypeDelta) {
@@ -3327,43 +3364,17 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     const state = get();
     const p = state.currentProject;
     if (!p) return "No project.";
-    if (p.devPhase !== "POLISHING" && p.production?.phase !== "bug_fixing" && p.production?.phase !== "polish" && p.production?.phase !== "finalize_build") {
+    if (
+      p.devPhase !== "POLISHING" &&
+      p.production?.phase !== "bug_fixing" &&
+      p.production?.phase !== "polish" &&
+      p.production?.phase !== "finalize_build"
+    ) {
       return "Only available during polish / bug-fix.";
     }
-    const w = state.week + 1;
-    const d = weekToDate(w, START_YEAR);
-    const day = weekToCampaignDay(state.week);
-    const adv = advanceProductionWeek(p, {
-      campaignSeed: state.campaignSeed,
-      staff: state.staff,
-      startDay: p.production?.asOfDay ?? day,
-    });
-    const next: GameState = {
-      ...state,
-      week: w,
-      year: d.year,
-      month: d.month,
-      currentProject: state.settings.noBugsMode
-        ? { ...adv.project, bugs: 0 }
-        : adv.project,
-      dirty: true,
-    };
-    if (adv.cashCost > 0) {
-      next.cash -= adv.cashCost;
-      next.ledger = applyLedger(next.ledger, {
-        week: w,
-        amount: -adv.cashCost,
-        category: "development",
-        label: `Polish/QA: ${p.title}`,
-        gameId: p.id,
-        ref: `polish-${p.id}-w${w}`,
-      });
-    }
-    next.staff = next.staff.map((m) =>
-      m.id === "founder" ? { ...m, energy: 100 } : m,
-    );
-    set(next);
-    return null;
+    // Foundation Lock: same weekly settlement as advanceWeek (rent/sales/etc).
+    // Production polish progress is applied inside tick() for active projects.
+    return get().advanceWeek();
   },
 
   enterPreRelease: () => {
@@ -3689,10 +3700,15 @@ export const useGame = create<GameState & Actions>((set, get) => ({
   },
 
   refreshCandidates: () => {
-    const y = get().year;
+    const state = get();
+    const y = state.year;
     const bias = 1 + Math.min(1.2, (y - 1979) * 0.015);
     candidatesCache = Array.from({ length: 5 }, (_, i) =>
-      generateStaff(bias + Math.random() * 0.35, y, { forceStar: i === 0 && Math.random() < 0.2 }),
+      generateStaff(bias + (hashSeed(state.campaignSeed, "hire-bias", i, state.week) / 4294967296) * 0.35, y, {
+        forceStar: i === 0 && hashSeed(state.campaignSeed, "hire-star", state.week) / 4294967296 < 0.2,
+        seed: hashSeed(state.campaignSeed, "hire", state.week, i),
+        candidateIndex: i,
+      }),
     );
     // Guarantee at least one above-average candidate
     if (!candidatesCache.some((c) => c.level >= 3)) {
@@ -4571,6 +4587,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
 
   launchDigitalStorefront: (name) => {
     const state = get();
+    if (!lateSystemAllowed(state, "digitalStorefront")) return "Locked until after Garage Phase One.";
     const store = state.digitalStorefront ?? emptyStorefront();
     const check = canLaunchStorefront({
       office: state.office,
@@ -4628,6 +4645,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
 
   licenseFranchise: (licenseId) => {
     const state = get();
+    if (!lateSystemAllowed(state, "netflixEdition")) return "Locked until after Garage Phase One.";
     const res = purchaseLicense(licenseId, state.cash);
     if (!res.ok) return res.error;
     set({
@@ -4657,10 +4675,11 @@ export const useGame = create<GameState & Actions>((set, get) => ({
 
   runStreamerCampaign: (tierId) => {
     const state = get();
+    if (!lateSystemAllowed(state, "streamerMarketing")) return "Locked until after Garage Phase One.";
     const tier = STREAMER_TIERS.find((t) => t.id === tierId);
     if (!tier) return "Unknown streamer tier.";
     if (state.cash < tier.cost) return `Need ${formatCash(tier.cost)}.`;
-    const rng = () => Math.random();
+    const rng = () => hashSeed(state.campaignSeed, "streamer", tierId, state.week) / 4294967296;
     const gain = streamerHypeGain(tier, state.fans, rng);
     set({
       cash: state.cash - tier.cost,
@@ -4685,11 +4704,12 @@ export const useGame = create<GameState & Actions>((set, get) => ({
 
   hostStudioConvention: (ticketPrice, focus) => {
     const state = get();
+    if (!lateSystemAllowed(state, "studioConventions")) return "Locked until after Garage Phase One.";
     if (!canHostConvention({ office: state.office, fans: state.fans })) {
       return "Need Level 3 office or 100,000 fans to host a studio convention.";
     }
     if (!Number.isFinite(ticketPrice) || ticketPrice < 5) return "Ticket price must be ≥ $5.";
-    const rng = () => Math.random();
+    const rng = () => hashSeed(state.campaignSeed, "convention", focus, state.week) / 4294967296;
     const out = conventionOutcome({
       ticketPrice,
       focus,
@@ -4999,6 +5019,15 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     if (!unlocked) {
       return "Marketing opens after you start or ship a game (or research Marketing 101).";
     }
+    const cap = canPurchaseMarketing(state);
+    if (cap) return cap;
+    // Streamer / convention-style advanced spam blocked in Garage
+    if (
+      isGaragePhaseOne(state) &&
+      (campaignId === "g3_booth" || campaignId === "influencer_blitz")
+    ) {
+      return "Advanced marketing locked during Garage Phase One.";
+    }
     const seed = hashSeed(state.campaignSeed, "studio-mkt", campaignId, state.week);
     const pack = studioCampaignHype(campaignId, seed);
     if (!pack) return "Unknown campaign.";
@@ -5013,9 +5042,18 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       return "Advanced campaigns need more studio presence.";
     }
     if (state.cash < pack.cost) return `Need ${pack.cost.toLocaleString()} cash.`;
+    const txn = applyCashTransaction(state.cash, state.ledger, {
+      week: state.week,
+      amount: -pack.cost,
+      category: "marketing",
+      label: pack.name,
+      ref: `studio-mkt-${campaignId}-w${state.week}-${countMarketingInYear(state, marketingYearIndex(state.week))}`,
+    });
+    if (!txn.applied) return "Marketing purchase already recorded this week.";
     let next: GameState = {
       ...state,
-      cash: state.cash - pack.cost,
+      cash: txn.cash,
+      ledger: txn.ledger,
       hype: Math.min(150, state.hype + pack.hypeGain),
       dirty: true,
       notifications: pushNote(
@@ -5024,13 +5062,6 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         "good",
       ),
     };
-    next.ledger = applyLedger(next.ledger, {
-      week: next.week,
-      amount: -pack.cost,
-      category: "marketing",
-      label: pack.name,
-      ref: `studio-mkt-${campaignId}-w${next.week}`,
-    });
     // Fold into active project spend so release sales see it
     if (next.currentProject) {
       next.currentProject = {
@@ -5048,6 +5079,8 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     const g = state.releasedGames.find((x) => x.id === gameId);
     if (!g) return "Game not found.";
     if (g.delisted || g.dormant) return "Title is not actively marketable.";
+    const mcap = canPurchaseMarketing(state);
+    if (mcap) return mcap;
     const spec = getCampaignSpec(campaignId);
     if (!spec) return "Unknown campaign.";
     const unlocked =
@@ -5654,10 +5687,11 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         return;
       }
       case "random_trend": {
+        // Cheat-only: isolated from normal campaign determinism via cheat log week salt
         const g = (["action", "adventure", "rpg", "simulation", "strategy", "casual"] as const)[
-          Math.floor(Math.random() * 6)
+          Math.floor((hashSeed(next.campaignSeed, "cheat-trend-g", next.week, next.cheatLog?.length ?? 0) / 4294967296) * 6)
         ]!;
-        const topic = TOPICS[Math.floor(Math.random() * TOPICS.length)];
+        const topic = TOPICS[Math.floor((hashSeed(next.campaignSeed, "cheat-trend-t", next.week, next.cheatLog?.length ?? 0) / 4294967296) * TOPICS.length)];
         next.hype = Math.min(200, next.hype + 25);
         next.notifications = [
           {

@@ -1,3 +1,4 @@
+import { hashSeed } from "../scoring/rng";
 /**
  * Runtime demand estimation & overall runtime health (weakest-axis capped).
  */
@@ -319,7 +320,7 @@ function suggestTaskForAxis(
     stability: "Crash & soak hardening",
   };
   return {
-    taskId: `opt_${axis}_${Math.random().toString(36).slice(2, 7)}`,
+    taskId: `opt_${axis}_${hashSeed("opt", axis).toString(16).slice(0, 7)}`,
     type,
     affectedAxis: axis,
     affectedPlatforms: [platformId],

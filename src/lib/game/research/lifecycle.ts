@@ -1,3 +1,4 @@
+import { hashSeed } from "../scoring/rng";
 /**
  * Research pipeline state machine — observe → research → prototype → integrate → use → mature.
  */
@@ -257,7 +258,7 @@ export function tickResearchPipeline(
     if (job.phase === "researching") {
       // Partial success still advances to prototype
       const risk = def?.prototypeRisk ?? 0.15;
-      const limited = Math.random() < risk * 0.35;
+      const limited = (hashSeed("research-risk", risk, "limited") / 4294967296) < risk * 0.35;
       knowledge[job.techId] = {
         ...cur,
         state: "prototype",

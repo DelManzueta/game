@@ -250,62 +250,6 @@ function MainMenu() {
               </Button>
             </div>
           )}
-          <a
-            href="/neoncore-os.html"
-            target="_blank"
-            rel="noreferrer"
-            className="block w-full rounded-lg border border-border bg-elevated px-3 py-2.5 text-center text-xs font-bold uppercase tracking-wide text-muted transition hover:border-accent hover:text-accent"
-          >
-            NEONCORE OS · experimental IDE sim
-          </a>
-          <a
-            href="/studio-os-v34.html"
-            target="_blank"
-            rel="noreferrer"
-            className="block w-full rounded-lg border border-border bg-elevated px-3 py-2.5 text-center text-xs font-bold uppercase tracking-wide text-muted transition hover:border-accent hover:text-accent"
-          >
-            Studio OS v3.4 · burnout / deals / tech debt
-          </a>
-          <a
-            href="/studio-os-v35.html"
-            target="_blank"
-            rel="noreferrer"
-            className="block w-full rounded-lg border border-border bg-elevated px-3 py-2.5 text-center text-xs font-bold uppercase tracking-wide text-muted transition hover:border-accent hover:text-accent"
-          >
-            Studio OS v3.5 · accessory factory
-          </a>
-          <a
-            href="/studio-os-v37.html"
-            target="_blank"
-            rel="noreferrer"
-            className="block w-full rounded-lg border border-border bg-elevated px-3 py-2.5 text-center text-xs font-bold uppercase tracking-wide text-muted transition hover:border-accent hover:text-accent"
-          >
-            Studio OS v3.7 · High-Density workbench
-          </a>
-          <a
-            href="/studio-os-v38.html"
-            target="_blank"
-            rel="noreferrer"
-            className="block w-full rounded-lg border border-border bg-elevated px-3 py-2.5 text-center text-xs font-bold uppercase tracking-wide text-muted transition hover:border-accent hover:text-accent"
-          >
-            Studio OS v3.8 · Netflix IDE
-          </a>
-          <a
-            href="/neoncore-v40.html"
-            target="_blank"
-            rel="noreferrer"
-            className="block w-full rounded-lg border border-border bg-elevated px-3 py-2.5 text-center text-xs font-bold uppercase tracking-wide text-muted transition hover:border-accent hover:text-accent"
-          >
-            NEONCORE v4.0 · Definitive IDE
-          </a>
-          <a
-            href="/neoncore-v48.html"
-            target="_blank"
-            rel="noreferrer"
-            className="block w-full rounded-lg border border-border bg-elevated px-3 py-2.5 text-center text-xs font-bold uppercase tracking-wide text-muted transition hover:border-accent hover:text-accent"
-          >
-            NEONCORE v4.8 · Platform Monolith
-          </a>
         </div>
       </div>
     </div>
@@ -3339,6 +3283,7 @@ function SettingsScreen() {
   const returnToMenu = useGame((s) => s.returnToMenu);
   const setScreen = useGame((s) => s.setScreen);
   const [panel, setPanel] = useState<"unlocks" | "contracts" | "hardware" | "netflix" | "platform" | "engines" | "none">("unlocks");
+  const office = useGame((s) => s.office);
   return (
     <div className="mx-auto max-w-lg space-y-3 px-1 pb-4 pt-1">
       <div className="game-panel px-4 py-3 text-center">
@@ -3352,15 +3297,20 @@ function SettingsScreen() {
         <Button size="sm" variant={panel === "contracts" ? "primary" : "secondary"} onClick={() => setPanel("contracts")}>
           Contracts
         </Button>
-        <Button size="sm" variant={panel === "hardware" ? "primary" : "secondary"} onClick={() => setPanel("hardware")}>
-          Hardware
-        </Button>
-        <Button size="sm" variant={panel === "netflix" ? "primary" : "secondary"} onClick={() => setPanel("netflix")}>
-          Netflix
-        </Button>
-        <Button size="sm" variant={panel === "platform" ? "primary" : "secondary"} onClick={() => setPanel("platform")}>
-          NeonStore
-        </Button>
+        {/* Late systems hidden in Garage Phase One (Foundation Lock) */}
+        {office > 1 && (
+          <>
+            <Button size="sm" variant={panel === "hardware" ? "primary" : "secondary"} onClick={() => setPanel("hardware")}>
+              Hardware
+            </Button>
+            <Button size="sm" variant={panel === "netflix" ? "primary" : "secondary"} onClick={() => setPanel("netflix")}>
+              Netflix
+            </Button>
+            <Button size="sm" variant={panel === "platform" ? "primary" : "secondary"} onClick={() => setPanel("platform")}>
+              NeonStore
+            </Button>
+          </>
+        )}
         <Button size="sm" variant={panel === "engines" ? "primary" : "secondary"} onClick={() => setPanel("engines")}>
           Engines
         </Button>
@@ -3376,9 +3326,9 @@ function SettingsScreen() {
       </div>
       {panel === "unlocks" && <UnlocksScreen embedded />}
       {panel === "contracts" && (<><OpsPublisherDeals /><ContractsScreen /></>)}
-      {panel === "hardware" && <HardwareLabScreen />}
-      {panel === "netflix" && <NetflixEditionScreen />}
-      {panel === "platform" && <PlatformScreen />}
+      {office > 1 && panel === "hardware" && <HardwareLabScreen />}
+      {office > 1 && panel === "netflix" && <NetflixEditionScreen />}
+      {office > 1 && panel === "platform" && <PlatformScreen />}
       {panel === "engines" && <TEngineScreen />}
       <SaveLoadPanel />
       <div className="space-y-2">

@@ -34,20 +34,26 @@ import type {
   StaffMember,
 } from "./types";
 
-export function uid(prefix = "id") {
-  return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
+let _uidSeq = 0;
+/** Stable id from optional parts; monotonic fallback (no Math.random). */
+export function uid(prefix = "id", ...parts: Array<string | number | boolean | null | undefined>) {
+  _uidSeq += 1;
+  const h = hashSeed(prefix, _uidSeq, ...parts);
+  return `${prefix}_${h.toString(16)}`;
 }
 
 export function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
+/** @deprecated Prefer SeededRng / hashSeed for causal sim. */
 export function rand(min: number, max: number) {
-  return min + Math.random() * (max - min);
+  return min + (hashSeed("legacy-rand", min, max, _uidSeq) / 4294967296) * (max - min);
 }
 
+/** @deprecated Prefer seeded pick. */
 export function pick<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)]!;
+  return arr[Math.floor((hashSeed("legacy-pick", _uidSeq, arr.length) / 4294967296) * arr.length)]!;
 }
 
 export function formatCash(n: number): string {
@@ -646,43 +652,47 @@ const SPECS: Array<import("./types").DevField | null> = [
 export function generateStaff(
   levelBias = 1,
   year = 1985,
-  opts?: { forceStar?: boolean },
+  opts?: { forceStar?: boolean; seed?: number; candidateIndex?: number },
 ): StaffMember {
   const eraBoost = 1 + Math.max(0, year - 1979) * 0.008;
+  const rng = new SeededRng(
+    opts?.seed ??
+      hashSeed("staff", year, levelBias, opts?.candidateIndex ?? 0, opts?.forceStar ? 1 : 0),
+  );
+  const r = (a: number, b: number) => rng.range(a, b);
+  const ri = (a: number, b: number) => rng.int(a, b);
   // ~12% chance of a higher-level "find" (or forced)
-  const isStar = opts?.forceStar || Math.random() < 0.12;
-  const isSolid = !isStar && Math.random() < 0.35;
+  const isStar = opts?.forceStar || rng.next() < 0.12;
+  const isSolid = !isStar && rng.next() < 0.35;
   let level = 1;
-  if (isStar) level = Math.round(rand(4, 8));
-  else if (isSolid) level = Math.round(rand(2, 4));
-  else level = Math.round(rand(1, 3));
+  if (isStar) level = Math.round(r(4, 8));
+  else if (isSolid) level = Math.round(r(2, 4));
+  else level = Math.round(r(1, 3));
   level = Math.max(1, Math.min(10, Math.round(level * Math.min(1.4, levelBias))));
 
-  // Stronger base stats — not weak garage rejects
   const baseMin = 38 + level * 3;
   const baseMax = 58 + level * 5;
   const starBump = isStar ? 12 : isSolid ? 5 : 0;
-  let design = Math.round(rand(baseMin, baseMax) * eraBoost + starBump + rand(-4, 8));
-  let tech = Math.round(rand(baseMin, baseMax) * eraBoost + starBump + rand(-4, 8));
-  let speed = Math.round(rand(baseMin + 2, baseMax + 4) * eraBoost + starBump * 0.6 + rand(-3, 6));
-  // One standout stat for identity
-  const standout = Math.floor(Math.random() * 3);
-  if (standout === 0) design = Math.min(98, design + Math.round(rand(6, 14)));
-  if (standout === 1) tech = Math.min(98, tech + Math.round(rand(6, 14)));
-  if (standout === 2) speed = Math.min(98, speed + Math.round(rand(6, 14)));
+  let design = Math.round(r(baseMin, baseMax) * eraBoost + starBump + r(-4, 8));
+  let tech = Math.round(r(baseMin, baseMax) * eraBoost + starBump + r(-4, 8));
+  let speed = Math.round(r(baseMin + 2, baseMax + 4) * eraBoost + starBump * 0.6 + r(-3, 6));
+  const standout = ri(0, 2);
+  if (standout === 0) design = Math.min(98, design + Math.round(r(6, 14)));
+  if (standout === 1) tech = Math.min(98, tech + Math.round(r(6, 14)));
+  if (standout === 2) speed = Math.min(98, speed + Math.round(r(6, 14)));
   design = clamp(design, 32, 100);
   tech = clamp(tech, 32, 100);
   speed = clamp(speed, 35, 100);
 
-  // Salary scales with power; hard-capped at $2M hire budget later
   let salary = Math.round((design + tech + speed) * (22 + level * 4) + 800 + level * 400);
   if (isStar) salary = Math.round(salary * 1.35);
-  salary = Math.min(salary, 1_800_000); // leave room under 2M signing package
+  salary = Math.min(salary, 1_800_000);
 
-  let name = `${pick(STAFF_FIRST)} ${pick(STAFF_LAST)}`;
+  const pickSeeded = <T,>(arr: T[]) => arr[ri(0, arr.length - 1)]!;
+  let name = `${pickSeeded(STAFF_FIRST)} ${pickSeeded(STAFF_LAST)}`;
   let guard = 0;
   while (RECENT_CANDIDATE_NAMES.includes(name) && guard < 20) {
-    name = `${pick(STAFF_FIRST)} ${pick(STAFF_LAST)}`;
+    name = `${pickSeeded(STAFF_FIRST)} ${pickSeeded(STAFF_LAST)}`;
     guard++;
   }
   RECENT_CANDIDATE_NAMES.push(name);
