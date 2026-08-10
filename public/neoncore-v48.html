@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>NEONCORE Engine v4.8.0 // Platform Monolith</title>
+<style>
+:root{--bg:#020204;--panel:rgba(6,6,12,.97);--box:#090914;--border:#161626;--cyan:#00f0ff;--violet:#a600ff;--lime:#00ff66;--rose:#ff0055;--gold:#ffcc00;--text:#f0f0f5;--dim:#4e4e63}
+*{box-sizing:border-box}body{margin:0;padding:16px;font-family:system-ui,sans-serif;background:linear-gradient(145deg,#070314,#020204 60%);color:var(--text)}
+h1{font-size:1.05rem;letter-spacing:1px;text-transform:uppercase;border-bottom:1px solid var(--border);padding-bottom:10px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
+.grid{display:grid;grid-template-columns:minmax(260px,380px) 1fr;gap:16px;max-width:1700px;margin:0 auto}
+@media(max-width:900px){.grid{grid-template-columns:1fr}}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px;backdrop-filter:blur(20px)}
+.hud{display:grid;grid-template-columns:1fr 1fr;gap:8px}.tile{background:var(--box);border:1px solid var(--border);border-left:4px solid var(--violet);padding:10px;border-radius:8px}
+.tile.lime{border-left-color:var(--lime)}.tile.cyan{border-left-color:var(--cyan)}.tile.gold{border-left-color:var(--gold)}
+.lbl{font-size:.62rem;color:var(--dim);text-transform:uppercase;font-weight:700}.val{font:900 1.05rem monospace}
+.tabs{display:flex;flex-wrap:wrap;gap:4px;background:#0008;padding:4px;border-radius:6px;border:1px solid var(--border);margin:12px 0}
+.tab{flex:1;min-width:4rem;background:0;border:0;color:var(--dim);padding:10px 4px;font-size:.62rem;font-weight:800;text-transform:uppercase;cursor:pointer;border-radius:4px}
+.tab.on{background:#121224;color:var(--cyan)}
+.btn{width:100%;padding:12px;border:0;border-radius:6px;font-weight:800;font-size:.72rem;text-transform:uppercase;cursor:pointer;background:linear-gradient(135deg,#003cdb,var(--cyan));color:#fff;margin-top:8px}
+.btn.ghost{background:#121224;border:1px solid var(--border)}
+label{display:block;font-size:.62rem;color:var(--dim);font-weight:700;margin:10px 0 4px;text-transform:uppercase}
+input,select{width:100%;padding:10px;background:#05050a;color:#fff;border:1px solid var(--border);border-radius:6px}
+.row{background:var(--box);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px;font-size:.8rem}
+.log{height:160px;overflow:auto;background:#010102;border:1px solid var(--border);border-radius:8px;padding:10px;font:11px monospace;margin-top:12px}
+.ok{color:var(--lime)}.err{color:var(--rose)}.warn{color:var(--gold)}.info{color:var(--cyan)}.view{display:none}.view.on{display:block}
+.bar{height:6px;background:#08080f;border-radius:3px;overflow:hidden;margin:8px 0}.bar>i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--violet),var(--cyan));transition:width .2s}
+</style></head><body>
+<h1><span>NEONCORE v4.8.0 // PLATFORM MONOLITH</span><span id="clock" style="font-family:monospace;color:var(--dim)">Y1 M1 W1</span></h1>
+<div class="grid">
+<div class="panel">
+  <div class="hud">
+    <div class="tile lime"><div class="lbl">Capital</div><div class="val" id="cash">$3,000,000</div></div>
+    <div class="tile"><div class="lbl">RP</div><div class="val" id="rp">120</div></div>
+    <div class="tile cyan"><div class="lbl">Fans</div><div class="val" id="fans">150,000</div></div>
+    <div class="tile gold"><div class="lbl">Store</div><div class="val" id="store" style="font-size:.85rem">No Platform</div></div>
+  </div>
+  <div style="background:var(--box);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:.8rem;margin-top:10px">
+    MMO ops: <b id="mmoc" style="color:var(--cyan)">0</b><br>
+    <span id="roy" style="color:var(--dim)">AI Store Royalties: $0/Mo</span>
+  </div>
+  <div class="log" id="log"></div>
+</div>
+<div class="panel">
+  <div class="tabs">
+    <button class="tab on" onclick="tab('dev',this)">Dev</button>
+    <button class="tab" onclick="tab('storefront',this)">NeonStore</button>
+    <button class="tab" onclick="tab('packs',this)">Mod API</button>
+    <button class="tab" onclick="tab('shelf',this)">Market</button>
+    <button class="tab" onclick="tab('save',this)">Save</button>
+  </div>
+  <div id="dev" class="view on">
+    <label>Title</label><input id="title" value="World of Sandbox"/>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div><label>Topic</label><select id="topic"><option>Sci-Fi</option><option>City</option></select></div>
+      <div><label>Genre</label><select id="genre"><option>Action</option><option>Simulation</option></select></div>
+    </div>
+    <label>Format</label>
+    <select id="fmt"><option value="Retail">Retail 12w</option><option value="MMO">MMO 16w</option></select>
+    <div class="bar"><i id="prog"></i></div>
+    <button class="btn" onclick="ship()">Authorize Build Pipeline</button>
+    <button class="btn ghost" onclick="tick(1)">Idle week</button>
+  </div>
+  <div id="storefront" class="view">
+    <p style="font-size:.72rem;color:var(--dim)">L3+ · $10M liquid · $2.5M deploy · 0% on your titles · 30% rival digital tax</p>
+    <div id="storeui">
+      <button class="btn" onclick="launchStore()">Deploy NeonStore (−$2.5M)</button>
+    </div>
+  </div>
+  <div id="packs" class="view">
+    <button class="btn ghost" onclick="installPack('arcade')">Arcade Revival (validated)</button>
+    <button class="btn ghost" onclick="installPack('chaos')">Community Chaos (unsigned)</button>
+    <div id="packlist" style="margin-top:10px;font-size:.8rem;color:var(--dim)"></div>
+  </div>
+  <div id="shelf" class="view"><div id="shelfEl"></div></div>
+  <div id="save" class="view">
+    <button class="btn" onclick="dl()">Download JSON</button>
+    <textarea id="paste" rows="5" style="width:100%;margin-top:8px;background:#05050a;color:#fff;border:1px solid var(--border);border-radius:6px;font:11px monospace"></textarea>
+    <button class="btn ghost" onclick="ld()">Load</button>
+  </div>
+</div>
+</div>
+<script>
+const banned=['stranger things','wednesday','mario','zelda','fortnite','minecraft'];
+let S={year:1,month:1,week:1,cash:3000000,rp:120,fans:150000,trailing:38,rent:42000,store:false,storeRoy:0,market:[],packs:[],litQueue:[]};
+function log(m,c){const e=document.getElementById('log');const d=document.createElement('div');d.className=c||'info';d.textContent='[Y'+S.year+' M'+S.month+' W'+S.week+'] '+m;e.appendChild(d);e.scrollTop=e.scrollHeight}
+function hud(){
+  clock.textContent='Y'+S.year+' M'+S.month+' W'+S.week;
+  cash.textContent='$'+Math.round(S.cash).toLocaleString();
+  rp.textContent=S.rp;fans.textContent=Math.floor(S.fans).toLocaleString();
+  store.textContent=S.store?'NeonStore':'No Platform';
+  store.style.color=S.store?'var(--lime)':'#fff';
+  mmoc.textContent=S.market.filter(p=>p.fmt==='MMO').length;
+  roy.textContent='AI Store Royalties: $'+Math.round(S.storeRoy).toLocaleString()+'/Mo';
+  if(S.store)storeui.innerHTML='<h3 style="color:var(--lime);margin:0">SYSTEM GRID DEPLOYED</h3><p style="font-size:.8rem;color:var(--dim)">Collecting 30% on rival digital sales.</p>';
+  shelfUI();packlist.textContent='Installed: '+(S.packs.join(', ')||'none');
+}
+function tab(id,btn){document.querySelectorAll('.view').forEach(v=>v.classList.remove('on'));document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));document.getElementById(id).classList.add('on');btn.classList.add('on')}
+function launchStore(){
+  if(S.store)return;
+  if(S.cash<10000000){log('Need $10M liquid','err');return}
+  if(S.cash<2500000){log('Need $2.5M deploy','err');return}
+  S.cash-=2500000;S.store=true;log('NeonStore deployed — 0% own cut, 30% rival tax','ok');hud();
+}
+function installPack(id){
+  if(id==='chaos'){log('Pack validation failed — unsigned','err');return}
+  if(S.packs.includes(id))return;
+  S.packs.push(id);S.rp+=15;log('Pack installed: '+id,'ok');hud();
+}
+function ship(){
+  const title=document.getElementById('title').value,topic=topic.value,genre=genre.value,fmt=document.getElementById('fmt').value;
+  let w=fmt==='MMO'?16:12;
+  // progress bar fake
+  let p=0;const iv=setInterval(()=>{p+=10;prog.style.width=p+'%';if(p>=100)clearInterval(iv)},40);
+  let pts=(40+Math.random()*20)*(((genre==='Action'&&topic==='Sci-Fi')||(genre==='Simulation'&&topic==='City'))?1.3:0.7);
+  let score=Math.max(1,Math.min(10,Math.round(((pts/S.trailing)*7)*10)/10));
+  S.trailing=S.trailing*0.7+pts*0.3;
+  const base=pts*Math.pow(score,2.4)*25;
+  if(fmt==='MMO'){
+    S.market.push({title,info:topic+'/'+genre,score,fmt:'MMO',months:0,subs:Math.round(base*0.5),upkeep:0});
+    log('MMO online: '+title,'ok');
+  } else {
+    S.market.push({title,info:topic+'/'+genre,score,fmt:'Retail',weeks:16,base:Math.round(base/16)});
+    log('Retail ship: '+title+' ★'+score,'ok');
+  }
+  // infringement check
+  const low=title.toLowerCase();
+  if(banned.some(b=>low.includes(b))){
+    S.litQueue.push({title,due:S.week+2,id:Math.random().toString(36).slice(2)});
+    log('Legal watch: trademark risk — review in 2 weeks','warn');
+  }
+  S.rp+=12;setTimeout(()=>{tick(w);prog.style.width='0'},500);
+}
+function tick(n){
+  for(let i=0;i<n;i++){
+    S.week++;
+    // litigation due
+    S.litQueue=S.litQueue.filter(q=>{
+      if(S.week<q.due)return true;
+      if(Math.random()<0.5){
+        S.market=S.market.filter(m=>m.title!==q.title);
+        log('C&D: '+q.title+' pulled from market','err');
+      } else {
+        S.cash-=150000;log('Settlement $150k: '+q.title,'warn');
+      }
+      return false;
+    });
+    if(S.week>4){
+      S.week=1;S.month++;
+      let mmoCost=0;
+      if(S.store){
+        const units=Math.round((500+Math.random()*2000)*Math.max(1,S.fans/100000));
+        S.storeRoy=units*9.99*0.30;
+      } else S.storeRoy=0;
+      S.market.forEach(p=>{if(p.fmt==='MMO')mmoCost+=p.upkeep||0});
+      S.cash-=(S.rent-S.storeRoy+mmoCost);
+      log('Month: rent −$'+S.rent+' · store +$'+Math.round(S.storeRoy)+' · mmo −$'+mmoCost,'warn');
+      monthMarket();
+    }
+    if(S.month>12){S.month=1;S.year++}
+  }
+  hud();
+}
+function monthMarket(){
+  S.market.forEach(p=>{
+    if(p.fmt==='Retail'&&p.weeks>0){
+      const u=Math.max(4,Math.round(p.base*Math.pow(p.weeks/16,2)));
+      p.weeks-=4;
+      const cut=S.store?1:0.85;
+      S.cash+=u*4*9.99*cut;
+      S.fans=Math.max(0,S.fans+Math.round(u*4*0.04*((p.score-5.5)/4.5)));
+    } else if(p.fmt==='MMO'){
+      p.months++;
+      p.subs=Math.round(p.subs*Math.max(0.05,1-p.months/64));
+      const rev=p.subs*4.99;p.upkeep=Math.round((p.subs/2500)*320);
+      S.cash+=rev-p.upkeep;S.fans+=Math.round(p.subs*0.005);
+    }
+  });
+  S.market=S.market.filter(p=>p.fmt==='MMO'||p.weeks>0);
+}
+function shelfUI(){
+  const el=document.getElementById('shelfEl');
+  if(!S.market.length){el.innerHTML='<div style="text-align:center;color:var(--dim);padding:30px">Empty</div>';return}
+  el.innerHTML='';S.market.forEach(p=>{const d=document.createElement('div');d.className='row';
+    d.innerHTML='<b>['+p.fmt+'] '+p.title+'</b> ★'+p.score+' · '+(p.fmt==='MMO'?(p.subs+' subs'):(p.weeks+'w'));
+    el.appendChild(d)});
+}
+function dl(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify({system_version:'4.8.0',state:S},null,2)],{type:'application/json'}));a.download='neoncore_v48.json';a.click()}
+function ld(){try{const d=JSON.parse(document.getElementById('paste').value);if(d.state)S=d.state;log('Loaded','ok');hud()}catch(e){log('Bad JSON','err')}}
+log('v4.8 Platform Monolith online.','ok');hud();
+</script></body></html>

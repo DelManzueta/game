@@ -651,6 +651,10 @@ export interface GameState {
   ipRoyaltyGameIds?: string[];
   /** Active MMO server runtimes */
   activeMmos?: import("./hardcoreEngines").MmoRuntime[];
+  digitalStorefront?: import("./digitalStorefront").DigitalStorefront;
+  installedPacks?: string[];
+  /** Games pending infringement check at week */
+  infringementDue?: { gameId: string; dueWeek: number; title: string }[];
   /** Known combo labels after post-mortem */
   knownCombos?: Record<string, import("./tycoonRiskAnalytics").MatchLabel>;
   playerConsoles?: import("./tycoonLateMarket").PlayerConsole[];

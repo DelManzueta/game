@@ -298,6 +298,14 @@ function MainMenu() {
           >
             NEONCORE v4.0 · Definitive IDE
           </a>
+          <a
+            href="/neoncore-v48.html"
+            target="_blank"
+            rel="noreferrer"
+            className="block w-full rounded-lg border border-border bg-elevated px-3 py-2.5 text-center text-xs font-bold uppercase tracking-wide text-muted transition hover:border-accent hover:text-accent"
+          >
+            NEONCORE v4.8 · Platform Monolith
+          </a>
         </div>
       </div>
     </div>
@@ -2889,6 +2897,76 @@ function AccessoryFactoryPanel({ onMsg }: { onMsg: (m: string) => void }) {
 
 
 
+function PlatformScreen() {
+  const cash = useGame((s) => s.cash);
+  const office = useGame((s) => s.office);
+  const store = useGame((s) => s.digitalStorefront);
+  const packs = useGame((s) => s.installedPacks) ?? [];
+  const launchDigitalStorefront = useGame((s) => s.launchDigitalStorefront);
+  const installContentPack = useGame((s) => s.installContentPack);
+  const [msg, setMsg] = useState("");
+  const [name, setName] = useState("NeonStore");
+  const packsList = [
+    { id: "pack_arcade_revival", name: "Arcade Revival Pack", note: "+15 RP · topics" },
+    { id: "pack_space_ops", name: "Orbital Ops Expansion", note: "+$25k · space topics" },
+    { id: "pack_community_chaos", name: "Community Chaos (unsigned)", note: "Fails validation" },
+  ];
+  return (
+    <div className="space-y-3">
+      <div className="game-panel px-4 py-3 text-center">
+        <h2 className="text-xl font-bold text-fg">Digital Platform</h2>
+        <p className="text-xs text-muted">
+          NeonStore · $2.5M · L3+ · $10M liquid · 0% on your games · 30% rival tax
+        </p>
+      </div>
+      {msg && <p className="text-center text-sm text-warn">{msg}</p>}
+      <div className="rounded-xl border border-border bg-elevated p-3 space-y-2">
+        <p className="text-[10px] font-bold uppercase text-muted">Storefront</p>
+        {store?.active ? (
+          <div className="text-sm">
+            <div className="font-bold text-good">{store.name} ONLINE</div>
+            <div className="text-xs text-muted">
+              Last month royalties {formatCash(store.lastMonthRoyalties)} · lifetime{" "}
+              {formatCash(store.lifetimeRivalRoyalties)}
+            </div>
+          </div>
+        ) : (
+          <>
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Store name" />
+            <p className="text-[11px] text-muted">
+              Cash {formatCash(cash)} · office L{office}. Need L3+ and $10M liquid.
+            </p>
+            <Button
+              className="w-full"
+              onClick={() => setMsg(launchDigitalStorefront(name) ?? "Platform deployed.")}
+            >
+              Deploy platform (−$2.5M)
+            </Button>
+          </>
+        )}
+      </div>
+      <div className="rounded-xl border border-border bg-elevated p-3 space-y-2">
+        <p className="text-[10px] font-bold uppercase text-muted">Modding API · content packs</p>
+        {packsList.map((p) => (
+          <button
+            key={p.id}
+            type="button"
+            disabled={packs.includes(p.id)}
+            className="flex w-full items-center justify-between rounded-lg border border-border bg-paper px-3 py-2 text-left text-xs disabled:opacity-40"
+            onClick={() => setMsg(installContentPack(p.id) ?? "Installed.")}
+          >
+            <span>
+              <span className="font-bold text-fg">{p.name}</span>
+              <span className="block text-muted">{p.note}</span>
+            </span>
+            <span className="text-muted">{packs.includes(p.id) ? "ON" : "Install"}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function NetflixEditionScreen() {
   const cash = useGame((s) => s.cash);
   const fans = useGame((s) => s.fans);
@@ -3260,8 +3338,7 @@ function SettingsScreen() {
   const setModal = useGame((s) => s.setModal);
   const returnToMenu = useGame((s) => s.returnToMenu);
   const setScreen = useGame((s) => s.setScreen);
-  const [panel, setPanel] = useState<"unlocks" | "contracts" | "hardware"
-  | "netflix" | "engines" | "none">("unlocks");
+  const [panel, setPanel] = useState<"unlocks" | "contracts" | "hardware" | "netflix" | "platform" | "engines" | "none">("unlocks");
   return (
     <div className="mx-auto max-w-lg space-y-3 px-1 pb-4 pt-1">
       <div className="game-panel px-4 py-3 text-center">
@@ -3281,6 +3358,9 @@ function SettingsScreen() {
         <Button size="sm" variant={panel === "netflix" ? "primary" : "secondary"} onClick={() => setPanel("netflix")}>
           Netflix
         </Button>
+        <Button size="sm" variant={panel === "platform" ? "primary" : "secondary"} onClick={() => setPanel("platform")}>
+          NeonStore
+        </Button>
         <Button size="sm" variant={panel === "engines" ? "primary" : "secondary"} onClick={() => setPanel("engines")}>
           Engines
         </Button>
@@ -3298,6 +3378,7 @@ function SettingsScreen() {
       {panel === "contracts" && (<><OpsPublisherDeals /><ContractsScreen /></>)}
       {panel === "hardware" && <HardwareLabScreen />}
       {panel === "netflix" && <NetflixEditionScreen />}
+      {panel === "platform" && <PlatformScreen />}
       {panel === "engines" && <TEngineScreen />}
       <SaveLoadPanel />
       <div className="space-y-2">

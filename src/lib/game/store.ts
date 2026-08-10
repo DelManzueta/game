@@ -182,6 +182,18 @@ import {
   type MmoRuntime,
 } from "./hardcoreEngines";
 import {
+  NEON_STORE,
+  emptyStorefront,
+  canLaunchStorefront,
+  monthlyPlatformRoyalties,
+  playerStoreKeepRate,
+  titleLooksInfringing,
+  rollInfringementLitigation,
+  BUILTIN_PACKS,
+  installPack,
+  type ContentPack,
+} from "./digitalStorefront";
+import {
   canAdvanceOffice,
   normalizeOfficeLevel,
   stageForOffice,
@@ -534,6 +546,9 @@ function initialState(): GameState {
     streamerHypeWeeksLeft: 0,
     ipRoyaltyGameIds: [],
     activeMmos: [],
+    digitalStorefront: emptyStorefront(),
+    installedPacks: [],
+    infringementDue: [],
     knownCombos: {},
     playerConsoles: [],
     lastAwardsYear: 0,
@@ -1504,6 +1519,22 @@ function releaseProject(next: GameState, project: GameProject): GameState {
     ).ipRoyaltyRate;
     (released as { ipLicensed?: boolean }).ipLicensed = true;
   }
+  // IP infringement schedule (2 weeks) if title uses blocked trademarks without license
+  {
+    const licensed = !!(next.activeIpLicense && next.activeIpLicense.licenseId !== "clear");
+    if (titleLooksInfringing(released.title, licensed)) {
+      next.infringementDue = [
+        ...(next.infringementDue ?? []),
+        { gameId: released.id, dueWeek: next.week + 2, title: released.title },
+      ];
+      next.notifications = pushNote(
+        next,
+        `Legal watch: "${released.title}" may infringe — review in 2 weeks.`,
+        "warn",
+      );
+    }
+  }
+
   // MMO lifecycle registration (research mmo + large/aaa or explicit flag)
   {
     const mmoOwned =
@@ -1809,6 +1840,8 @@ interface Actions {
     focus: ConventionFocus,
   ) => string | null;
   shutdownMmo: (gameId: string) => string | null;
+  launchDigitalStorefront: (name?: string) => string | null;
+  installContentPack: (packId: string) => string | null;
   acceptCopySettlement: () => string | null;
   refuseCopySettlement: () => string | null;
   launchAccessory: (
@@ -2770,6 +2803,56 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     }
 
 
+    // Trademark infringement (banned names without license)
+    if ((next.infringementDue ?? []).length) {
+      const due = next.infringementDue ?? [];
+      const remain = [];
+      for (const item of due) {
+        if (next.week < item.dueWeek) {
+          remain.push(item);
+          continue;
+        }
+        const lit = rollInfringementLitigation(() => Math.random());
+        let sales = [...next.activeSales];
+        let games = [...next.releasedGames];
+        if (lit.salesHalted) {
+          sales = sales
+            .map((g) =>
+              g.id === item.gameId
+                ? { ...g, onSale: false, dormant: true, weeklySalesLeft: [] }
+                : g,
+            )
+            .filter((g) => g.onSale && !g.dormant);
+          games = games.map((g) =>
+            g.id === item.gameId
+              ? { ...g, onSale: false, dormant: true, weeklySalesLeft: [] }
+              : g,
+          );
+        }
+        if (lit.penaltyCash > 0) {
+          next.cash -= lit.penaltyCash;
+          next.ledger = applyLedger(next.ledger, {
+            week: next.week,
+            amount: -lit.penaltyCash,
+            category: "other",
+            label: `IP settlement: ${item.title}`,
+            ref: `tm-lit-${item.gameId}`,
+          });
+        }
+        next.activeSales = sales;
+        next.releasedGames = games;
+        next.notifications = pushNote(next, `"${item.title}" — ${lit.msg}`, lit.salesHalted ? "bad" : "warn");
+        next.pendingEvent = {
+          id: `tm_${item.gameId}`,
+          title: lit.code.replace(/_/g, " "),
+          body: lit.msg,
+        };
+        next.modal = "event";
+        next.speed = 0;
+      }
+      next.infringementDue = remain;
+    }
+
     // Module 17 — IP litigation 2 weeks post-launch
     {
       let sales = [...next.activeSales];
@@ -2892,6 +2975,33 @@ export const useGame = create<GameState & Actions>((set, get) => ({
           next.modal = "event";
           next.speed = 0;
         }
+      }
+    }
+
+    // NeonStore monthly rival royalties
+    if (((next.week - 1) % 4) === 0 && next.digitalStorefront?.active) {
+      const roy = monthlyPlatformRoyalties(next.fans, () => Math.random());
+      next.cash += roy.revenue;
+      next.digitalStorefront = {
+        ...next.digitalStorefront,
+        lastMonthRoyalties: roy.revenue,
+        lifetimeRivalRoyalties:
+          (next.digitalStorefront.lifetimeRivalRoyalties ?? 0) + roy.revenue,
+        rivalTitlesHosted: (next.digitalStorefront.rivalTitlesHosted ?? 0) + 1,
+      };
+      next.ledger = applyLedger(next.ledger, {
+        week: next.week,
+        amount: roy.revenue,
+        category: "sales",
+        label: `${next.digitalStorefront.name} rival royalties (${roy.units} units)`,
+        ref: `store-royalty-w${next.week}`,
+      });
+      if (roy.revenue > 500) {
+        next.notifications = pushNote(
+          next,
+          `${next.digitalStorefront.name}: +${formatCash(roy.revenue)} third-party cut.`,
+          "good",
+        );
       }
     }
 
@@ -4455,6 +4565,63 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         "Refused settlement — final score −1.5 when you ship.",
         "warn",
       ),
+    });
+    return null;
+  },
+
+  launchDigitalStorefront: (name) => {
+    const state = get();
+    const store = state.digitalStorefront ?? emptyStorefront();
+    const check = canLaunchStorefront({
+      office: state.office,
+      cash: state.cash,
+      alreadyActive: store.active,
+    });
+    if (!check.ok) return check.error;
+    const storeName = (name?.trim() || NEON_STORE.name).slice(0, 32);
+    set({
+      cash: state.cash - NEON_STORE.launchCost,
+      digitalStorefront: {
+        ...store,
+        active: true,
+        name: storeName,
+        launchedWeek: state.week,
+      },
+      dirty: true,
+      notifications: pushNote(
+        state,
+        `${storeName} live — 0% cut on your titles, 30% on rival digital sales. −${formatCash(NEON_STORE.launchCost)}.`,
+        "good",
+      ),
+      ledger: applyLedger(state.ledger, {
+        week: state.week,
+        amount: -NEON_STORE.launchCost,
+        category: "other",
+        label: `${storeName} platform launch`,
+        ref: `neonstore-w${state.week}`,
+      }),
+    });
+    return null;
+  },
+
+  installContentPack: (packId) => {
+    const state = get();
+    const pack = BUILTIN_PACKS.find((p) => p.id === packId);
+    if (!pack) return "Unknown content pack.";
+    const res = installPack(pack, state.installedPacks ?? []);
+    if (!res.ok) return res.error;
+    const topics = new Set(state.unlockedTopics);
+    for (const t of pack.topics ?? []) topics.add(t);
+    const genres = new Set(state.unlockedGenres as string[]);
+    for (const g of pack.genres ?? []) genres.add(g);
+    set({
+      cash: state.cash + res.grantCash,
+      researchPoints: state.researchPoints + res.grantRp,
+      unlockedTopics: [...topics],
+      unlockedGenres: [...genres] as typeof state.unlockedGenres,
+      installedPacks: [...(state.installedPacks ?? []), pack.id],
+      dirty: true,
+      notifications: pushNote(state, `Installed pack: ${pack.name} v${pack.version}.`, "good"),
     });
     return null;
   },

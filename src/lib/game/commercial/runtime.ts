@@ -6,6 +6,7 @@ import type { GameState, ReleasedGame } from "../types";
 import { defaultLaunchPrice } from "../contracts";
 import { applyLedger } from "../finance/ledger";
 import { applyIpRoyalty } from "../netflixEdition";
+import { playerStoreKeepRate } from "../digitalStorefront";
 import {
   calculateWeeklySales,
   reviewToHundred,
@@ -251,6 +252,10 @@ export function tickReleasedSales(
 
       units = Math.floor(result.unitsSold * eraSalesDampener(next.year));
       rev = result.developerRevenue * (units / Math.max(1, result.unitsSold));
+      if (next.digitalStorefront?.active) {
+        // restore ~15% that third-party store would take
+        rev = rev / 0.85;
+      }
       nextG.weeklySalesResults = [...(g.weeklySalesResults ?? []), result].slice(
         -200,
       );
@@ -289,7 +294,15 @@ export function tickReleasedSales(
       units = Math.floor(planUnits * eraSalesDampener(next.year));
       const price = g.launchPrice ?? defaultLaunchPrice(g.size);
       const share = g.publisherRoyalty ?? 0.7;
-      rev = units * price * share;
+      const storeKeep = playerStoreKeepRate(!!next.digitalStorefront?.active);
+      // own store: no third-party marketplace tax (storeKeep 1.0 vs 0.85 baseline on gross)
+      rev = units * price * share * (storeKeep >= 1 ? 1 : storeKeep / 0.85 * 0.85);
+      // simpler: if own store boost revenue by removing 15% platform cut from residual
+      if (next.digitalStorefront?.active) {
+        rev = units * price * share; // full publisher share, no extra 15% store tax
+      } else {
+        rev = units * price * share * 0.85;
+      }
       if (units <= 15) {
         nextG.lowSalesStreak = (g.lowSalesStreak ?? 0) + 1;
         if (nextG.lowSalesStreak >= 6) {
