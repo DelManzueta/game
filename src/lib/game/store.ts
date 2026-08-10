@@ -151,6 +151,14 @@ import {
   PUBLISHER_MATRIX,
   type PublisherOffer,
 } from "./tycoonOps34";
+import {
+  ACCESSORY_CATEGORIES,
+  createHardwareProduct,
+  processHardwareWeek,
+  setupCostCheck,
+  type AccessoryCategoryId,
+  type HardwareProduct,
+} from "./hardwareMerch";
 import { tycoonHypeDecay, tycoonStaffEnergyTick, TYCOON_DEFAULTS } from "./tycoonEngine";
 import {
   competitorRelease,
@@ -470,6 +478,7 @@ function initialState(): GameState {
     postMortems: [],
     genreExp: { action: 0, adventure: 0, rpg: 0, simulation: 0, strategy: 0, casual: 0 },
     gameHistoryLedger: [],
+    hardwareProducts: [],
     knownCombos: {},
     playerConsoles: [],
     lastAwardsYear: 0,
@@ -1639,6 +1648,11 @@ interface Actions {
   refactorEngine: (engineId?: string) => string | null;
   sendStaffOnVacation: (staffId: string) => string | null;
   signOpsPublisher: (publisherId: string) => string | null;
+  launchAccessory: (
+    categoryId: AccessoryCategoryId,
+    name: string,
+    retailPrice: number,
+  ) => string | null;
   attachTEngineFramework: (engineId: string) => string | null;
   executeCheatCommand: (raw: string) => string | null;
   startConfiguredConsole: (
@@ -2629,6 +2643,23 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       }
       next.releasedGames = games;
       next.activeSales = sales;
+    // Module 23 — physical merch weekly shelves
+    if ((next.hardwareProducts ?? []).length) {
+      const hw = processHardwareWeek(next.hardwareProducts ?? []);
+      next.hardwareProducts = hw.products;
+      if (hw.cashDelta !== 0) {
+        next.cash += hw.cashDelta;
+        next.ledger = applyLedger(next.ledger, {
+          week: next.week,
+          amount: hw.cashDelta,
+          category: "sales",
+          label: `Hardware margins (${hw.units} units)`,
+          ref: `hw-sales-w${next.week}`,
+        });
+      }
+      if (hw.fansDelta) next.fans = Math.max(0, next.fans + hw.fansDelta);
+    }
+
     }
 
     // Module 11 — Annual G3 Awards (Dec week 4)
@@ -3593,6 +3624,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     postMortems: [],
     genreExp: { action: 0, adventure: 0, rpg: 0, simulation: 0, strategy: 0, casual: 0 },
     gameHistoryLedger: [],
+    hardwareProducts: [],
     knownCombos: {},
     playerConsoles: [],
     lastAwardsYear: 0,
@@ -4040,6 +4072,43 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         category: "other",
         label: `Publisher advance: ${offer.company}`,
         ref: `ops-pub-${offer.id}`,
+      }),
+    });
+    return null;
+  },
+
+  launchAccessory: (categoryId, name, retailPrice) => {
+    const state = get();
+    if (!(categoryId in ACCESSORY_CATEGORIES)) return "Unknown accessory category.";
+    if (!Number.isFinite(retailPrice) || retailPrice <= 0) return "Retail price must be > 0.";
+    const err = setupCostCheck(categoryId, state.cash, state.researchPoints);
+    if (err) return err;
+    const cat = ACCESSORY_CATEGORIES[categoryId];
+    const product = createHardwareProduct({
+      id: uid("hw"),
+      name,
+      categoryId,
+      retailPrice,
+      fans: state.fans,
+    });
+    set({
+      cash: state.cash - cat.setupCost,
+      researchPoints: state.researchPoints - cat.rpCost,
+      hardwareProducts: [product, ...(state.hardwareProducts ?? [])],
+      dirty: true,
+      notifications: pushNote(
+        state,
+        product.lossLeader
+          ? `Factory: "${product.name}" loss-leader shipping 16w. −${formatCash(cat.setupCost)}.`
+          : `Factory: "${product.name}" shipping 16w. −${formatCash(cat.setupCost)}.`,
+        product.lossLeader ? "warn" : "good",
+      ),
+      ledger: applyLedger(state.ledger, {
+        week: state.week,
+        amount: -cat.setupCost,
+        category: "research",
+        label: `Accessory setup: ${cat.label}`,
+        ref: `hw-setup-${product.id}`,
       }),
     });
     return null;

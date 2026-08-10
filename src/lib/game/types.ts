@@ -636,6 +636,8 @@ export interface GameState {
   gameHistoryLedger?: import("./workshopMods").GameHistoryEntry[];
   /** Module 22 — last year we aged engines */
   lastEngineAgeYear?: number;
+  /** Module 23 — physical accessories on warehouse shelves */
+  hardwareProducts?: import("./hardwareMerch").HardwareProduct[];
   /** Known combo labels after post-mortem */
   knownCombos?: Record<string, import("./tycoonRiskAnalytics").MatchLabel>;
   playerConsoles?: import("./tycoonLateMarket").PlayerConsole[];
