@@ -58,6 +58,7 @@ import { MarketScreen } from "@/components/game/MarketScreen";
 import { SalesChart, salesPointsFromGame } from "@/components/game/SalesChart";
 import { CAMPAIGN_CATALOG } from "@/lib/game/commercial/marketing";
 import { HARDWARE_TIERS, type HardwareTierId } from "@/lib/game/tycoonLateMarket";
+import { DRM_TIERS, type DrmTier } from "@/lib/game/tycoonPiracy";
 import { getPlatformSpec, platformMarketState, weekToCampaignDay } from "@/lib/game/platforms/lifecycle";
 import { SYSTEM_UNLOCKS, describeUnlockRequirements } from "@/lib/game/progression/unlockRegistry";
 import { idealPhaseSliders } from "@/lib/game/classicGdt";
@@ -712,8 +713,12 @@ function TechReadinessPanel({
 function ProjectModsBar() {
   const project = useGame((s) => s.currentProject);
   const unlocked = useGame((s) => s.unlockedPlatforms);
+  const unlockedDrm = useGame((s) => s.unlockedDrm) ?? ["None"];
   const toggleCrunchMode = useGame((s) => s.toggleCrunchMode);
   const setSecondaryPlatforms = useGame((s) => s.setSecondaryPlatforms);
+  const setProjectDrm = useGame((s) => s.setProjectDrm);
+  const unlockDrm = useGame((s) => s.unlockDrm);
+  const rp = useGame((s) => s.researchPoints);
   const [msg, setMsg] = useState("");
   if (!project) return null;
   const secs = project.secondaryPlatformIds ?? [];
@@ -745,6 +750,41 @@ function ProjectModsBar() {
             Flu {project.fluWeeksLeft}w
           </span>
         )}
+      </div>
+      <div>
+        <p className="mb-1 text-[10px] font-bold uppercase text-white/45">
+          DRM / copy protection
+        </p>
+        <div className="flex flex-wrap gap-1.5">
+          {DRM_TIERS.map((d) => {
+            const have = unlockedDrm.includes(d.id) || d.id === "None";
+            const on = (project.drmTier ?? "None") === d.id;
+            return (
+              <button
+                key={d.id}
+                type="button"
+                className={cnJoin(
+                  "rounded-full border px-2 py-1 text-[10px] font-semibold",
+                  on
+                    ? "border-accent bg-accent/25 text-accent"
+                    : have
+                      ? "border-white/15 bg-white/5 text-white/70"
+                      : "border-white/10 text-white/35",
+                )}
+                onClick={() => {
+                  if (!have) {
+                    setMsg(unlockDrm(d.id as DrmTier) ?? `Unlocked ${d.label}`);
+                  } else {
+                    setMsg(setProjectDrm(d.id as DrmTier) ?? d.label);
+                  }
+                }}
+              >
+                {have ? d.label : `${d.label} (${d.rpUnlock} RP)`}
+              </button>
+            );
+          })}
+        </div>
+        <p className="mt-1 text-[10px] text-white/40">RP {Math.floor(rp)} · heavier DRM = less theft, more backlash</p>
       </div>
       {candidates.length > 0 && (
         <div>

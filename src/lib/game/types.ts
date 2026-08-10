@@ -295,6 +295,8 @@ export interface GameProject {
   /** Module 9 — up to 2 secondary platforms. */
   secondaryPlatformIds?: string[];
   /** Module 8 — flat review penalty from crises (e.g. bug fest −1.5). */
+  /** Module 16 DRM for this title */
+  drmTier?: import("./tycoonPiracy").DrmTier;
   crisisReviewPenalty?: number;
   /** Module 8 — flu: design gen multiplier weeks remaining. */
   fluWeeksLeft?: number;
@@ -604,6 +606,8 @@ export interface GameState {
   /** Part 2: campaign difficulty (economy/uncertainty only). */
   difficulty?: import("./research/types").DifficultyConfig;
   /** Module 13 — proprietary consoles */
+  /** Module 16 unlocked DRM tiers */
+  unlockedDrm?: import("./tycoonPiracy").DrmTier[];
   playerConsoles?: import("./tycoonLateMarket").PlayerConsole[];
   /** Module 11 — last awards year resolved */
   lastAwardsYear?: number;

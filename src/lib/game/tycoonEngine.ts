@@ -9,6 +9,7 @@
 
 import type { AudienceId, GameSize, GenreId } from "./types";
 import { clamp } from "./scoring/qualityEngine";
+import { HISTORICAL_AVERAGE_FLOOR } from "./tycoonPiracy";
 
 export const TYCOON_ENGINE_VERSION = "2.1.0" as const;
 
@@ -125,7 +126,7 @@ export function tycoonReviewScore(opts: {
   scoreRatio: number;
   nextHistorical: number;
 } {
-  const hist = Math.max(1, opts.historicalAverage || TYCOON_DEFAULTS.historicalAveragePoints);
+  const hist = Math.max(HISTORICAL_AVERAGE_FLOOR, opts.historicalAverage || TYCOON_DEFAULTS.historicalAveragePoints);
   const points = Math.max(0, opts.totalPoints);
   const scoreRatio = points / hist;
   // Spec: Raw = Score Ratio × 7.0
@@ -137,7 +138,7 @@ export function tycoonReviewScore(opts: {
   const max = opts.sizeMax ?? 10;
   const final = clamp(Math.round(raw * 10) / 10, 1.0, max);
   // Spec 2.4 trailing average
-  const nextHistorical = hist * 0.7 + points * 0.3;
+  const nextHistorical = Math.max(HISTORICAL_AVERAGE_FLOOR, hist * 0.7 + points * 0.3);
   return { final, raw, scoreRatio, nextHistorical };
 }
 

@@ -165,6 +165,16 @@ import {
   type EligibleTitle,
 } from "./tycoonLateMarket";
 import {
+  processShipmentPiracy,
+  clampHistoricalAverage,
+  intCash,
+  intFans,
+  isBankrupt,
+  DRM_TIERS,
+  type DrmTier,
+  HISTORICAL_AVERAGE_FLOOR,
+} from "./tycoonPiracy";
+import {
   startMarketingCampaign,
   getCampaignSpec,
   emptyMarketingState,
@@ -415,6 +425,7 @@ function initialState(): GameState {
     garageSlice: true,
     publishingBoard: null,
     activePublisherDealId: null,
+    unlockedDrm: ["None"],
     playerConsoles: [],
     lastAwardsYear: 0,
     lastRivalReleaseWeek: 0,
@@ -1028,6 +1039,31 @@ function releaseProject(next: GameState, project: GameProject): GameState {
         gross: classicSales.gross * RIVAL_GENRE_SATURATION,
       };
     }
+    // Module 16 — piracy / DRM
+    {
+      const drm = (scored.drmTier ?? "None") as DrmTier;
+      const pir = processShipmentPiracy({
+        originalUnits: classicSales.totalUnits,
+        drm,
+        fans: next.fans,
+        pirateMode: !!next.settings.pirateMode,
+      });
+      const ratio = classicSales.totalUnits > 0 ? pir.legitUnits / classicSales.totalUnits : 1;
+      classicSales = {
+        ...classicSales,
+        totalUnits: pir.legitUnits,
+        weekly: classicSales.weekly.map((u) => Math.floor(u * ratio)),
+        net: classicSales.net * ratio,
+        gross: classicSales.gross * ratio,
+      };
+      next.piracyLossRate = pir.theftRate;
+      if (pir.lostUnits > 0) {
+        next.notifications = pushNote(next, pir.note, "warn");
+      }
+      if (pir.fanBacklash > 0) {
+        next.fans = intFans(next.fans - pir.fanBacklash);
+      }
+    }
     sales.totalUnits = classicSales.totalUnits;
     sales.revenue = classicSales.net;
     sales.price = classicSales.price;
@@ -1293,7 +1329,7 @@ next.gamesPublished += 1;
       (reviews as { nextTargetHighScore?: number }).nextTargetHighScore ??
       br.nextTargetHighScore ??
       next.targetHighScore;
-    next.targetHighScore = nextHist;
+    next.targetHighScore = clampHistoricalAverage(nextHist);
     next.previousHighBaseScore =
       br.nextHighBaseScore ??
       (reviews as { nextHighBaseScore?: number }).nextHighBaseScore ??
@@ -1426,6 +1462,8 @@ interface Actions {
   buildDlc: (gameId: string) => string | null;
   startPlayerConsole: (tier: HardwareTierId, name?: string) => string | null;
   setConsolePricing: (id: string, retailPrice: number, royaltyRate: number) => string | null;
+  setProjectDrm: (drm: DrmTier) => string | null;
+  unlockDrm: (drm: DrmTier) => string | null;
   applyCheat: (cheat: string, arg?: string | number) => void;
   resolveEvent: (choiceIndex: number) => void;
   exportSave: () => string;
@@ -1717,6 +1755,11 @@ export const useGame = create<GameState & Actions>((set, get) => ({
   tick: () => {
     const state = get();
     if (state.phase !== "playing" || state.speed === 0) return;
+    // Module 15 — do not auto-advance while insolvent
+    if (isBankrupt(state.cash, !!state.settings.disableBankruptcy) && state.cash < 0) {
+      set({ speed: 0 });
+      return;
+    }
     // Open decision must be resolved before time advances (and after save/load)
     if (state.pendingEvent) {
       if (state.modal !== "event") set({ modal: "event", speed: 0 });
@@ -2181,7 +2224,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
           historicalAverage: next.targetHighScore ?? 35,
           rivalIndex: idx,
         });
-        next.targetHighScore = rel.nextHistorical;
+        next.targetHighScore = clampHistoricalAverage(rel.nextHistorical);
         next.lastRivalReleaseWeek = next.week;
         next.rivalRotateIndex = (idx + 1) % 3;
         // Genre saturation 8 weeks
@@ -2367,15 +2410,25 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     }
 
 
-    if (
-      !next.settings.disableBankruptcy &&
-      next.cash < -5000 &&
-      !next.currentProject &&
-      next.activeSales.length === 0
-    ) {
-      next.phase = "gameover";
+    // Module 15 — bankruptcy halt (no further auto-advance)
+    next.cash = intCash(next.cash);
+    next.fans = intFans(next.fans);
+    if (isBankrupt(next.cash, !!next.settings.disableBankruptcy)) {
       next.speed = 0;
-      next.notifications = pushNote(next, "Bankrupt. The studio shuts its doors.", "bad");
+      if (next.cash < -5000 && !next.currentProject && next.activeSales.length === 0) {
+        next.phase = "gameover";
+        next.notifications = pushNote(
+          next,
+          "[GAME OVER] Your company has defaulted on debts. Load a save to continue.",
+          "bad",
+        );
+      } else if (next.cash < 0) {
+        next.notifications = pushNote(
+          next,
+          "Cash below $0 — timeline paused. Earn sales or load a backup.",
+          "bad",
+        );
+      }
     }
 
     set(next);
@@ -3236,6 +3289,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
   },
 
   clearPublisherDeal: () => set({ activePublisherDealId: null,
+    unlockedDrm: ["None"],
     playerConsoles: [],
     lastAwardsYear: 0,
     lastRivalReleaseWeek: 0,
@@ -3522,6 +3576,38 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         label: `Console R&D: ${started.console.name}`,
         ref: `console-${platId}`,
       }),
+    });
+    return null;
+  },
+
+
+  setProjectDrm: (drm) => {
+    const state = get();
+    const p = state.currentProject;
+    if (!p) return "No active project.";
+    const unlocked = state.unlockedDrm ?? ["None"];
+    if (!unlocked.includes(drm) && drm !== "None") {
+      return "Research/unlock that DRM tier first.";
+    }
+    set({
+      currentProject: { ...p, drmTier: drm },
+      dirty: true,
+      notifications: pushNote(state, `DRM set: ${drm}`, "info"),
+    });
+    return null;
+  },
+
+  unlockDrm: (drm) => {
+    const state = get();
+    const tier = DRM_TIERS.find((d) => d.id === drm);
+    if (!tier) return "Unknown DRM.";
+    if ((state.unlockedDrm ?? []).includes(drm)) return "Already unlocked.";
+    if (state.researchPoints < tier.rpUnlock) return `Need ${tier.rpUnlock} RP.`;
+    set({
+      researchPoints: state.researchPoints - tier.rpUnlock,
+      unlockedDrm: [...(state.unlockedDrm ?? ["None"]), drm],
+      dirty: true,
+      notifications: pushNote(state, `Unlocked DRM: ${tier.label}`, "good"),
     });
     return null;
   },
