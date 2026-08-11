@@ -33,6 +33,11 @@ export type FinanceLedger = {
   balance: number;
 };
 
+/** Cent-stable money (matches finance/transaction.moneyRound). */
+function moneyRound(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
 export function emptyLedger(startingCash = 0): FinanceLedger {
   return {
     entries:
@@ -64,11 +69,12 @@ export function applyLedger(
   const id =
     entry.id ??
     `${entry.category}-${entry.week}-${entry.ref ?? base.entries.length}`;
+  const amount = moneyRound(entry.amount);
   const next: LedgerEntry = {
     id,
     week: entry.week,
     day: entry.day,
-    amount: entry.amount,
+    amount,
     category: entry.category,
     label: entry.label,
     gameId: entry.gameId,
@@ -76,6 +82,6 @@ export function applyLedger(
   };
   return {
     entries: [...base.entries, next].slice(-500),
-    balance: base.balance + entry.amount,
+    balance: moneyRound(base.balance + amount),
   };
 }

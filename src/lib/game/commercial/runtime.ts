@@ -135,27 +135,15 @@ export function initReleasedCommercial(opts: {
     marketCapacityRate: 0.012,
   };
 
-  // Foundation Lock: NO projected-lifetime fan award from plan units.
-  // Bounded review reaction only; weekly fans come from actual sales.
-  const fansDelta =
-    avgReview >= 8.5 ? 25 : avgReview >= 7 ? 10 : avgReview >= 5.5 ? 0 : -5;
-  released.fansGained = fansDelta;
-  released.fanHistory = [
-    { week: state.week, delta: fansDelta, reason: "review_reaction" },
-  ];
-
-  let notification: { text: string; tone: "good" | "bad" | "info" } | undefined;
-  if (fansDelta > 0) {
-    notification = {
-      text: `Reviews land — +${fansDelta} fans (sales convert later).`,
-      tone: "good",
-    };
-  } else if (fansDelta < 0) {
-    notification = {
-      text: `Soft reviews — ${fansDelta} fans.`,
-      tone: "bad",
-    };
-  }
+  // Foundation Lock: NO projected fans at release (plan units or review reaction).
+  // Fans accrue only from actual weekly sales in tickReleasedSales.
+  released.fansGained = 0;
+  released.fanHistory = [];
+  const fansDelta = 0;
+  const notification: { text: string; tone: "good" | "bad" | "info" } | undefined = {
+    text: "Reviews landed. Sales (and fan growth) start next week.",
+    tone: "info",
+  };
 
   return { released, fansDelta, notification };
 }

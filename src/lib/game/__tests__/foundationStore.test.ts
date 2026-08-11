@@ -18,40 +18,24 @@ describe("Foundation Lock — store economy", () => {
     let s = reset("Rent Co");
     assert.equal(s.cash, 75_000);
     assert.equal(s.ledger?.balance, 75_000);
-    // Advance until first month boundary rent (weekOfMonth === 1 after tick)
-    for (let i = 0; i < 8 && s.cash === 75_000; i++) {
+    // Advance to first rent charge only (dismiss soft events; no other spend)
+    for (let i = 0; i < 16; i++) {
       useGame.getState().setSpeed(1);
       useGame.getState().advanceWeek();
       s = useGame.getState();
-      // dismiss events
       if (s.pendingEvent) {
         useGame.setState({ pendingEvent: null, modal: null, speed: 1 });
         s = useGame.getState();
       }
-    }
-    // Find a state after rent charged
-    let found = false;
-    for (let i = 0; i < 12; i++) {
-      s = useGame.getState();
-      if (s.ledger?.entries.some((e) => e.category === "rent")) {
-        found = true;
-        break;
-      }
-      useGame.getState().setSpeed(1);
-      useGame.getState().advanceWeek();
-      if (useGame.getState().pendingEvent) {
-        useGame.setState({ pendingEvent: null, modal: null, speed: 1 });
-      }
+      if ((s.ledger?.entries ?? []).some((e) => e.category === "rent")) break;
     }
     s = useGame.getState();
-    assert.ok(found || s.cash < 75_000, "rent should eventually charge");
-    if (s.ledger?.entries.some((e) => e.category === "rent")) {
-      assert.equal(s.cash, s.ledger.balance);
-      // 75k - 8k rent = 67k if no other burns
-      const rentEntries = s.ledger.entries.filter((e) => e.category === "rent");
-      assert.ok(rentEntries.length >= 1);
-      assert.ok(rentEntries.some((e) => e.amount === -8000));
-    }
+    const rentEntries = (s.ledger?.entries ?? []).filter((e) => e.category === "rent");
+    assert.equal(rentEntries.length, 1, "exactly one rent entry at first boundary");
+    assert.equal(rentEntries[0]!.amount, -8000);
+    assert.equal(s.cash, 67_000);
+    assert.equal(s.ledger!.balance, 67_000);
+    assert.ok(!(s.ledger?.entries ?? []).some((e) => e.label === "Balance reconciliation"));
   });
 
   it("duplicate rent ref does not double-charge", async () => {

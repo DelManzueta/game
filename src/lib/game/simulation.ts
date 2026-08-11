@@ -707,7 +707,9 @@ export function generateStaff(
   const li = rng.int(0, STAFF_LAST.length - 1);
   const name = `${STAFF_FIRST[fi]} ${STAFF_LAST[li]}`;
 
-  const specialization = isStar || isSolid ? pick(SPECS.filter(Boolean) as import("./types").DevField[]) : pick(SPECS);
+  const specialization = isStar || isSolid
+    ? pick(SPECS.filter(Boolean) as import("./types").DevField[], opts?.seed ?? 0, idx, "spec-star")
+    : pick(SPECS, opts?.seed ?? 0, idx, "spec");
 
   return {
     id: uid("staff", opts?.seed ?? hashSeed("staff-id", year, idx), idx, name),

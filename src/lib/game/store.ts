@@ -1633,6 +1633,11 @@ function releaseProject(next: GameState, project: GameProject): GameState {
     next.week,
     next.year,
   );
+  // Foundation Lock: release-day commercial counters start at zero.
+  // Lifetime plan may exist for residual weeks, but fans/sales accrue weekly only.
+  released.fansGained = 0;
+  released.sales = 0;
+  released.revenue = 0;
   // Freeze ops publisher distribution before any clear of active deal id
   const snap = (scored as { publisherContractSnapshot?: { source: string; id: string; company: string; royaltyCut: number } }).publisherContractSnapshot;
   if (snap) {
@@ -1807,11 +1812,8 @@ function releaseProject(next: GameState, project: GameProject): GameState {
     };
   }
   {
-    // Foundation Lock: no projected lifetime fans at release.
-    // Small bounded review-reaction only (independent of shelf plan units).
-    const reaction =
-      reviews.avg >= 8.5 ? 25 : reviews.avg >= 7 ? 10 : reviews.avg >= 5.5 ? 0 : -5;
-    next.fans = Math.max(0, next.fans + reaction);
+    // Foundation Lock: no projected fans at release.
+    // Fans come only from actual weekly sales (and rare explicit marketing events).
   }
   if (commercial.notification) {
     next.notifications = pushNote(
@@ -3152,8 +3154,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
           const c0 = shippingHw[0]!;
           const rivalGross = rel.totalPoints * 800; // abstract
           const cut = rivalGross * c0.royaltyRate;
-          next.cash += cut;
-          next.ledger = applyLedger(next.ledger, {
+          next = commitTxn(next, {
             week: next.week,
             amount: cut,
             category: "sales",
@@ -3211,11 +3212,20 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     if (next.activeContract) {
       const c = { ...next.activeContract, progress: next.activeContract.progress + 1 };
       if (c.progress >= c.weeks) {
-        next.cash += c.reward;
+        next = commitTxn(next, {
+          week: next.week,
+          amount: c.reward,
+          category: "sales",
+          label: `Contract complete: ${c.title}`,
+          ref: `contract-done-${c.id}-w${next.week}`,
+        });
         next.researchPoints += c.researchReward;
         next.notifications = pushNote(next, `Contract complete: +${formatCash(c.reward)}`, "good");
         next.activeContract = null;
-        next.contracts = generateContracts(3, next.year);
+        next.contracts = generateContracts(3, next.year, {
+          campaignSeed: next.campaignSeed,
+          week: next.week,
+        });
       } else {
         next.activeContract = c;
       }
@@ -3223,8 +3233,8 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       next.contracts = generateContracts(3, next.year);
     }
 
-    // Publisher board (Module 3) — season refresh when unlocked
-    {
+    // Publisher board — inert in Garage Phase One (Foundation Lock quarantine)
+    if (!isGaragePhaseOne(next) && lateSystemAllowed(next, "publishers")) {
       const unlocked =
         publishingUnlocked({
           gamesPublished: next.gamesPublished,
@@ -3282,8 +3292,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
           );
         }
         if (lit.penaltyCash > 0) {
-          next.cash -= lit.penaltyCash;
-          next.ledger = applyLedger(next.ledger, {
+          next = commitTxn(next, {
             week: next.week,
             amount: -lit.penaltyCash,
             category: "other",
@@ -3327,8 +3336,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
             .map((x) => (x.id === g.id ? patched : x))
             .filter((x) => x.onSale && !x.dormant);
           if (lit.penaltyCash > 0) {
-            next.cash -= lit.penaltyCash;
-            next.ledger = applyLedger(next.ledger, {
+            next = commitTxn(next, {
               week: next.week,
               amount: -lit.penaltyCash,
               category: "other",
@@ -3351,8 +3359,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       const hw = processHardwareWeek(next.hardwareProducts ?? []);
       next.hardwareProducts = hw.products;
       if (hw.cashDelta !== 0) {
-        next.cash += hw.cashDelta;
-        next.ledger = applyLedger(next.ledger, {
+        next = commitTxn(next, {
           week: next.week,
           amount: hw.cashDelta,
           category: "sales",
@@ -3399,9 +3406,8 @@ export const useGame = create<GameState & Actions>((set, get) => ({
           }
           next.fans = Math.max(0, next.fans + fanGain);
           next.researchPoints += rpGain;
-          next.cash += cashGain;
-          if (cashGain > 0) {
-            next.ledger = applyLedger(next.ledger, {
+          if (cashGain !== 0) {
+            next = commitTxn(next, {
               week: next.week,
               amount: cashGain,
               category: "sales",
@@ -3429,21 +3435,21 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       const roy = monthlyPlatformRoyalties(next.fans, () =>
         hashSeed(next.campaignSeed, "store-royalty", next.week) / 4294967296,
       );
-      next.cash += roy.revenue;
-      next.digitalStorefront = {
-        ...next.digitalStorefront,
-        lastMonthRoyalties: roy.revenue,
-        lifetimeRivalRoyalties:
-          (next.digitalStorefront.lifetimeRivalRoyalties ?? 0) + roy.revenue,
-        rivalTitlesHosted: (next.digitalStorefront.rivalTitlesHosted ?? 0) + 1,
-      };
-      next.ledger = applyLedger(next.ledger, {
+      const storeName = next.digitalStorefront.name;
+      next = commitTxn(next, {
         week: next.week,
         amount: roy.revenue,
         category: "sales",
-        label: `${next.digitalStorefront.name} rival royalties (${roy.units} units)`,
+        label: `${storeName} rival royalties (${roy.units} units)`,
         ref: `store-royalty-w${next.week}`,
       });
+      const ds = next.digitalStorefront!;
+      next.digitalStorefront = {
+        ...ds,
+        lastMonthRoyalties: roy.revenue,
+        lifetimeRivalRoyalties: (ds.lifetimeRivalRoyalties ?? 0) + roy.revenue,
+        rivalTitlesHosted: (ds.rivalTitlesHosted ?? 0) + 1,
+      };
       if (roy.revenue > 500) {
         next.notifications = pushNote(
           next,
@@ -3462,8 +3468,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       const mmo = processMmoMonth(next.activeMmos ?? []);
       next.activeMmos = mmo.mmos;
       if (mmo.cashDelta !== 0) {
-        next.cash += mmo.cashDelta;
-        next.ledger = applyLedger(next.ledger, {
+        next = commitTxn(next, {
           week: next.week,
           amount: mmo.cashDelta,
           category: mmo.cashDelta >= 0 ? "sales" : "other",
@@ -3483,16 +3488,13 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         const r = tickPlayerConsole(c, next.week, next.fans);
         updated.push(r.console);
         if (r.cashDelta !== 0) {
-          next.cash += r.cashDelta;
-          if (Math.abs(r.cashDelta) > 100) {
-            next.ledger = applyLedger(next.ledger, {
-              week: next.week,
-              amount: r.cashDelta,
-              category: r.cashDelta >= 0 ? "sales" : "other",
-              label: `${c.name} hardware`,
-              ref: `hw-${c.id}-w${next.week}`,
-            });
-          }
+          next = commitTxn(next, {
+            week: next.week,
+            amount: r.cashDelta,
+            category: r.cashDelta >= 0 ? "sales" : "other",
+            label: `${c.name} hardware`,
+            ref: `hw-${c.id}-w${next.week}`,
+          });
         }
         if (r.note) next.notifications = pushNote(next, r.note, "good");
       }
@@ -3710,7 +3712,6 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     );
     if (planned.error) return planned.error;
     let project = planned.project;
-    const cash = state.cash;
     let notes = pushNote(state, `Stage ${stageNum} started.`, "info");
     let modal: GameState["modal"] = null;
     let pendingEvent: GameState["pendingEvent"] = state.pendingEvent;
@@ -3756,28 +3757,30 @@ export const useGame = create<GameState & Actions>((set, get) => ({
           modal = "event";
         }
         notes = pushNote({ ...state, notifications: notes }, crisis.note, "warn");
-        set({
-          cash: cash + crisis.cashDelta,
-          researchPoints: Math.max(0, state.researchPoints + crisis.rpDelta),
-          hype: Math.max(0, state.hype + crisis.hypeDelta),
-          currentProject: project,
-          speed: crisis.code === "EVT_COPY" ? 0 : 1,
-          screen: "develop",
-          dirty: true,
-          notifications: notes,
-          modal,
-          pendingEvent,
-          ledger:
-            crisis.cashDelta !== 0
-              ? applyLedger(state.ledger, {
-                  week: state.week,
-                  amount: crisis.cashDelta,
-                  category: "other",
-                  label: crisis.title,
-                  ref: `qcrisis-${crisis.code}-w${state.week}`,
-                })
-              : state.ledger,
-        });
+        {
+          let st: GameState = {
+            ...state,
+            researchPoints: Math.max(0, state.researchPoints + crisis.rpDelta),
+            hype: Math.max(0, state.hype + crisis.hypeDelta),
+            currentProject: project,
+            speed: crisis.code === "EVT_COPY" ? 0 : 1,
+            screen: "develop",
+            dirty: true,
+            notifications: notes,
+            modal,
+            pendingEvent,
+          };
+          if (crisis.cashDelta !== 0) {
+            st = commitTxn(st, {
+              week: state.week,
+              amount: crisis.cashDelta,
+              category: "other",
+              label: crisis.title,
+              ref: `qcrisis-${crisis.code}-w${state.week}`,
+            });
+          }
+          set(st);
+        }
         return null;
       }
     }
@@ -4028,35 +4031,57 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       const weeks = started.weeks || item?.weeks || 2;
       // Design-only instant path
       if (weeks === 0) {
-        set({
+        let st: GameState = {
+          ...state,
           researchPoints: state.researchPoints - cost,
-          cash: state.cash - (catalogTech.researchCash || 0),
           researched: [...state.researched, id],
           researchPipeline: pipe,
           dirty: true,
-          notifications: pushNote(state, `${catalogTech.name} ready for production (design feature).`, "good"),
-        });
+        };
+        if ((catalogTech.researchCash || 0) > 0) {
+          st = commitTxn(st, {
+            week: state.week,
+            amount: -(catalogTech.researchCash || 0),
+            category: "research",
+            label: `Research: ${catalogTech.name}`,
+            ref: `research-cash-${id}-w${state.week}`,
+          });
+        }
+        st.notifications = pushNote(st, `${catalogTech.name} ready for production (design feature).`, "good");
+        set(st);
         return null;
       }
-      set({
-        researchPoints: state.researchPoints - cost,
-        cash: state.cash - (catalogTech.researchCash || 0),
-        researchPipeline: pipe,
-        activeResearch: {
-          id: uid("job"),
-          kind: "tech",
-          targetId: id,
-          name: catalogTech.name,
-          weeksLeft: weeks,
-          totalWeeks: weeks,
-        },
-        dirty: true,
-        notifications: pushNote(
-          state,
+      {
+        let st: GameState = {
+          ...state,
+          researchPoints: state.researchPoints - cost,
+          researchPipeline: pipe,
+          activeResearch: {
+            id: uid("job", state.campaignSeed, id, state.week),
+            kind: "tech",
+            targetId: id,
+            name: catalogTech.name,
+            weeksLeft: weeks,
+            totalWeeks: weeks,
+          },
+          dirty: true,
+        };
+        if ((catalogTech.researchCash || 0) > 0) {
+          st = commitTxn(st, {
+            week: state.week,
+            amount: -(catalogTech.researchCash || 0),
+            category: "research",
+            label: `Research: ${catalogTech.name}`,
+            ref: `research-cash-${id}-w${state.week}`,
+          });
+        }
+        st.notifications = pushNote(
+          st,
           `Researching: ${catalogTech.name} (${weeks}w) — pipeline, not a shop purchase.`,
           "info",
-        ),
-      });
+        );
+        set(st);
+      }
       return null;
     }
 
@@ -4102,23 +4127,25 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         : "";
     let next: GameState = {
       ...state,
-      cash: state.cash - packageCost,
       staff: [...state.staff, { ...candidate, energy: 100, training: null }],
       dirty: true,
-      notifications: pushNote(
-        state,
-        `Hired ${candidate.name} (Lv ${candidate.level}).${starNote}`,
-        candidate.level >= 5 ? "good" : "info",
-      ),
       researchPointsFrac: (state.researchPointsFrac ?? 0) + 0.4, // learn-by-doing: recruiting
     };
-    next.ledger = applyLedger(next.ledger, {
+    next = commitTxn(next, {
       week: next.week,
       amount: -packageCost,
       category: "payroll",
       label: `Signing: ${candidate.name}`,
       ref: `hire-${candidate.id}`,
     });
+    if (next.cash === state.cash && packageCost > 0) {
+      return "Signing fee already applied or blocked.";
+    }
+    next.notifications = pushNote(
+      next,
+      `Hired ${candidate.name} (Lv ${candidate.level}).${starNote}`,
+      candidate.level >= 5 ? "good" : "info",
+    );
     next = applyUnlockNotes(next);
     set(next);
     return null;
@@ -4191,25 +4218,26 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     if (state.researchPoints < course.rpCost) return "Not enough RP.";
     const result = startTrainingOnMember(member, course);
     if (typeof result === "string") return result;
-    const next: GameState = {
+    let next: GameState = {
       ...state,
-      cash: state.cash - course.cashCost,
       researchPoints: state.researchPoints - course.rpCost,
       staff: state.staff.map((m) => (m.id === staffId ? result : m)),
       dirty: true,
-      notifications: pushNote(
-        state,
-        `${member.name} started ${course.name} (${course.weeks}w).`,
-        "info",
-      ),
     };
-    next.ledger = applyLedger(next.ledger, {
-      week: next.week,
-      amount: -course.cashCost,
-      category: "research",
-      label: `Training: ${course.name}`,
-      ref: `train-${staffId}-${courseId}-${next.week}`,
-    });
+    if (course.cashCost > 0) {
+      next = commitTxn(next, {
+        week: next.week,
+        amount: -course.cashCost,
+        category: "research",
+        label: `Training: ${course.name}`,
+        ref: `train-${staffId}-${courseId}-${next.week}`,
+      });
+    }
+    next.notifications = pushNote(
+      next,
+      `${member.name} started ${course.name} (${course.weeks}w).`,
+      "info",
+    );
     set(next);
     return null;
   },
@@ -4221,12 +4249,24 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     if (!plat) return "Unknown platform.";
     if (state.year < plat.year) return "Not released yet.";
     if (state.cash < plat.licenseCost) return `Need ${formatCash(plat.licenseCost)}.`;
-    set({
-      cash: state.cash - plat.licenseCost,
-      unlockedPlatforms: [...state.unlockedPlatforms, id],
-      dirty: true,
-      notifications: pushNote(state, `Licensed ${plat.name}.`, "good"),
-    });
+    {
+      let next: GameState = {
+        ...state,
+        unlockedPlatforms: [...state.unlockedPlatforms, id],
+        dirty: true,
+      };
+      if (plat.licenseCost > 0) {
+        next = commitTxn(next, {
+          week: state.week,
+          amount: -plat.licenseCost,
+          category: "other",
+          label: `License: ${plat.name}`,
+          ref: `plat-lic-${id}-w${state.week}`,
+        });
+      }
+      next.notifications = pushNote(next, `Licensed ${plat.name}.`, "good");
+      set(next);
+    }
     return null;
   },
 
@@ -4250,19 +4290,13 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     const stage = stageForOffice(check.next);
     let next: GameState = {
       ...state,
-      cash: state.cash - check.cost,
       office: check.next,
       officeEnteredYear: state.year,
       officeEnteredMonth: state.month,
       dirty: true,
-      notifications: pushNote(
-        state,
-        `Moved into ${stage.name}. Rent ${formatCash(stage.rent)}/mo · seats ${stage.staffMax} · sizes: ${stage.allowedSizes.join(", ")}.`,
-        "good",
-      ),
     };
     if (check.cost > 0) {
-      next.ledger = applyLedger(next.ledger, {
+      next = commitTxn(next, {
         week: next.week,
         amount: -check.cost,
         category: "other",
@@ -4270,6 +4304,11 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         ref: `office-${check.next}-y${state.year}`,
       });
     }
+    next.notifications = pushNote(
+      next,
+      `Moved into ${stage.name}. Rent ${formatCash(stage.rent)}/mo · seats ${stage.staffMax} · sizes: ${stage.allowedSizes.join(", ")}.`,
+      "good",
+    );
     // Unlock notes by level
     if (check.next === 2) {
       next.unlocks = { ...next.unlocks, hiring: "owned", training: "owned", publishing: "owned" };
@@ -4368,16 +4407,28 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       cash: state.cash,
     });
     if (!result.ok) return result.error;
-    set({
-      cash: state.cash - result.cost,
-      engineWorkshop: result.workshop,
-      dirty: true,
-      notifications: pushNote(
-        state,
+    {
+      let next: GameState = {
+        ...state,
+        engineWorkshop: result.workshop,
+        dirty: true,
+      };
+      if (result.cost > 0) {
+        next = commitTxn(next, {
+          week: state.week,
+          amount: -result.cost,
+          category: "research",
+          label: `Engine project: ${result.project.name}`,
+          ref: `eng-proj-${String(result.project.name)}-w${state.week}`,
+        });
+      }
+      next.notifications = pushNote(
+        next,
         `Engine project started: ${result.project.name} (~${result.project.weeksEstimate}w, ${formatCash(result.cost)}).`,
         "info",
-      ),
-    });
+      );
+      set(next);
+    }
     return null;
   },
 
@@ -4617,28 +4668,30 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         },
       };
     }
-    set({
-      cash: state.cash - fee,
-      currentProject: nextP,
-      dirty: true,
-      notifications: pushNote(
-        state,
+    {
+      let next: GameState = {
+        ...state,
+        currentProject: nextP,
+        dirty: true,
+      };
+      if (fee > 0) {
+        next = commitTxn(next, {
+          week: state.week,
+          amount: -fee,
+          category: "other",
+          label: "Multi-platform kits",
+          ref: `mp-kit-${p.id}`,
+        });
+      }
+      next.notifications = pushNote(
+        next,
         uniq.length
           ? `Multi-platform: ${uniq.join(", ")} (+${weeksExtra}w${fee ? `, −${formatCash(fee)}` : ""}).`
           : "Secondary platforms cleared.",
         "info",
-      ),
-      ledger:
-        fee > 0
-          ? applyLedger(state.ledger, {
-              week: state.week,
-              amount: -fee,
-              category: "other",
-              label: "Multi-platform kits",
-              ref: `mp-kit-${p.id}`,
-            })
-          : state.ledger,
-    });
+      );
+      set(next);
+    }
     return null;
   },
 
@@ -4681,16 +4734,15 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     }
     // Instant resolve after "2 weeks" abstracted as immediate for UX; cost is time opportunity - charge small cash
     const units = dlcUnitsSold(g.sales, g.avgReview);
-    const revenue = units * DLC.price * 0.85;
-    set({
-      cash: state.cash + revenue,
+    const revenue = moneyRound(units * DLC.price * 0.85);
+    let next: GameState = {
+      ...state,
       releasedGames: state.releasedGames.map((x) =>
         x.id === gameId
           ? {
               ...x,
               hasDlc: true,
               dlcRevenue: (x.dlcRevenue ?? 0) + revenue,
-              // shelf life extension: add 4 weeks residual if empty
               weeklySalesLeft: [
                 ...(x.weeklySalesLeft ?? []),
                 ...Array.from({ length: 4 }, () => Math.max(10, Math.floor(units / 8))),
@@ -4700,41 +4752,25 @@ export const useGame = create<GameState & Actions>((set, get) => ({
             }
           : x,
       ),
-      activeSales: (() => {
-        const updated = state.releasedGames
-          .map((x) =>
-            x.id === gameId
-              ? {
-                  ...x,
-                  hasDlc: true,
-                  dlcRevenue: (x.dlcRevenue ?? 0) + revenue,
-                  weeklySalesLeft: [
-                    ...(x.weeklySalesLeft ?? []),
-                    ...Array.from({ length: 4 }, () => Math.max(10, Math.floor(units / 8))),
-                  ],
-                  onSale: true,
-                  dormant: false,
-                }
-              : x,
-          )
-          .filter((x) => x.onSale && !x.dormant);
-        return updated;
-      })(),
       dirty: true,
-      notifications: pushNote(
-        state,
-        `DLC for "${g.title}": ${units.toLocaleString()} packs · +${formatCash(revenue)}.`,
-        "good",
-      ),
-      ledger: applyLedger(state.ledger, {
+    };
+    next.activeSales = next.releasedGames.filter((x) => x.onSale && !x.dormant);
+    if (revenue !== 0) {
+      next = commitTxn(next, {
         week: state.week,
         amount: revenue,
         category: "sales",
         label: `DLC: ${g.title}`,
         gameId,
         ref: `dlc-${gameId}`,
-      }),
-    });
+      });
+    }
+    next.notifications = pushNote(
+      next,
+      `DLC for "${g.title}": ${units.toLocaleString()} packs · +${formatCash(revenue)}.`,
+      "good",
+    );
+    set(next);
     return null;
   },
 
@@ -4757,28 +4793,31 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     });
     // Register as platform for first-party shipping
     const platId = started.console.id;
-    set({
-      cash: state.cash - started.cost,
-      researchPoints: state.researchPoints - started.rp,
-      playerConsoles: [...(state.playerConsoles ?? []), started.console],
-      unlockedPlatforms: state.unlockedPlatforms.includes(platId)
-        ? state.unlockedPlatforms
-        : [...state.unlockedPlatforms, platId],
-      flags: { ...state.flags, hardwareLab: true },
-      dirty: true,
-      notifications: pushNote(
-        state,
-        `Hardware program: ${started.console.name} (${started.console.weeksLeft}w, −${formatCash(started.cost)}).`,
-        "info",
-      ),
-      ledger: applyLedger(state.ledger, {
+    {
+      let next: GameState = {
+        ...state,
+        researchPoints: state.researchPoints - started.rp,
+        playerConsoles: [...(state.playerConsoles ?? []), started.console],
+        unlockedPlatforms: state.unlockedPlatforms.includes(platId)
+          ? state.unlockedPlatforms
+          : [...state.unlockedPlatforms, platId],
+        flags: { ...state.flags, hardwareLab: true },
+        dirty: true,
+      };
+      next = commitTxn(next, {
         week: state.week,
         amount: -started.cost,
         category: "other",
         label: `Console R&D: ${started.console.name}`,
         ref: `console-${platId}`,
-      }),
-    });
+      });
+      next.notifications = pushNote(
+        next,
+        `Hardware program: ${started.console.name} (${started.console.weeksLeft}w, −${formatCash(started.cost)}).`,
+        "info",
+      );
+      set(next);
+    }
     return null;
   },
 
@@ -4874,29 +4913,31 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     if (!eng) return "No engine.";
     if (state.cash < ENGINE_REFACTOR.cash) return `Need ${formatCash(ENGINE_REFACTOR.cash)}.`;
     if (state.researchPoints < ENGINE_REFACTOR.rp) return `Need ${ENGINE_REFACTOR.rp} RP.`;
-    set({
-      cash: state.cash - ENGINE_REFACTOR.cash,
-      researchPoints: state.researchPoints - ENGINE_REFACTOR.rp,
-      week: state.week, // week cost applied by caller advance optional
-      engines: state.engines.map((e) =>
-        e.id === eng.id
-          ? { ...e, gamesShippedCount: 0, chronologicalAgeYears: 0 }
-          : e,
-      ),
-      dirty: true,
-      notifications: pushNote(
-        state,
-        `Refactored "${eng.name}" — tech debt cleared (−${formatCash(ENGINE_REFACTOR.cash)}, −${ENGINE_REFACTOR.rp} RP).`,
-        "good",
-      ),
-      ledger: applyLedger(state.ledger, {
+    {
+      let next: GameState = {
+        ...state,
+        researchPoints: state.researchPoints - ENGINE_REFACTOR.rp,
+        engines: state.engines.map((e) =>
+          e.id === eng.id
+            ? { ...e, gamesShippedCount: 0, chronologicalAgeYears: 0 }
+            : e,
+        ),
+        dirty: true,
+      };
+      next = commitTxn(next, {
         week: state.week,
         amount: -ENGINE_REFACTOR.cash,
         category: "research",
         label: "Engine refactor",
         ref: `refactor-${eng.id}-${state.week}`,
-      }),
-    });
+      });
+      next.notifications = pushNote(
+        next,
+        `Refactored "${eng.name}" — tech debt cleared (−${formatCash(ENGINE_REFACTOR.cash)}, −${ENGINE_REFACTOR.rp} RP).`,
+        "good",
+      );
+      set(next);
+    }
     return null;
   },
 
@@ -4953,24 +4994,27 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     if (state.office !== 2) return "High-Density Bay is a Tech Park (Level 2) renovation.";
     if (isHighDensity(state.officeSubTier)) return "Already renovated to High-Density Bay.";
     if (state.cash < HIGH_DENSITY.cashCost) return `Need ${formatCash(HIGH_DENSITY.cashCost)}.`;
-    set({
-      cash: state.cash - HIGH_DENSITY.cashCost,
-      officeSubTier: 2.5,
-      dirty: true,
-      notifications: pushNote(
-        state,
-        `High-Density Bay online — seats ${HIGH_DENSITY.staffMax}, rent ${formatCash(HIGH_DENSITY.rent)}/mo, workbench unlocked.`,
-        "good",
-      ),
-      ledger: applyLedger(state.ledger, {
+    {
+      let next: GameState = {
+        ...state,
+        officeSubTier: 2.5,
+        dirty: true,
+        unlocks: { ...state.unlocks, hiring: "owned" },
+      };
+      next = commitTxn(next, {
         week: state.week,
         amount: -HIGH_DENSITY.cashCost,
         category: "other",
         label: "High-Density Bay renovation",
         ref: `hd-reno-w${state.week}`,
-      }),
-      unlocks: { ...state.unlocks, hiring: "owned" },
-    });
+      });
+      next.notifications = pushNote(
+        next,
+        `High-Density Bay online — seats ${HIGH_DENSITY.staffMax}, rent ${formatCash(HIGH_DENSITY.rent)}/mo, workbench unlocked.`,
+        "good",
+      );
+      set(next);
+    }
     return null;
   },
 
@@ -4998,22 +5042,25 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       return "No patent scare pending.";
     }
     if (state.cash < 45000) return "Need $45,000 for settlement.";
-    set({
-      cash: state.cash - 45000,
-      currentProject: {
-        ...p,
-        pendingCopyCrisis: false,
-      } as typeof p,
-      dirty: true,
-      notifications: pushNote(state, "Paid $45k patent settlement — score safe.", "info"),
-      ledger: applyLedger(state.ledger, {
+    {
+      let next: GameState = {
+        ...state,
+        currentProject: {
+          ...p,
+          pendingCopyCrisis: false,
+        } as typeof p,
+        dirty: true,
+      };
+      next = commitTxn(next, {
         week: state.week,
         amount: -45000,
         category: "other",
         label: "Patent settlement",
         ref: `copy-settle-w${state.week}`,
-      }),
-    });
+      });
+      next.notifications = pushNote(next, "Paid $45k patent settlement — score safe.", "info");
+      set(next);
+    }
     return null;
   },
 
@@ -5050,28 +5097,31 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     });
     if (!check.ok) return check.error;
     const storeName = (name?.trim() || NEON_STORE.name).slice(0, 32);
-    set({
-      cash: state.cash - NEON_STORE.launchCost,
-      digitalStorefront: {
-        ...store,
-        active: true,
-        name: storeName,
-        launchedWeek: state.week,
-      },
-      dirty: true,
-      notifications: pushNote(
-        state,
-        `${storeName} live — 0% cut on your titles, 30% on rival digital sales. −${formatCash(NEON_STORE.launchCost)}.`,
-        "good",
-      ),
-      ledger: applyLedger(state.ledger, {
+    {
+      let next: GameState = {
+        ...state,
+        digitalStorefront: {
+          ...store,
+          active: true,
+          name: storeName,
+          launchedWeek: state.week,
+        },
+        dirty: true,
+      };
+      next = commitTxn(next, {
         week: state.week,
         amount: -NEON_STORE.launchCost,
         category: "other",
         label: `${storeName} platform launch`,
         ref: `neonstore-w${state.week}`,
-      }),
-    });
+      });
+      next.notifications = pushNote(
+        next,
+        `${storeName} live — 0% cut on your titles, 30% on rival digital sales. −${formatCash(NEON_STORE.launchCost)}.`,
+        "good",
+      );
+      set(next);
+    }
     return null;
   },
 
@@ -5085,15 +5135,27 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     for (const t of pack.topics ?? []) topics.add(t);
     const genres = new Set(state.unlockedGenres as string[]);
     for (const g of pack.genres ?? []) genres.add(g);
-    set({
-      cash: state.cash + res.grantCash,
-      researchPoints: state.researchPoints + res.grantRp,
-      unlockedTopics: [...topics],
-      unlockedGenres: [...genres] as typeof state.unlockedGenres,
-      installedPacks: [...(state.installedPacks ?? []), pack.id],
-      dirty: true,
-      notifications: pushNote(state, `Installed pack: ${pack.name} v${pack.version}.`, "good"),
-    });
+    {
+      let next: GameState = {
+        ...state,
+        researchPoints: state.researchPoints + res.grantRp,
+        unlockedTopics: [...topics],
+        unlockedGenres: [...genres] as typeof state.unlockedGenres,
+        installedPacks: [...(state.installedPacks ?? []), pack.id],
+        dirty: true,
+      };
+      if (res.grantCash) {
+        next = commitTxn(next, {
+          week: state.week,
+          amount: res.grantCash,
+          category: "other",
+          label: `Content pack: ${pack.name}`,
+          ref: `pack-${pack.id}`,
+        });
+      }
+      next.notifications = pushNote(next, `Installed pack: ${pack.name} v${pack.version}.`, "good");
+      set(next);
+    }
     return null;
   },
 
@@ -5102,28 +5164,30 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     if (!lateSystemAllowed(state, "netflixEdition")) return "Locked until after Garage Phase One.";
     const res = purchaseLicense(licenseId, state.cash);
     if (!res.ok) return res.error;
-    set({
-      cash: state.cash - res.cost,
-      activeIpLicense: res.state,
-      dirty: true,
-      notifications: pushNote(
-        state,
+    {
+      let next: GameState = {
+        ...state,
+        activeIpLicense: res.state,
+        dirty: true,
+      };
+      if (res.cost > 0) {
+        next = commitTxn(next, {
+          week: state.week,
+          amount: -res.cost,
+          category: "marketing",
+          label: `IP license: ${res.state.name}`,
+          ref: `ip-${res.state.licenseId}-w${state.week}`,
+        });
+      }
+      next.notifications = pushNote(
+        next,
         res.state.licenseId === "clear"
           ? "Franchise license cleared — no royalty obligations."
           : `IP rights locked: ${res.state.name} (−${formatCash(res.cost)}). Match theme for 1.4× hype & +1.5 score; 15% royalty.`,
         res.state.licenseId === "clear" ? "info" : "good",
-      ),
-      ledger:
-        res.cost > 0
-          ? applyLedger(state.ledger, {
-              week: state.week,
-              amount: -res.cost,
-              category: "marketing",
-              label: `IP license: ${res.state.name}`,
-              ref: `ip-${res.state.licenseId}-w${state.week}`,
-            })
-          : state.ledger,
-    });
+      );
+      set(next);
+    }
     return null;
   },
 
@@ -5135,24 +5199,27 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     if (state.cash < tier.cost) return `Need ${formatCash(tier.cost)}.`;
     const rng = () => hashSeed(state.campaignSeed, "streamer", tierId, state.week) / 4294967296;
     const gain = streamerHypeGain(tier, state.fans, rng);
-    set({
-      cash: state.cash - tier.cost,
-      hype: state.hype + gain,
-      streamerHypeWeeksLeft: Math.max(state.streamerHypeWeeksLeft ?? 0, tier.id === "mega" ? 6 : 4),
-      dirty: true,
-      notifications: pushNote(
-        state,
-        `${tier.name}: +${gain} hype (fan-scaled). Fast decay window open.`,
-        "good",
-      ),
-      ledger: applyLedger(state.ledger, {
+    {
+      let next: GameState = {
+        ...state,
+        hype: state.hype + gain,
+        streamerHypeWeeksLeft: Math.max(state.streamerHypeWeeksLeft ?? 0, tier.id === "mega" ? 6 : 4),
+        dirty: true,
+      };
+      next = commitTxn(next, {
         week: state.week,
         amount: -tier.cost,
         category: "marketing",
         label: tier.name,
         ref: `stream-${tier.id}-w${state.week}`,
-      }),
-    });
+      });
+      next.notifications = pushNote(
+        next,
+        `${tier.name}: +${gain} hype (fan-scaled). Fast decay window open.`,
+        "good",
+      );
+      set(next);
+    }
     return null;
   },
 
@@ -5172,34 +5239,35 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       rng,
     });
     if (state.cash < out.cost) return `Need ${formatCash(out.cost)} to host.`;
-    const net = out.ticketRevenue - out.cost;
-    set({
-      cash: state.cash + net,
-      fans: state.fans + out.fansGained,
-      hype: state.hype + out.hypeGained,
-      dirty: true,
-      notifications: pushNote(
-        state,
+        const net = out.ticketRevenue - out.cost;
+    {
+      let next: GameState = {
+        ...state,
+        fans: state.fans + out.fansGained,
+        hype: state.hype + out.hypeGained,
+        dirty: true,
+      };
+      next = commitTxn(next, {
+        week: state.week,
+        amount: -out.cost,
+        category: "marketing",
+        label: "Studio convention ops",
+        ref: `con-cost-w${state.week}`,
+      });
+      next = commitTxn(next, {
+        week: state.week,
+        amount: out.ticketRevenue,
+        category: "sales",
+        label: "Convention tickets",
+        ref: `con-tix-w${state.week}`,
+      });
+      next.notifications = pushNote(
+        next,
         `Studio Con: ${out.attendance.toLocaleString()} guests · net ${formatCash(net)} · +${out.fansGained.toLocaleString()} fans · +${out.hypeGained} hype.`,
         "good",
-      ),
-      ledger: applyLedger(
-        applyLedger(state.ledger, {
-          week: state.week,
-          amount: -out.cost,
-          category: "marketing",
-          label: "Studio convention ops",
-          ref: `con-cost-w${state.week}`,
-        }),
-        {
-          week: state.week,
-          amount: out.ticketRevenue,
-          category: "sales",
-          label: "Convention tickets",
-          ref: `con-tix-w${state.week}`,
-        },
-      ),
-    });
+      );
+      set(next);
+    }
     return null;
   },
 
@@ -5221,24 +5289,27 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       retailPrice,
       fans: state.fans,
     });
-    set({
-      cash: state.cash - cat.setupCost,
-      researchPoints: state.researchPoints - cat.rpCost,
-      hardwareProducts: [product, ...(state.hardwareProducts ?? [])],
-      dirty: true,
-      notifications: pushNote(
-        state,
-        `Workbench fab: "${product.name}" — ${HIGH_DENSITY.fabWeeks}w hand assembly · +${formatCash(HIGH_DENSITY.clutterTaxPerLine)}/mo clutter.`,
-        "info",
-      ),
-      ledger: applyLedger(state.ledger, {
+    {
+      let next: GameState = {
+        ...state,
+        researchPoints: state.researchPoints - cat.rpCost,
+        hardwareProducts: [product, ...(state.hardwareProducts ?? [])],
+        dirty: true,
+      };
+      next = commitTxn(next, {
         week: state.week,
         amount: -cat.setupCost,
         category: "research",
         label: `Workbench setup: ${cat.label}`,
         ref: `bench-${product.id}`,
-      }),
-    });
+      });
+      next.notifications = pushNote(
+        next,
+        `Workbench fab: "${product.name}" — ${HIGH_DENSITY.fabWeeks}w hand assembly · +${formatCash(HIGH_DENSITY.clutterTaxPerLine)}/mo clutter.`,
+        "info",
+      );
+      set(next);
+    }
     return null;
   },
 
@@ -5252,22 +5323,22 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     if (state.cash < cfg.cost) return `Need ${formatCash(cfg.cost)}.`;
     const refresh = get().refreshCandidates;
     if (typeof refresh === "function") refresh();
-    set({
-      cash: get().cash - cfg.cost,
-      dirty: true,
-      notifications: pushNote(
-        get(),
-        `${cfg.label} campaign (−${formatCash(cfg.cost)}). Check People for applicants.`,
-        "info",
-      ),
-      ledger: applyLedger(get().ledger, {
-        week: get().week,
+    {
+      let next: GameState = { ...get(), dirty: true };
+      next = commitTxn(next, {
+        week: next.week,
         amount: -cfg.cost,
         category: "other",
         label: cfg.label,
-        ref: `recruit-${tier}-w${get().week}`,
-      }),
-    });
+        ref: `recruit-${tier}-w${next.week}`,
+      });
+      next.notifications = pushNote(
+        next,
+        `${cfg.label} campaign (−${formatCash(cfg.cost)}). Check People for applicants.`,
+        "info",
+      );
+      set(next);
+    }
     return null;
   },
 
@@ -5288,26 +5359,29 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       retailPrice,
       fans: state.fans,
     });
-    set({
-      cash: state.cash - cat.setupCost,
-      researchPoints: state.researchPoints - cat.rpCost,
-      hardwareProducts: [product, ...(state.hardwareProducts ?? [])],
-      dirty: true,
-      notifications: pushNote(
-        state,
-        product.lossLeader
-          ? `Factory: "${product.name}" loss-leader shipping 16w. −${formatCash(cat.setupCost)}.`
-          : `Factory: "${product.name}" shipping 16w. −${formatCash(cat.setupCost)}.`,
-        product.lossLeader ? "warn" : "good",
-      ),
-      ledger: applyLedger(state.ledger, {
+    {
+      let next: GameState = {
+        ...state,
+        researchPoints: state.researchPoints - cat.rpCost,
+        hardwareProducts: [product, ...(state.hardwareProducts ?? [])],
+        dirty: true,
+      };
+      next = commitTxn(next, {
         week: state.week,
         amount: -cat.setupCost,
         category: "research",
         label: `Accessory setup: ${cat.label}`,
         ref: `hw-setup-${product.id}`,
-      }),
-    });
+      });
+      next.notifications = pushNote(
+        next,
+        product.lossLeader
+          ? `Factory: "${product.name}" loss-leader shipping 16w. −${formatCash(cat.setupCost)}.`
+          : `Factory: "${product.name}" shipping 16w. −${formatCash(cat.setupCost)}.`,
+        product.lossLeader ? "warn" : "good",
+      );
+      set(next);
+    }
     return null;
   },
 
@@ -5318,33 +5392,36 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     if (eng.tEngineFramework) return "T-Engine already attached.";
     if (state.cash < T_ENGINE.cashCost) return `Need ${formatCash(T_ENGINE.cashCost)}.`;
     if (state.researchPoints < T_ENGINE.rpCost) return `Need ${T_ENGINE.rpCost} RP.`;
-    set({
-      cash: state.cash - T_ENGINE.cashCost,
-      researchPoints: state.researchPoints - T_ENGINE.rpCost,
-      engines: state.engines.map((e) =>
-        e.id === engineId
-          ? {
-              ...e,
-              tEngineFramework: true,
-              name: e.name.includes("T-Engine") ? e.name : `${e.name} · T-Engine`,
-              techBonus: e.techBonus + 5,
-            }
-          : e,
-      ),
-      dirty: true,
-      notifications: pushNote(
-        state,
-        `T-Engine Modular Framework on "${eng.name}" (−${formatCash(T_ENGINE.cashCost)}, −${T_ENGINE.rpCost} RP).`,
-        "good",
-      ),
-      ledger: applyLedger(state.ledger, {
+    {
+      let next: GameState = {
+        ...state,
+        researchPoints: state.researchPoints - T_ENGINE.rpCost,
+        engines: state.engines.map((e) =>
+          e.id === engineId
+            ? {
+                ...e,
+                tEngineFramework: true,
+                name: e.name.includes("T-Engine") ? e.name : `${e.name} · T-Engine`,
+                techBonus: e.techBonus + 5,
+              }
+            : e,
+        ),
+        dirty: true,
+      };
+      next = commitTxn(next, {
         week: state.week,
         amount: -T_ENGINE.cashCost,
         category: "research",
         label: "T-Engine Modular Framework",
         ref: `tengine-${engineId}`,
-      }),
-    });
+      });
+      next.notifications = pushNote(
+        next,
+        `T-Engine Modular Framework on "${eng.name}" (−${formatCash(T_ENGINE.cashCost)}, −${T_ENGINE.rpCost} RP).`,
+        "good",
+      );
+      set(next);
+    }
     return null;
   },
 
@@ -5391,28 +5468,31 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       mediaDrive: media,
       gpuPart: gpu,
     };
-    set({
-      cash: state.cash - rd.cash,
-      researchPoints: state.researchPoints - rd.rp,
-      playerConsoles: [...(state.playerConsoles ?? []), console],
-      unlockedPlatforms: state.unlockedPlatforms.includes(id)
-        ? state.unlockedPlatforms
-        : [...state.unlockedPlatforms, id],
-      flags: { ...state.flags, hardwareLab: true },
-      dirty: true,
-      notifications: pushNote(
-        state,
-        `Console R&D: ${console.name} · unit cost $${mfg.toFixed(2)} · ${console.weeksLeft}w · −${formatCash(rd.cash)}.`,
-        "info",
-      ),
-      ledger: applyLedger(state.ledger, {
+    {
+      let next: GameState = {
+        ...state,
+        researchPoints: state.researchPoints - rd.rp,
+        playerConsoles: [...(state.playerConsoles ?? []), console],
+        unlockedPlatforms: state.unlockedPlatforms.includes(id)
+          ? state.unlockedPlatforms
+          : [...state.unlockedPlatforms, id],
+        flags: { ...state.flags, hardwareLab: true },
+        dirty: true,
+      };
+      next = commitTxn(next, {
         week: state.week,
         amount: -rd.cash,
         category: "other",
         label: `Console components: ${console.name}`,
         ref: `cfg-${id}`,
-      }),
-    });
+      });
+      next.notifications = pushNote(
+        next,
+        `Console R&D: ${console.name} · unit cost $${mfg.toFixed(2)} · ${console.weeksLeft}w · −${formatCash(rd.cash)}.`,
+        "info",
+      );
+      set(next);
+    }
     return null;
   },
 
@@ -5674,16 +5754,26 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     });
     const cost = proj.bomCost * 400 + 50000;
     if (state.cash < cost) return `Needs $${cost.toLocaleString()} to fund architecture.`;
-    set({
-      cash: state.cash - cost,
-      hardwareProjects: [...(state.hardwareProjects ?? []), proj],
-      dirty: true,
-      notifications: pushNote(
-        state,
+    {
+      let next: GameState = {
+        ...state,
+        hardwareProjects: [...(state.hardwareProjects ?? []), proj],
+        dirty: true,
+      };
+      next = commitTxn(next, {
+        week: state.week,
+        amount: -cost,
+        category: "other",
+        label: `Hardware project: ${proj.name}`,
+        ref: `hw-proj-${proj.id}-w${state.week}`,
+      });
+      next.notifications = pushNote(
+        next,
         `Hardware project "${proj.name}" started. Performance is bottlenecked — not averaged.`,
         "info",
-      ),
-    });
+      );
+      set(next);
+    }
     return null;
   },
 
@@ -5714,14 +5804,15 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     };
 
     const ledgerCash = (amount: number, label: string) => {
-      next.cash += amount;
-      next.ledger = applyLedger(next.ledger, {
+      const n = commitTxn(next, {
         week: next.week,
         amount,
         category: "cheat",
         label,
-        ref: `cheat-${label}-${next.week}-${Date.now()}`,
+        ref: `cheat-${label}-w${next.week}-n${(next.cheatLog ?? []).length}`,
       });
+      next.cash = n.cash;
+      next.ledger = n.ledger;
     };
 
     const DREAM = [

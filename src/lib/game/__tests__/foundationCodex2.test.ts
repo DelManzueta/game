@@ -4,17 +4,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { generateStaff } from "../simulation";
-import { hashSeed } from "../scoring/rng";
 import {
   emptyMarketingOpportunityState,
   ensureYearOpportunities,
   resolveMarketingOpportunity,
-  campaignYearIndex,
 } from "../marketingOpportunities";
 import { useGame } from "../store";
 import { lateSystemAllowed } from "../phaseOne";
-import { applyCashTransaction } from "../finance/transaction";
-import { emptyLedger } from "../finance/ledger";
 import { TOPIC_COUNT, TOPICS } from "../content/topics";
 
 describe("identity purity", () => {
@@ -42,7 +38,7 @@ describe("marketing opportunities machine", () => {
   it("promotes scheduled→offered and dark year after double generate", () => {
     let st = emptyMarketingOpportunityState();
     // Force a seed that schedules two year-0 slots (most seeds do)
-    let seed = 42;
+    const seed = 42;
     st = ensureYearOpportunities(st, 0, seed);
     // Advance through whole year 0 to promote all slots
     for (let w = 0; w < 48; w++) st = ensureYearOpportunities(st, w, seed);

@@ -59,14 +59,19 @@ describe("content catalog validation", () => {
     }
   });
 
-  it("50 fixed platforms include PC, Itara, and Commodore; Custom Console separate", () => {
-    assert.ok(PLATFORMS.length >= 50);
-    const ids = new Set(PLATFORMS.map((p) => p.id));
-    assert.ok(ids.has("pc"));
-    assert.ok(ids.has("itara_5200") || [...ids].some((id) => id.includes("itara")));
-    assert.ok(ids.has("commodore"));
+  it("exactly 57 timeline platforms include PC, Itara, and Commodore; Custom Console separate", () => {
+    assert.equal(PLATFORMS.length, 57);
+    assert.equal(PLATFORM_COUNT, 57);
+    const ids = PLATFORMS.map((p) => p.id);
+    assert.equal(new Set(ids).size, 57);
+    assert.ok(ids.includes("pc"));
+    assert.ok(ids.includes("itara_5200"));
+    assert.ok(ids.includes("commodore"));
+    assert.ok(ids.includes("playsystem"));
+    assert.ok(ids.includes("mbox"));
     assert.ok(CUSTOM_CONSOLE);
-    assert.ok(!ids.has("custom_console"));
+    assert.equal(CUSTOM_CONSOLE.id, "custom_console");
+    assert.ok(!ids.includes("custom_console"));
   });
 
   it("27 engine components: 1 starting Basic 2D V1 + 26 researchable", () => {
