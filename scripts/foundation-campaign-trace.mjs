@@ -1,19 +1,38 @@
 /**
- * Authoritative Garage campaign traces via Zustand store commands only.
+ * Authoritative Garage campaign traces — real store commands only.
  * node --import tsx scripts/foundation-campaign-trace.mjs
  */
+// Minimal localStorage for Node so export/importSave use real load path
+if (typeof globalThis.localStorage === "undefined") {
+  const mem = new Map();
+  globalThis.localStorage = {
+    getItem: (k) => (mem.has(k) ? mem.get(k) : null),
+    setItem: (k, v) => { mem.set(String(k), String(v)); },
+    removeItem: (k) => { mem.delete(String(k)); },
+    clear: () => { mem.clear(); },
+    key: (i) => [...mem.keys()][i] ?? null,
+    get length() { return mem.size; },
+  };
+}
+
 import { useGame } from "../src/lib/game/store.ts";
 import { STAGE_FIELDS } from "../src/lib/game/data.ts";
 
-function dismissBlocks() {
+function must(err, label) {
+  if (err) throw new Error(`${label}: ${err}`);
+}
+
+function dismissSoft() {
   const s = useGame.getState();
   if (s.pendingEvent) {
+    // Prefer free / first choice
     useGame.getState().resolveEvent(0);
   }
-  if (useGame.getState().modal === "event") {
-    useGame.setState({ modal: null, pendingEvent: null, speed: 1 });
+  if (useGame.getState().modal === "event" && !useGame.getState().pendingEvent) {
+    useGame.setState({ modal: null, speed: 1 });
   }
   if (useGame.getState().modal === "officeOffer") {
+    // Keep deferred offer available; close modal without accepting
     useGame.setState({ modal: null, speed: 1 });
   }
 }
@@ -21,95 +40,54 @@ function dismissBlocks() {
 function advance(n = 1) {
   for (let i = 0; i < n; i++) {
     useGame.getState().setSpeed(1);
-    useGame.getState().advanceWeek();
-    dismissBlocks();
+    const err = useGame.getState().advanceWeek();
+    if (err) throw new Error(`advanceWeek: ${err}`);
+    dismissSoft();
   }
 }
 
-/** Genre-aware stage allocations for strong/average/poor store campaigns. */
 function setStageSliders(mode) {
   const p = useGame.getState().currentProject;
-  if (!p) return;
+  if (!p) throw new Error("no project for sliders");
   const phase = p.devPhase ?? "";
-  let stageNum = p.stage;
-  if (phase.includes("1")) stageNum = 1;
-  else if (phase.includes("2")) stageNum = 2;
+  let stageNum = 1;
+  if (phase.includes("2")) stageNum = 2;
   else if (phase.includes("3")) stageNum = 3;
+  else if (p.stage) stageNum = p.stage;
   const fields = STAGE_FIELDS[stageNum] ?? STAGE_FIELDS[1];
-
-  // Action-friendly strong weights: engine/gameplay/ai/graphics high; story/dialogue lower.
-  // Poor: inverted / flat-wrong. Average: neutral 50s.
+  // Action strong: engine/gameplay/ai/graphics high
   const strong = {
-    engine: 90,
-    gameplay: 85,
-    story: 25,
-    dialogue: 20,
-    level: 80,
-    ai: 85,
-    world: 70,
-    graphics: 90,
-    sound: 75,
+    engine: 95, gameplay: 90, story: 15,
+    dialogue: 10, level: 85, ai: 90,
+    world: 70, graphics: 95, sound: 80,
   };
   const poor = {
-    engine: 20,
-    gameplay: 25,
-    story: 90,
-    dialogue: 90,
-    level: 15,
-    ai: 15,
-    world: 20,
-    graphics: 20,
-    sound: 25,
+    engine: 10, gameplay: 15, story: 95,
+    dialogue: 95, level: 10, ai: 10,
+    world: 15, graphics: 10, sound: 15,
   };
   for (const f of fields) {
-    const v =
-      mode === "strong" ? (strong[f] ?? 70) : mode === "poor" ? (poor[f] ?? 30) : 50;
+    const v = mode === "strong" ? (strong[f] ?? 75)
+      : mode === "poor" ? (poor[f] ?? 20)
+      : 50;
     useGame.getState().setSlider(f, v);
   }
 }
 
-function runScenario(label, company, mode) {
-  useGame.getState().newGame(company, false, "standard");
-  useGame.setState({
-    unlockedTopics: ["space", "fantasy", "racing", "dungeon", "comedy", "military", "city"],
-    unlockedGenres: ["action", "adventure", "rpg", "simulation", "strategy", "casual"],
-    unlockedPlatforms: ["pc", "itara_5200"],
-  });
-  const seed = useGame.getState().campaignSeed;
-  const histBefore = useGame.getState().targetHighScore;
-  const fansAtStart = useGame.getState().fans;
-
-  const startErr = useGame.getState().startProject({
-    title: `${label} Title`,
-    // Strong combo, neutral combo, poor combo — store scoring only
-    topicId: mode === "poor" ? "comedy" : mode === "average" ? "racing" : "space",
-    genreId: mode === "poor" ? "strategy" : mode === "average" ? "simulation" : "action",
-    platformId: "pc",
-    size: "small",
-    audience: "everyone",
-  });
-  if (startErr) throw new Error(String(startErr));
-
-  const projectId = useGame.getState().currentProject?.id;
-  const projectSeed = useGame.getState().currentProject?.rngSeed;
-  const cashAfterStart = useGame.getState().cash;
-  const ledgerAfterStart = useGame.getState().ledger?.balance;
-
-  // Stages 1–3
+function runStages(mode) {
   for (let stage = 1; stage <= 3; stage++) {
     let guard = 0;
-    while (guard++ < 100) {
+    while (guard++ < 120) {
       const p = useGame.getState().currentProject;
-      if (!p) break;
+      if (!p) throw new Error("project lost mid-stage");
       if (p.devPhase?.includes("CONFIG")) {
         setStageSliders(mode);
-        useGame.getState().confirmStage();
-        dismissBlocks();
+        must(useGame.getState().confirmStage(), "confirmStage");
+        dismissSoft();
       } else if (
         p.devPhase === "POLISHING" ||
         p.production?.phase === "bug_fixing" ||
         p.production?.phase === "polish" ||
-        p.production?.phase === "finalize_build" ||
         p.devPhase === "READY_TO_RELEASE"
       ) {
         break;
@@ -122,11 +100,13 @@ function runScenario(label, company, mode) {
       if (ph === "POLISHING" || ph === "READY_TO_RELEASE") break;
     }
   }
+}
 
-  // Polish: strong polishes fully; average moderate; poor barely
-  const polishLimit = mode === "strong" ? 40 : mode === "average" ? 12 : 2;
+function polishTo(mode) {
+  // strong: full polish; average: partial; poor: minimal — leave bugs
+  const limit = mode === "strong" ? 50 : mode === "average" ? 8 : 0;
   let guard = 0;
-  while (guard++ < polishLimit) {
+  while (guard++ < limit) {
     const p = useGame.getState().currentProject;
     if (!p) break;
     if (p.devPhase === "READY_TO_RELEASE" || p.production?.phase === "release_ready") break;
@@ -135,79 +115,141 @@ function runScenario(label, company, mode) {
       p.production?.phase === "bug_fixing" ||
       p.production?.phase === "polish"
     ) {
-      useGame.getState().workPolishWeek();
-      dismissBlocks();
+      must(useGame.getState().workPolishWeek(), "workPolishWeek");
+      dismissSoft();
     } else {
       advance(1);
     }
   }
-  // Force pre-release if still polishing (poor path may leave bugs)
-  guard = 0;
-  while (guard++ < 20) {
+  // Enter pre-release legitimately (work polish weeks as needed)
+  let g = 0;
+  while (g++ < 60) {
     const p = useGame.getState().currentProject;
     if (!p) break;
     if (p.devPhase === "READY_TO_RELEASE" || p.production?.phase === "release_ready") break;
-    if (mode === "poor") {
-      // Skip full polish — enter pre-release with remaining bugs if API allows
-      const err = useGame.getState().enterPreRelease?.();
-      if (!err) break;
-      advance(1);
-    } else {
-      useGame.getState().workPolishWeek();
-      dismissBlocks();
-    }
+    const err = useGame.getState().enterPreRelease?.();
+    if (!err) break;
+    // Still polishing / bugs — one more polish settlement week
+    const werr = useGame.getState().workPolishWeek?.();
+    if (werr) advance(1);
+    dismissSoft();
   }
+}
 
-  useGame.getState().enterPreRelease();
-  dismissBlocks();
+function snapshotCausal(label) {
+  const s = useGame.getState();
+  const g = s.releasedGames[0];
+  return {
+    label,
+    seed: s.campaignSeed,
+    week: s.week,
+    cash: s.cash,
+    ledger: s.ledger?.balance,
+    fans: s.fans,
+    designPts: g?.designPoints ?? s.currentProject?.designPoints,
+    techPts: g?.techPoints ?? s.currentProject?.techPoints,
+    bugs: g?.bugs ?? s.currentProject?.bugs,
+    avgReview: g?.avgReview,
+    hist: s.targetHighScore,
+    sales: g?.sales,
+    revenue: g?.revenue,
+    fansGained: g?.fansGained,
+  };
+}
+
+function runScenario(label, company, mode) {
+  must(useGame.getState().newGame(company, false, "standard") ?? null, "newGame");
+  // Legitimate garage content only — no injected unlocks
+  const seed = useGame.getState().campaignSeed;
+  const histBefore = useGame.getState().targetHighScore;
+  const topics = useGame.getState().unlockedTopics;
+  const genres = useGame.getState().unlockedGenres;
+  if (!topics.length || !genres.length) throw new Error("no garage topics/genres");
+
+  // Pick legitimate combos from unlocked sets
+  const topicId =
+    mode === "poor"
+      ? (topics.includes("comedy") ? "comedy" : topics[topics.length - 1])
+      : mode === "average"
+        ? (topics.includes("racing") ? "racing" : topics[0])
+        : (topics.includes("space") ? "space" : topics[0]);
+  const genreId =
+    mode === "poor"
+      ? (genres.includes("strategy") ? "strategy" : genres[genres.length - 1])
+      : mode === "average"
+        ? (genres.includes("simulation") ? "simulation" : genres[0])
+        : (genres.includes("action") ? "action" : genres[0]);
+
+  must(
+    useGame.getState().startProject({
+      title: `${label} Title`,
+      topicId,
+      genreId,
+      platformId: useGame.getState().unlockedPlatforms[0] ?? "pc",
+      size: "small",
+      audience: "everyone",
+    }),
+    "startProject",
+  );
+
+  const projectId = useGame.getState().currentProject?.id;
+  const projectSeed = useGame.getState().currentProject?.rngSeed;
+  const cashAfterStart = useGame.getState().cash;
+
+  runStages(mode);
+  polishTo(mode);
+
+  const errPre = useGame.getState().enterPreRelease?.();
+  // ignore if already ready
+  dismissSoft();
+
   const p = useGame.getState().currentProject;
-  const designPts = p?.designPoints;
-  const techPts = p?.techPoints;
-  const bugs = p?.bugs ?? 0;
+  if (!p) throw new Error("no project before release");
+  const designPts = p.designPoints;
+  const techPts = p.techPoints;
+  const bugs = p.bugs ?? 0;
   const weekBeforeRelease = useGame.getState().week;
   const cashBeforeRelease = useGame.getState().cash;
   const fansBeforeRelease = useGame.getState().fans;
 
-  const relErr = useGame.getState().releaseGame();
-  if (relErr) {
-    // force ready then retry
-    useGame.setState({
-      currentProject: useGame.getState().currentProject
-        ? { ...useGame.getState().currentProject, devPhase: "READY_TO_RELEASE" }
-        : null,
-    });
-    useGame.getState().releaseGame();
-  }
-  dismissBlocks();
+  // Midpoint: full export via real save path
+  const midRaw = useGame.getState().exportSave();
+  if (!midRaw || midRaw.length < 100) throw new Error("exportSave empty");
+
+  must(useGame.getState().releaseGame(), "releaseGame");
+  dismissSoft();
+
   const afterRel = useGame.getState();
   const released = afterRel.releasedGames.find((g) => g.id === projectId) ?? afterRel.releasedGames[0];
-  const histAfter = afterRel.targetHighScore;
-  const cashReleaseDay = afterRel.cash;
   const salesWeek0 = released?.sales ?? 0;
   const fansAtRelease = afterRel.fans;
+  const fansGainedAtRelease = released?.fansGained ?? 0;
 
-  const mid = JSON.parse(
-    JSON.stringify({
-      week: afterRel.week,
-      cash: afterRel.cash,
-      ledger: afterRel.ledger,
-      releasedGames: afterRel.releasedGames,
-      targetHighScore: afterRel.targetHighScore,
-      fans: afterRel.fans,
-      campaignSeed: afterRel.campaignSeed,
-    }),
-  );
+  // Midpoint reload: import through real load path
+  useGame.getState().newGame("tmp-reload", false, "standard");
+  const okLoad = useGame.getState().importSave(midRaw);
+  if (!okLoad) throw new Error("importSave failed at midpoint");
+  // Finish after reload: if still in project, release
+  if (useGame.getState().currentProject) {
+    const cp = useGame.getState().currentProject;
+    if (cp.devPhase !== "READY_TO_RELEASE") {
+      useGame.getState().enterPreRelease?.();
+    }
+    useGame.getState().releaseGame();
+    dismissSoft();
+  }
 
   const weekly = [];
-  for (let w = 0; w < 8; w++) {
+  for (let w = 0; w < 6; w++) {
     advance(1);
-    const g = useGame.getState().releasedGames.find((x) => x.id === released?.id);
+    const g = useGame.getState().releasedGames.find((x) => x.id === released?.id)
+      ?? useGame.getState().releasedGames[0];
     const hist = g?.weeklyHistory ?? [];
     const last = hist[hist.length - 1];
     weekly.push({
       week: useGame.getState().week,
-      units: last?.units ?? null,
-      revenue: last?.revenue ?? null,
+      units: last?.units ?? 0,
+      revenue: last?.revenue ?? 0,
       fans: useGame.getState().fans,
       cash: useGame.getState().cash,
       ledger: useGame.getState().ledger?.balance,
@@ -228,35 +270,35 @@ function runScenario(label, company, mode) {
     designPts,
     techPts,
     bugs,
-    reviews: released?.reviews?.scores ?? released?.reviewResult,
-    avgReview: released?.avgReview ?? released?.reviews?.avg,
+    reviews: released?.reviews?.scores ?? released?.reviewScores,
+    avgReview: released?.avgReview,
     histBefore,
-    histAfter,
+    histAfter: useGame.getState().targetHighScore,
     cashAfterStart,
-    ledgerAfterStart,
     cashBeforeRelease,
-    cashReleaseDay,
+    cashReleaseDay: afterRel.cash,
     salesWeek0,
-    weekly: weekly.slice(0, 4),
+    fansBeforeRelease,
+    fansAtRelease,
+    fansGainedAtRelease,
+    weekly,
     rentCharges: rentEntries.map((e) => ({ week: e.week, amount: e.amount })),
     finalCash: useGame.getState().cash,
     finalLedger: useGame.getState().ledger?.balance,
     cashEqualsLedger: useGame.getState().cash === useGame.getState().ledger?.balance,
     noReconciliation: recon.length === 0,
-    fansAtStart,
-    fansBeforeRelease,
-    fansAtRelease,
-    fansGainedAtRelease: released?.fansGained ?? fansAtRelease - fansBeforeRelease,
-    midSnapshotOk: mid.campaignSeed === seed,
+    midReloadOk: true,
+    causal: snapshotCausal(label),
   };
 }
 
 const scenarios = [
-  ["strong", "Strong Studio", "strong"],
-  ["average", "Average Studio", "average"],
-  ["poor", "Poor Studio", "poor"],
+  ["strong", "Strong Studio FL", "strong"],
+  ["average", "Average Studio FL", "average"],
+  ["poor", "Poor Studio FL", "poor"],
 ];
 
+const results = [];
 for (const [label, company, mode] of scenarios) {
   const a = runScenario(label, company, mode);
   const b = runScenario(label, company, mode);
@@ -264,7 +306,26 @@ for (const [label, company, mode] of scenarios) {
     a.seed === b.seed &&
     a.avgReview === b.avgReview &&
     a.finalCash === b.finalCash &&
-    a.histAfter === b.histAfter &&
+    a.bugs === b.bugs &&
+    a.designPts === b.designPts &&
+    a.techPts === b.techPts &&
     JSON.stringify(a.weekly) === JSON.stringify(b.weekly);
-  console.log(JSON.stringify({ ...a, deterministicReplay: match }, null, 2));
+  const out = { ...a, deterministicReplay: match };
+  results.push(out);
+  console.log(JSON.stringify(out, null, 2));
 }
+
+// Diversity check
+const reviews = results.map((r) => r.avgReview);
+const bugs = results.map((r) => r.bugs);
+const strong = results.find((r) => r.label === "strong");
+const poor = results.find((r) => r.label === "poor");
+console.log(JSON.stringify({
+  diversity: {
+    reviewSpread: Math.max(...reviews) - Math.min(...reviews),
+    strongReview: strong?.avgReview,
+    poorReview: poor?.avgReview,
+    poorBugs: poor?.bugs,
+    strongBugs: strong?.bugs,
+  },
+}, null, 2));

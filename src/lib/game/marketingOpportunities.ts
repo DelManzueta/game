@@ -22,7 +22,9 @@ export type MarketingOpportunity = {
   weekOffered: number;
   choices: MarketingChoice[];
   selectedChoiceId: string | null;
-  status: "scheduled" | "offered" | "resolved" | "expired";
+  status: "scheduled" | "offered" | "resolved" | "expired" | "deferred";
+  /** True when offer is due but UI was blocked; survives save/load. */
+  duePending?: boolean;
   eventSeed: number;
   headline?: string;
 };
@@ -123,11 +125,9 @@ export function yearOpportunitySlots(
 ): number[] {
   const yearStart = yearIndex * 48;
   const rng = new SeededRng(hashSeed(campaignSeed, "mkt-slots", yearIndex));
-  // 55% chance of 1 slot, 35% chance of 2, 10% chance of 0 (quiet year without dark rule)
+  // Normal non-dark years: exactly 1 or 2 (never zero). Dark years handled by ensureYearOpportunities.
   const roll = rng.next();
-  let n = 1;
-  if (roll < 0.1) n = 0;
-  else if (roll > 0.65) n = 2;
+  const n = roll > 0.55 ? 2 : 1;
 
   const slots: number[] = [];
   let guard = 0;
@@ -145,7 +145,10 @@ function promoteDue(
 ): MarketingOpportunity[] {
   return opportunities.map((o) => {
     if (o.status === "scheduled" && week >= o.weekOffered) {
-      return { ...o, status: "offered" as const };
+      return { ...o, status: "offered" as const, duePending: true };
+    }
+    if (o.status === "deferred" && week >= o.weekOffered) {
+      return { ...o, status: "offered" as const, duePending: true };
     }
     return o;
   });
@@ -230,5 +233,33 @@ export function resolveMarketingOpportunity(
       storedMarketingPoints: state.storedMarketingPoints + choice.marketingPoints,
     },
     choice,
+  };
+}
+
+/** Player chose "Not now" or UI was blocked — keep recoverable. */
+export function deferMarketingOpportunity(
+  state: MarketingOpportunityState,
+  opportunityId: string,
+): MarketingOpportunityState {
+  return {
+    ...state,
+    opportunities: state.opportunities.map((o) =>
+      o.id === opportunityId && (o.status === "offered" || o.status === "deferred")
+        ? { ...o, status: "deferred" as const, duePending: true }
+        : o,
+    ),
+  };
+}
+
+/** Clear duePending after the offer has been shown as a modal. */
+export function markMarketingOpportunitySurfaced(
+  state: MarketingOpportunityState,
+  opportunityId: string,
+): MarketingOpportunityState {
+  return {
+    ...state,
+    opportunities: state.opportunities.map((o) =>
+      o.id === opportunityId ? { ...o, duePending: false } : o,
+    ),
   };
 }

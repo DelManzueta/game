@@ -39,12 +39,13 @@ import type {
  * Callers MUST pass campaignSeed + entity/event keys — no process counters.
  */
 export function uid(prefix = "id", ...parts: Array<string | number | boolean | null | undefined>) {
-  if (parts.length === 0) {
-    // Non-causal fallback: still pure for empty call within same process not required —
-    // prefer always passing parts. Use fixed salt so empty calls don't depend on order.
-    return `${prefix}_${hashSeed(prefix, "empty").toString(16)}`;
+  const cleaned = parts.filter((p) => p !== undefined && p !== null && p !== "");
+  if (cleaned.length === 0) {
+    throw new Error(
+      `uid("${prefix}") requires campaign seed + stable identity parts — empty identity is forbidden`,
+    );
   }
-  return `${prefix}_${hashSeed(prefix, ...parts).toString(16)}`;
+  return `${prefix}_${hashSeed(prefix, ...cleaned).toString(16)}`;
 }
 
 export function clamp(n: number, min: number, max: number) {

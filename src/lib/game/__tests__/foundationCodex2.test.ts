@@ -148,12 +148,15 @@ describe("event cash atomicity", () => {
 describe("hiring board persistence", () => {
   it("board survives setState JSON clone", () => {
     useGame.getState().newGame("Board", false, "standard");
+    // Hiring board is a post-Garage system
+    useGame.setState({ office: 2, unlocks: { ...useGame.getState().unlocks, hiring: "owned" } });
     const board = useGame.getState().refreshCandidates();
+    assert.ok(board && board.length > 0);
     const json = JSON.parse(JSON.stringify(useGame.getState()));
     useGame.setState({
       ...json,
-      // actions lost — re-get board from state field
       hiringBoard: json.hiringBoard,
+      office: 2,
     } as any);
     assert.deepEqual(useGame.getState().hiringBoard, board);
     const again = useGame.getState().refreshCandidates();

@@ -32,6 +32,7 @@ export function emptyOffer(offerId: OfferId, gate: TransitionGate): OfficeOfferR
     discoveredWeek: null,
     offeredWeek: null,
     reminderWeeks: [],
+    reminderDueWeeks: [],
     acceptedWeek: null,
     completedWeek: null,
   };

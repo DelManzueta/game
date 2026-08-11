@@ -737,6 +737,7 @@ function ProjectModsBar() {
   const setProjectDrm = useGame((s) => s.setProjectDrm);
   const unlockDrm = useGame((s) => s.unlockDrm);
   const toggleIllicitAssets = useGame((s) => s.toggleIllicitAssets);
+  const office = useGame((s) => s.office);
   const knownCombos = useGame((s) => s.knownCombos) ?? {};
   const rp = useGame((s) => s.researchPoints);
   const [msg, setMsg] = useState("");
@@ -760,6 +761,7 @@ function ProjectModsBar() {
         >
           {project.crunchMode ? "Crunch ON · 1.45×" : "Crunch OFF"}
         </Button>
+        {(office ?? 1) > 1 && (
         <Button
           size="sm"
           variant={project.usedIllicitAssets ? "danger" : "secondary"}
@@ -767,6 +769,7 @@ function ProjectModsBar() {
         >
           {project.usedIllicitAssets ? "Illicit assets ON" : "Clean assets"}
         </Button>
+        )}
         {(project.crisisReviewPenalty ?? 0) > 0 && (
           <span className="rounded-full border border-red-400/40 px-2 py-1 text-[10px] font-bold text-red-300">
             Review pen −{project.crisisReviewPenalty}

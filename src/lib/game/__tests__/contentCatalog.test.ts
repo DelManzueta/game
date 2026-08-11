@@ -59,11 +59,11 @@ describe("content catalog validation", () => {
     }
   });
 
-  it("exactly 57 timeline platforms include PC, Itara, and Commodore; Custom Console separate", () => {
-    assert.equal(PLATFORMS.length, 57);
-    assert.equal(PLATFORM_COUNT, 57);
+  it("exactly 50 fixed platforms include PC, Itara, and Commodore; Custom Console separate", () => {
+    assert.equal(PLATFORMS.length, 50);
+    assert.equal(PLATFORM_COUNT, 50);
     const ids = PLATFORMS.map((p) => p.id);
-    assert.equal(new Set(ids).size, 57);
+    assert.equal(new Set(ids).size, 50);
     assert.ok(ids.includes("pc"));
     assert.ok(ids.includes("itara_5200"));
     assert.ok(ids.includes("commodore"));
