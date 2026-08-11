@@ -208,6 +208,15 @@ export function calculatePhaseOutput(opts: {
     bugs = Math.floor((workloadRatio - 0.6) * 45);
     bottleneck = true;
   }
+  // Bad stage focus injects ship bugs even without heavy feature load
+  // (Garage titles rarely hit feature bottlenecks.)
+  if (efficiency < 0.72) {
+    bugs += Math.max(1, Math.floor((0.72 - efficiency) * 48));
+  }
+  // Extreme miss: invert focus hard → more defects at score time
+  if (efficiency < 0.45) {
+    bugs += Math.floor((0.45 - efficiency) * 30);
+  }
 
   return {
     tech: Math.round(tech),

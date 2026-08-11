@@ -314,6 +314,7 @@ import {
   cancelProjectProduction,
   isReleaseReady,
   productionOpenSeverity,
+  openBugsCount,
 } from "./production/bridge";
 import {
   finalizeBuild,
@@ -1040,7 +1041,7 @@ function applyEventChoice(state: GameState, choiceIndex: number): GameState {
       const mkt = deferMarketingOpportunity(state.marketingOpportunities, mktId);
       // Clear display cooldown so it can re-surface next clear idle week
       const cooldowns = { ...state.eventCooldowns };
-      delete cooldowns[`mkt_notified_${mktId}`];
+      delete cooldowns[`mkt-notified-${mktId}`];
       return {
         ...state,
         marketingOpportunities: mkt,
@@ -1063,7 +1064,7 @@ function applyEventChoice(state: GameState, choiceIndex: number): GameState {
       if (state.cash < res.choice.cost) {
         const mkt = deferMarketingOpportunity(state.marketingOpportunities, mktId);
         const cooldowns = { ...state.eventCooldowns };
-        delete cooldowns[`mkt_notified_${mktId}`];
+        delete cooldowns[`mkt-notified-${mktId}`];
         return {
           ...state,
           marketingOpportunities: mkt,
@@ -1312,12 +1313,25 @@ function releaseProject(next: GameState, project: GameProject): GameState {
       staffTech: pool.tech,
       staffDesign: pool.design,
     });
-    // Feature baseline points fold into totals; bottleneck bugs stack
+    // Feature baseline points fold into totals; bottleneck/focus bugs stack.
+    // Polish progress damps focus bugs — strong polish ships clean; poor retains them.
+    const polishNeed = Math.max(1, scored.production?.polishRequired ?? 1);
+    const polishProg = scored.production?.polishProgress ?? 0;
+    const polishRatio = Math.min(1, polishProg / polishNeed);
+    const openProd = scored.production ? openBugsCount(scored.production) : 0;
+    // Forced ship-with-bugs (pre-release skip) keeps full focus defects
+    const damp =
+      scored.production?.phase === "release_ready" && openProd === 0 && polishRatio >= 0.95
+        ? 0.15
+        : scored.production?.phase === "release_ready" && polishRatio < 0.35
+          ? 1
+          : Math.max(0.15, 1 - polishRatio * 0.85);
+    const focusBugs = Math.round(alloc.bugs * damp);
     scored = {
       ...scored,
       designPoints: scored.designPoints + alloc.design * 0.55,
       techPoints: scored.techPoints + alloc.tech * 0.55,
-      bugs: scored.bugs + alloc.bugs,
+      bugs: scored.bugs + focusBugs + openProd,
     };
     if (alloc.notes.length) {
       next.notifications = pushNote(next, alloc.notes[0]!, "warn");
@@ -1850,6 +1864,12 @@ function releaseProject(next: GameState, project: GameProject): GameState {
     comboMult,
     distType,
     royalty,
+    publisherAwarenessMult:
+      distType === "publisher"
+        ? snap
+          ? 1.4
+          : 1.25
+        : 1,
     planUnits,
     productQuality,
     avgReview: reviews.avg,
@@ -2571,22 +2591,21 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       // Player can open it from notifications / wait; only surface modal if idle (no project).
       const due = mkt.opportunities.find((o) => o.status === "offered");
       const notifiedKey = due ? `mkt-notified-${due.id}` : "";
-      if (
-        due &&
-        !(next.eventCooldowns[notifiedKey] != null) &&
+      const canSurfaceMkt =
+        !!due &&
         !next.pendingEvent &&
         next.modal == null &&
-        !next.currentProject
-      ) {
+        !next.currentProject;
+      if (canSurfaceMkt) {
         next.eventCooldowns = { ...next.eventCooldowns, [notifiedKey]: next.week };
-        const head = due.headline ?? "A marketing window opened.";
+        const head = due!.headline ?? "A marketing window opened.";
         next.pendingEvent = {
-          id: due.id,
+          id: due!.id,
           title: "Marketing opportunity",
           body: `${head}\n\nPick a channel — or wait.`,
           choices: [
             { label: "Not now", effect: "Keep offer · no spend" },
-            ...due.choices.map((c) => ({
+            ...due!.choices.map((c) => ({
               label: c.label,
               effect:
                 c.cost <= 0
@@ -2597,22 +2616,21 @@ export const useGame = create<GameState & Actions>((set, get) => ({
             })),
           ],
         };
-        (next.pendingEvent as { marketingOpportunityId?: string }).marketingOpportunityId = due.id;
+        (next.pendingEvent as { marketingOpportunityId?: string }).marketingOpportunityId = due!.id;
         (next.pendingEvent as { marketingChoiceOffset?: number }).marketingChoiceOffset = 1;
-        next.marketingOpportunities = markMarketingOpportunitySurfaced(mkt, due.id);
+        next.marketingOpportunities = markMarketingOpportunitySurfaced(mkt, due!.id);
         next.modal = "event";
         next.speed = 0;
-      } else if (due && next.currentProject) {
-        // Keep duePending; soft note once per opportunity
+      } else if (due && (next.currentProject || next.pendingEvent || next.modal)) {
+        // Keep duePending; soft note once per opportunity while blocked
         if (next.eventCooldowns[notifiedKey] == null) {
           next.eventCooldowns = { ...next.eventCooldowns, [notifiedKey]: next.week };
           next.notifications = pushNote(
             next,
-            `Marketing option available after you ship — check next idle week.`,
+            `Marketing option waiting — surfaces next clear idle week.`,
             "info",
           );
         }
-        // Clear notify cooldown when project ends is handled by using duePending on the opp itself
       }
     }
 
@@ -3906,7 +3924,10 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     if (
       p.devPhase !== "POLISHING" &&
       p.devPhase !== "READY_TO_RELEASE" &&
-      p.production?.phase !== "release_ready"
+      p.production?.phase !== "release_ready" &&
+      p.production?.phase !== "polish" &&
+      p.production?.phase !== "bug_fixing" &&
+      p.production?.phase !== "finalize_build"
     ) {
       return "Finish development first.";
     }
@@ -3922,10 +3943,24 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       }
       if (proj.production?.phase === "release_ready") {
         proj = { ...proj, devPhase: "READY_TO_RELEASE" };
-      } else if (proj.production?.phase === "bug_fixing") {
-        return "Fix remaining bugs (Work on bugs) before Pre-Release.";
-      } else if (proj.production?.phase === "polish") {
-        return "Keep polishing until the build is finalized.";
+      } else if (
+        proj.production?.phase === "bug_fixing" ||
+        proj.production?.phase === "polish" ||
+        proj.production?.phase === "finalize_build"
+      ) {
+        // Ship-with-bugs / light-polish path: fold open defects and mark release-ready.
+        // Strong campaigns polish first via workPolishWeek; poor may enter here intentionally.
+        const open = openBugsCount(proj.production);
+        const openSev = productionOpenSeverity(proj);
+        proj = {
+          ...proj,
+          bugs: Math.max(proj.bugs, open) + Math.max(0, Math.floor(openSev * 0.35)),
+          production: {
+            ...proj.production,
+            phase: "release_ready",
+          },
+          devPhase: "READY_TO_RELEASE",
+        };
       }
     }
 
@@ -3938,13 +3973,15 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         ? "Pre-Release blocked by certification or blockers — see tech gates."
         : rec === "hold"
           ? "Pre-Release: tech recommends holding. Set title/price or keep fixing."
-          : "Pre-Release: set final title and price.";
+          : proj.bugs > 0
+            ? `Pre-Release with ${proj.bugs} open bugs — reviews will notice.`
+            : "Pre-Release: set final title and price.";
 
     set({
       currentProject: { ...proj, devPhase: "READY_TO_RELEASE" },
       speed: 0,
       dirty: true,
-      notifications: pushNote(state, note, rec === "blocked" ? "warn" : "info"),
+      notifications: pushNote(state, note, rec === "blocked" || proj.bugs > 5 ? "warn" : "info"),
     });
     return null;
   },
@@ -5433,20 +5470,46 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     }
     if (tier === "headhunter" && state.office < 2) return "Headhunter needs Tech Park+.";
     if (state.cash < cfg.cost) return `Need ${formatCash(cfg.cost)}.`;
-    const txn = commitTxnResult(
-      { ...state, dirty: true },
-      {
-        week: state.week,
-        amount: -cfg.cost,
-        category: "other",
-        label: cfg.label,
-        ref: `recruit-${tier}-w${state.week}`,
-      },
+    const draft: GameState = { ...state, dirty: true };
+    const txn = commitTxnResult(draft, {
+      week: state.week,
+      amount: -cfg.cost,
+      category: "other",
+      label: cfg.label,
+      ref: `recruit-${tier}-w${state.week}`,
+    });
+    if (!txn.applied) {
+      // Duplicate fee ref: change absolutely no state (board, cash, notes).
+      return "Recruitment already charged this week.";
+    }
+    // Refresh board only after successful fee — pure draft, single set
+    const y = txn.state.year;
+    const refresh = (txn.state.hiringBoardRefresh ?? 0) + 1;
+    const bias = 1 + Math.min(1.2, (y - 1979) * 0.015);
+    const board = Array.from({ length: 5 }, (_, i) =>
+      generateStaff(
+        bias + (hashSeed(txn.state.campaignSeed, "hire-bias", refresh, i) / 4294967296) * 0.35,
+        y,
+        {
+          forceStar: i === 0 && hashSeed(txn.state.campaignSeed, "hire-star", refresh) / 4294967296 < 0.2,
+          seed: hashSeed(txn.state.campaignSeed, "hire", refresh, i),
+          candidateIndex: i,
+        },
+      ),
     );
-    if (!txn.applied) return "Recruitment already charged this week.";
-    // Only mutate board after successful fee
-    get().refreshCandidates();
-    const next = { ...get(), cash: txn.state.cash, ledger: txn.state.ledger, dirty: true };
+    if (!board.some((c) => c.level >= 3)) {
+      board[0] = generateStaff(bias + 0.5, y, {
+        forceStar: true,
+        seed: hashSeed(txn.state.campaignSeed, "hire-star-force", refresh),
+        candidateIndex: 0,
+      });
+    }
+    const next: GameState = {
+      ...txn.state,
+      hiringBoard: board,
+      hiringBoardRefresh: refresh,
+      dirty: true,
+    };
     next.notifications = pushNote(
       next,
       `${cfg.label} campaign (−${formatCash(cfg.cost)}). Check People for applicants.`,

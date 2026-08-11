@@ -152,6 +152,25 @@ export function generateWeekPoints(input: PointGenInput): PointGenResult {
     1.2,
   );
 
+  // Genre-focus efficiency: wrong stage emphasis softens weekly output
+  // so strong vs poor slider plans diverge before score-time allocation.
+  let focusHit = 0;
+  let focusN = 0;
+  {
+    const focusFields = new Set(fields.slice(0, Math.min(2, fields.length)));
+    for (const f of fields) {
+      const s = (input.sliders[f] ?? 50) / 100;
+      focusN += 1;
+      if (focusFields.has(f)) focusHit += s;
+      else focusHit += (1 - Math.abs(s - 0.35));
+    }
+  }
+  const focusEfficiency = clamp(
+    0.45 + (focusHit / Math.max(1, focusN)) * 0.7,
+    0.4,
+    1.15,
+  );
+
   let designGain = 0;
   let techGain = 0;
 
@@ -160,8 +179,8 @@ export function generateWeekPoints(input: PointGenInput): PointGenResult {
     const energy = clamp(member.energy ?? 100, 0, 100);
     if (energy <= 20 && member.id !== "founder") continue;
     const efficiency = clamp(
-      (0.5 + member.speed / 200 + member.level * 0.01) * (energy / 100),
-      DEV_POINTS.efficiencyFloor * 0.55,
+      (0.5 + member.speed / 200 + member.level * 0.01) * (energy / 100) * focusEfficiency,
+      DEV_POINTS.efficiencyFloor * 0.45,
       DEV_POINTS.efficiencyCeil,
     );
     for (const field of fields) {

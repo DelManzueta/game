@@ -4,7 +4,9 @@
   "sideEffects": false,
   "type": "module",
   "overrides": {
-    "nf3": "0.3.17"
+    "nf3": "0.3.17",
+    "lightningcss": "1.33.0",
+    "@tailwindcss/oxide": "4.3.3"
   },
   "scripts": {
     "dev": "vite dev --host 0.0.0.0 --port 8080",
@@ -93,7 +95,10 @@
   },
   "optionalDependencies": {
     "@tailwindcss/oxide-linux-x64-gnu": "4.3.3",
+    "@tailwindcss/oxide-linux-x64-musl": "4.3.3",
     "lightningcss-linux-x64-gnu": "1.33.0",
-    "@rolldown/binding-linux-x64-gnu": "1.2.3"
+    "lightningcss-linux-x64-musl": "1.33.0",
+    "@rolldown/binding-linux-x64-gnu": "1.2.3",
+    "@rolldown/binding-linux-x64-musl": "1.2.3"
   }
 }

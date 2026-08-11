@@ -14,3 +14,7 @@ artifacts/imagine_videos/
 artifacts/searched_images/
 *.pid
 *.sock
+
+# Agent QA screenshots (local only)
+screenshots/
+!screenshots/.gitkeep

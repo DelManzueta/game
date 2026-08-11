@@ -113,7 +113,8 @@ function polishTo(mode) {
     if (
       p.devPhase === "POLISHING" ||
       p.production?.phase === "bug_fixing" ||
-      p.production?.phase === "polish"
+      p.production?.phase === "polish" ||
+      p.production?.phase === "finalize_build"
     ) {
       must(useGame.getState().workPolishWeek(), "workPolishWeek");
       dismissSoft();
@@ -121,7 +122,7 @@ function polishTo(mode) {
       advance(1);
     }
   }
-  // Enter pre-release legitimately (work polish weeks as needed)
+  // Enter pre-release legitimately. Poor may ship with residual bugs.
   let g = 0;
   while (g++ < 60) {
     const p = useGame.getState().currentProject;
@@ -129,7 +130,14 @@ function polishTo(mode) {
     if (p.devPhase === "READY_TO_RELEASE" || p.production?.phase === "release_ready") break;
     const err = useGame.getState().enterPreRelease?.();
     if (!err) break;
-    // Still polishing / bugs — one more polish settlement week
+    if (mode === "poor") {
+      // Force ship-with-bugs path once stages done
+      if (p.devPhase === "POLISHING" || p.production?.phase === "polish" || p.production?.phase === "bug_fixing") {
+        const e2 = useGame.getState().enterPreRelease?.();
+        if (!e2) break;
+      }
+    }
+    // Still polishing / bugs — one more polish settlement week (strong/average)
     const werr = useGame.getState().workPolishWeek?.();
     if (werr) advance(1);
     dismissSoft();
@@ -207,7 +215,7 @@ function runScenario(label, company, mode) {
   if (!p) throw new Error("no project before release");
   const designPts = p.designPoints;
   const techPts = p.techPoints;
-  const bugs = p.bugs ?? 0;
+  const bugsAtPreRelease = p.bugs ?? 0;
   const weekBeforeRelease = useGame.getState().week;
   const cashBeforeRelease = useGame.getState().cash;
   const fansBeforeRelease = useGame.getState().fans;
@@ -221,6 +229,7 @@ function runScenario(label, company, mode) {
 
   const afterRel = useGame.getState();
   const released = afterRel.releasedGames.find((g) => g.id === projectId) ?? afterRel.releasedGames[0];
+  const bugs = released?.bugs ?? bugsAtPreRelease;
   const salesWeek0 = released?.sales ?? 0;
   const fansAtRelease = afterRel.fans;
   const fansGainedAtRelease = released?.fansGained ?? 0;
@@ -320,12 +329,24 @@ const reviews = results.map((r) => r.avgReview);
 const bugs = results.map((r) => r.bugs);
 const strong = results.find((r) => r.label === "strong");
 const poor = results.find((r) => r.label === "poor");
-console.log(JSON.stringify({
-  diversity: {
-    reviewSpread: Math.max(...reviews) - Math.min(...reviews),
-    strongReview: strong?.avgReview,
-    poorReview: poor?.avgReview,
-    poorBugs: poor?.bugs,
-    strongBugs: strong?.bugs,
-  },
-}, null, 2));
+const avg = results.find((r) => r.label === "average");
+const reviewSpread = Math.max(...reviews) - Math.min(...reviews);
+const diversity = {
+  reviewSpread,
+  strongReview: strong?.avgReview,
+  averageReview: avg?.avgReview,
+  poorReview: poor?.avgReview,
+  poorBugs: poor?.bugs,
+  strongBugs: strong?.bugs,
+  strongDesign: strong?.designPts,
+  poorDesign: poor?.designPts,
+  ok:
+    reviewSpread >= 0.8 &&
+    (strong?.avgReview ?? 0) > (poor?.avgReview ?? 99) &&
+    (poor?.bugs ?? 0) > (strong?.bugs ?? 0),
+};
+console.log(JSON.stringify({ diversity }, null, 2));
+if (!diversity.ok) {
+  console.error("DIVERSITY_FAIL", diversity);
+  process.exitCode = 1;
+}
