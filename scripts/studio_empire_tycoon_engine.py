@@ -3,11 +3,12 @@
 """
 =============================================================================
 STUDIO EMPIRE — TYCOON ENGINE MONOLITH
-Version: 2.5.0-GOLDEN
+Version: 2.5.1-AUDIT
 License: Self-contained standard-library only (sys, math, random, json)
 Architecture: 5-Pillar Framework (WHO / WHAT / WHERE / WHY / HOW)
 
-Deterministic-friendly: seeded RNG; integer cash/fans; historical floor 10.0
+Deterministic-friendly: persisted RNG state; integer cash/fans; historical floor 10.0
+Audit pass: v2.5.0-GOLDEN findings 1.1–1.3, 2.1–2.2, 3.1–3.4, 4.1–4.3
 =============================================================================
 """
 
@@ -18,7 +19,6 @@ import math
 import random
 import sys
 from copy import deepcopy
-from dataclasses import dataclass, field, asdict
 from typing import Any, Dict, List, Optional, Tuple
 
 
@@ -26,7 +26,7 @@ from typing import Any, Dict, List, Optional, Tuple
 # PILLAR 4 — DETERMINISTIC MATH HELPERS (WHY)
 # =============================================================================
 
-ENGINE_VERSION = "2.5.0-GOLDEN"
+ENGINE_VERSION = "2.5.1-AUDIT"
 HISTORICAL_AVERAGE_FLOOR = 10.0
 PLATFORM_TAX_RATE = 0.15
 UNIT_PRICE_DEFAULT = 9.99
@@ -36,6 +36,18 @@ GARAGE_RENT = 8_000
 START_CASH = 75_000
 START_RP = 40
 START_HIST = 35.0
+
+STAFF_CAP = 8
+BUG_DAMP_MIN = 0.7
+BUG_DAMP_DIVISOR = 80.0
+EARLY_SHIP_PENALTY = 0.85
+HIRING_STAT_MIN_DIVISOR = 1000
+HIRING_STAT_MAX_DIVISOR = 400
+RIVAL_PRESSURE_YEARLY_GROWTH = 0.05
+RIVAL_PRESSURE_CAP = 2.5
+RIVAL_PRESSURE_STRONG_RELIEF = 0.03
+RIVAL_PRESSURE_FLOOR = 1.0
+STRONG_REVIEW_THRESHOLD = 8.0
 
 
 def clamp(value: float, lo: float, hi: float) -> float:
@@ -52,6 +64,30 @@ def int_fans(n: float) -> int:
 
 def round1(n: float) -> float:
     return round(float(n), 1)
+
+
+def safe_int(raw: Any, default: int = 0) -> int:
+    """Parse user/menu text as int. Never raises; returns default on failure."""
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def serialize_rng_state(rng: random.Random) -> List[Any]:
+    version, internal, gauss_next = rng.getstate()
+    return [version, list(internal), gauss_next]
+
+
+def restore_rng_state(payload: Any) -> Optional[random.Random]:
+    """Rebuild Random from JSON-round-tripped getstate(). None if unusable."""
+    try:
+        version, internal_state, gauss_next = payload
+        rng = random.Random()
+        rng.setstate((int(version), tuple(internal_state), gauss_next))
+        return rng
+    except (TypeError, ValueError, IndexError):
+        return None
 
 
 def genre_level_from_exp(exp_points: int) -> int:
@@ -86,6 +122,7 @@ def roi_percent(net_revenue: float, dev_cost: float, mkt_cost: float) -> float:
 
 
 def combo_multiplier(topic: str, genre: str) -> float:
+    """Directional topic→genre pairing. Order is intentional; not commutative."""
     t = topic.strip().lower()
     g = genre.strip().lower()
     goods = {
@@ -101,7 +138,7 @@ def combo_multiplier(topic: str, genre: str) -> float:
         ("city", "horror"),
         ("dating", "action"),
     }
-    if (t, g) in goods or (g, t) in goods:
+    if (t, g) in goods:
         return 1.3
     if (t, g) in bads:
         return 0.7
@@ -551,6 +588,11 @@ class StudioState:
     def payroll(self) -> int:
         return sum(s.salary for s in self.staff)
 
+    def normalize_scalars(self) -> None:
+        """Force cash/fans onto integer rails. Call after any settlement."""
+        self.cash = float(int_cash(self.cash))
+        self.fans = int_fans(self.fans)
+
     def platform_active(self, key: str) -> bool:
         p = PLATFORM_REGISTRY.get(key)
         if not p:
@@ -588,6 +630,7 @@ class StudioState:
             "project": self.project.to_dict() if self.project else None,
             "seed": self.seed,
             "rival_pressure": self.rival_pressure,
+            "rng_state": serialize_rng_state(self.rng),
         }
 
     def load_save_matrix(self, data: Dict[str, Any]) -> None:
@@ -609,9 +652,15 @@ class StudioState:
         proj = data.get("project")
         self.project = ActiveProject.from_dict(proj) if proj else None
         self.seed = int(data.get("seed", self.seed))
-        self.rng = random.Random(self.seed + self.year * 1000 + self.week)
+        restored = restore_rng_state(data.get("rng_state"))
+        if restored is not None:
+            self.rng = restored
+        else:
+            # Legacy 2.5.0 saves: derived seed, not a true continuation
+            self.rng = random.Random(self.seed + self.year * 1000 + self.week)
         self.rival_pressure = float(data.get("rival_pressure", 1.0))
         self.game_over = False
+        self.normalize_scalars()
 
 
 class CheatConsole:
@@ -658,7 +707,10 @@ class CheatConsole:
         return False
 
     def _run_command(self, cmd: str) -> bool:
-        key = cmd.strip().lower().split()[0]
+        parts = cmd.strip().lower().split()
+        if not parts:
+            return True
+        key = parts[0]
         # normalize
         if not key.startswith("/"):
             key = "/" + key
@@ -706,7 +758,8 @@ class TycoonEngine:
     """
     Integrated execution engine: time, development, shipping, menus.
     Injection points:
-      - T-Engine during Phase 2 production (bug-halving)
+      - T-Engine Phase 2 stability (no mid-dev bug-halving)
+      - T-Engine bug-halving exactly once at ship
       - Genre EXP after review, before telemetry append
       - CheatConsole at apex of input loop
     """
@@ -726,7 +779,9 @@ class TycoonEngine:
             # Hype decay: max(1, floor(hype*0.12))
             if st.hype > 0:
                 decay = max(1, int(st.hype * 0.12))
+                before = st.hype
                 st.hype = max(0, st.hype - decay)
+                st.log_msg(f"📉 Hype decayed −{before - st.hype} (now {st.hype})")
             # Staff energy
             for member in st.staff:
                 member.tick_energy(working=working and st.project is not None)
@@ -743,16 +798,18 @@ class TycoonEngine:
             if st.month > 12:
                 st.month = 1
                 st.year += 1
-                st.rival_pressure = min(2.5, st.rival_pressure + 0.05)
+                st.rival_pressure = min(
+                    RIVAL_PRESSURE_CAP,
+                    st.rival_pressure + RIVAL_PRESSURE_YEARLY_GROWTH,
+                )
                 st.log_msg(f"🎉 New Year — Year {st.year} | rival pressure {st.rival_pressure:.2f}")
             # Bankruptcy halt
             if st.cash < 0:
-                st.cash = float(int_cash(st.cash))
+                st.normalize_scalars()
                 st.log_msg("[GAME OVER] Cash below $0 — company defaulted.")
                 st.game_over = True
                 return
-            st.cash = float(int_cash(st.cash))
-            st.fans = int_fans(st.fans)
+            st.normalize_scalars()
 
     # ── Development week (Phase production) ─────────────────────────────────
 
@@ -779,15 +836,14 @@ class TycoonEngine:
         tech_gain = (base * 0.55 + staff_t) * st.engine.tech_mult * combo * genre_mult
         design_gain = (base * 0.45 + staff_d) * st.engine.design_mult * combo * genre_mult
 
-        # Phase 2: T-Engine stability / bug matrix (injection point)
+        # Phase 2: T-Engine stability only. Bug-halving happens once at ship.
         phase_bugs = st.rng.randint(0, 4)
         if p.phase == 2 and st.engine.has_t_engine:
-            # Stability points +25% of tech gain
             stability = tech_gain * 0.25
             p.stability_points += stability
-            phase_bugs = apply_t_engine_bugs(phase_bugs + st.rng.randint(0, 3), True)
+            phase_bugs = phase_bugs + st.rng.randint(0, 3)
             st.log_msg(
-                f"  ⚙️ T-Engine Phase 2 stability +{stability:.1f} | bugs halved → {phase_bugs}"
+                f"  ⚙️ T-Engine Phase 2 stability +{stability:.1f} | bugs this phase: {phase_bugs}"
             )
         else:
             phase_bugs = max(0, phase_bugs)
@@ -825,11 +881,11 @@ class TycoonEngine:
         if p.phase < 3 or p.weeks_left > 0:
             # Allow early ship with penalty
             st.log_msg("⚠️ Shipping early — quality penalty applied.")
-            early_pen = 0.85
+            early_pen = EARLY_SHIP_PENALTY
         else:
             early_pen = 1.0
 
-        # Final bug pass with T-Engine
+        # Final bug pass with T-Engine — the ONLY halving pass
         base_bugs = p.bugs
         final_bugs = apply_t_engine_bugs(base_bugs, st.engine.has_t_engine)
         bugs_fixed = max(0, base_bugs - final_bugs)
@@ -844,7 +900,7 @@ class TycoonEngine:
         # Review
         raw_review = compute_review_score(total_points, st.historical_average)
         # Bug damp
-        bug_damp = clamp(1.0 - (final_bugs / 80.0), 0.7, 1.0)
+        bug_damp = clamp(1.0 - (final_bugs / BUG_DAMP_DIVISOR), BUG_DAMP_MIN, 1.0)
         raw_review = clamp(round1(raw_review * bug_damp), 1.0, 10.0)
         uses_3d = p.uses_3d or st.engine.uses_3d
         final_review = apply_t_engine_review(raw_review, st.engine.has_t_engine, uses_3d)
@@ -876,6 +932,14 @@ class TycoonEngine:
         mkt = p.marketing_allocated
         st.hype = 0  # spent at launch
 
+        # Strong launches push back on the yearly rival-pressure ramp
+        if final_review >= STRONG_REVIEW_THRESHOLD:
+            st.rival_pressure = max(
+                RIVAL_PRESSURE_FLOOR,
+                st.rival_pressure - RIVAL_PRESSURE_STRONG_RELIEF,
+            )
+            st.log_msg(f"🏆 Strong launch — rival pressure eased to {st.rival_pressure:.2f}")
+
         domination = round(share / max(0.1, st.rival_pressure), 3)
 
         record = st.telemetry.build_record(
@@ -906,7 +970,7 @@ class TycoonEngine:
         self._print_release_telemetry(record)
 
         st.project = None
-        self.tick_weeks(0)  # normalize integers only
+        st.normalize_scalars()
 
     def _print_release_telemetry(self, record: Dict[str, Any]) -> None:
         print("\n┌─ RELEASE TELEMETRY ─────────────────────────────────────┐")
@@ -961,6 +1025,9 @@ class TycoonEngine:
             st.log_msg("❌ Invalid marketing tier.")
             return False
         cost = int(cfg["cost"])
+        if cost <= 0:
+            st.log_msg("❌ Marketing cost must be positive.")
+            return False
         if st.cash < cost:
             st.log_msg(f"❌ Need ${cost:,} for {cfg['name']}. Cash preserved.")
             return False
@@ -997,6 +1064,9 @@ class TycoonEngine:
             cash_cost += T_ENGINE_CASH
             rp_cost += T_ENGINE_RP
 
+        if cash_cost < 0 or rp_cost < 0:
+            st.log_msg("❌ Engine cost must not be negative. State preserved.")
+            return False
         if st.cash < cash_cost:
             st.log_msg(f"❌ Need ${cash_cost:,}. State preserved.")
             return False
@@ -1040,6 +1110,9 @@ class TycoonEngine:
             st.log_msg(f"❌ {plat['name']} not released until Year {plat['release_year']}.")
             return False
         cost = int(plat["license_cost"])
+        if cost < 0:
+            st.log_msg("❌ License cost must not be negative. State preserved.")
+            return False
         if st.cash < cost:
             st.log_msg(f"❌ Need ${cost:,}. State preserved.")
             return False
@@ -1050,13 +1123,18 @@ class TycoonEngine:
 
     def generate_hiring_pool(self, investment: int) -> bool:
         st = self.state
+        if investment <= 0:
+            st.log_msg("❌ Recruiting investment must be positive.")
+            return False
         if st.cash < investment:
             st.log_msg("❌ Insufficient funds for recruiting. State preserved.")
             return False
         st.cash = float(int_cash(st.cash - investment))
         st.hiring_pool = []
-        stat_min = max(10, investment // 1000)
-        stat_max = max(30, investment // 400)
+        stat_min = max(10, investment // HIRING_STAT_MIN_DIVISOR)
+        stat_max = max(30, investment // HIRING_STAT_MAX_DIVISOR)
+        if stat_max < stat_min:
+            stat_max = stat_min
         for _ in range(3):
             t = st.rng.randint(stat_min, stat_max)
             d = st.rng.randint(stat_min, stat_max)
@@ -1073,19 +1151,24 @@ class TycoonEngine:
         if index < 0 or index >= len(st.hiring_pool):
             st.log_msg("❌ Invalid candidate index.")
             return False
-        if len(st.staff) >= 8:
-            st.log_msg("❌ Staff cap (8) reached.")
+        if len(st.staff) >= STAFF_CAP:
+            st.log_msg(f"❌ Staff cap ({STAFF_CAP}) reached.")
             return False
         m = st.hiring_pool.pop(index)
         st.staff.append(m)
         st.log_msg(f"✅ Hired {m.name} (${m.salary}/mo)")
         return True
 
-    def save_to_file(self, path: str) -> None:
+    def save_to_file(self, path: str) -> bool:
         data = self.state.to_save_matrix()
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+        except OSError as e:
+            print(f"❌ Save failed: {e}")
+            return False
         print(f"💾 Saved → {path}")
+        return True
 
     def load_from_file(self, path: str) -> bool:
         try:
@@ -1224,8 +1307,9 @@ def menu_engine_builder(engine: TycoonEngine) -> None:
     if raw:
         for part in raw.split(","):
             part = part.strip()
-            if part.isdigit() and 0 <= int(part) < len(keys):
-                chosen.append(keys[int(part)])
+            idx = safe_int(part, default=-1)
+            if 0 <= idx < len(keys):
+                chosen.append(keys[idx])
     t_flag = prompt(f"Attach T-Engine Modular Framework (+${T_ENGINE_CASH:,} +{T_ENGINE_RP} RP)? [y/N]: ")
     attach = t_flag.lower() in ("y", "yes")
     engine.build_custom_engine(chosen, attach_t_engine=attach)
@@ -1253,10 +1337,7 @@ def menu_staff(engine: TycoonEngine) -> None:
     sub = prompt("Staff menu: ")
     if sub == "1":
         inv = prompt("Recruiting investment (e.g. 5000): ")
-        try:
-            engine.generate_hiring_pool(int(inv))
-        except ValueError:
-            print("❌ Invalid amount.")
+        engine.generate_hiring_pool(safe_int(inv, default=0))
     elif sub == "2":
         if not engine.state.hiring_pool:
             print("Pool empty — generate first.")
@@ -1264,10 +1345,7 @@ def menu_staff(engine: TycoonEngine) -> None:
         for i, m in enumerate(engine.state.hiring_pool):
             print(f"  [{i}] {m.name} T{m.tech} D{m.design} ${m.salary}/mo")
         idx = prompt("Index: ")
-        try:
-            engine.hire_from_pool(int(idx))
-        except ValueError:
-            print("❌ Invalid index.")
+        engine.hire_from_pool(safe_int(idx, default=-1))
     else:
         if not engine.state.staff:
             print("(no staff)")
@@ -1286,11 +1364,11 @@ def menu_save_load(engine: TycoonEngine) -> None:
     sub = prompt("Save/Load: ")
     if sub == "1":
         path = prompt("Path [studio_save.json]: ") or "studio_save.json"
-        engine.save_to_file(path)
-        print("### SYSTEM SAVE MATRIX (portable)")
-        print("```json")
-        print(json.dumps(engine.state.to_save_matrix(), indent=2)[:2000])
-        print("```")
+        if engine.save_to_file(path):
+            print("### SYSTEM SAVE MATRIX (portable)")
+            print("```json")
+            print(json.dumps(engine.state.to_save_matrix(), indent=2)[:2000])
+            print("```")
     elif sub == "2":
         path = prompt("Path [studio_save.json]: ") or "studio_save.json"
         engine.load_from_file(path)
@@ -1315,7 +1393,7 @@ def run_main_loop(seed: int = 42) -> None:
     print(
         f"""
 ╔══════════════════════════════════════════════════════════════════════╗
-║  STUDIO EMPIRE — TYCOON ENGINE MONOLITH  v{ENGINE_VERSION:10s}          ║
+║  STUDIO EMPIRE TYCOON ENGINE MONOLITH  v{ENGINE_VERSION:10s}          ║
 ║  5-Pillar Architecture · stdlib only · deterministic-friendly        ║
 ║  Genre EXP · T-Engine · Telemetry · Expanded Platforms · Cheats      ║
 ╚══════════════════════════════════════════════════════════════════════╝
@@ -1373,8 +1451,51 @@ def run_main_loop(seed: int = 42) -> None:
             print("Unknown option. Enter 0–9, T, Q, or a /cheat command.")
 
 
+def self_test_pure_functions() -> None:
+    """Exhaustive-enough checks for side-effect-free helpers."""
+    # compute_units_sold edge cases
+    assert compute_units_sold(10, 0, 0, 0) > 0  # review/share clamp off zero
+    u_lo = compute_units_sold(100, 5, 0, 0.01)
+    u_floor = compute_units_sold(100, 5, 0, 0.05)
+    assert u_lo == u_floor
+    u_hype0 = compute_units_sold(80, 7, 0, 1.0)
+    u_hype100 = compute_units_sold(80, 7, 100, 1.0)
+    assert u_hype100 > u_hype0
+
+    # update_historical floor
+    assert update_historical(1.0, 0.0) == HISTORICAL_AVERAGE_FLOOR
+    nxt = update_historical(40.0, 20.0)
+    assert nxt == max(HISTORICAL_AVERAGE_FLOOR, 40.0 * 0.7 + 20.0 * 0.3)
+
+    # combo_multiplier: goods / bads / default / reversed is NOT a match
+    assert combo_multiplier("Sci-Fi", "Action") == 1.3
+    assert combo_multiplier("Casual", "Action") == 0.7
+    assert combo_multiplier("Fantasy", "Simulation") == 0.95
+    assert combo_multiplier("Action", "Sci-Fi") == 0.95
+
+    # roi_percent denominator floor
+    assert roi_percent(100.0, 0.0, 0.0) == 10000.0
+
+    # platform lifecycle
+    st = StudioState(seed=1)
+    st.year = 1
+    assert st.platform_active("PC") is True  # lifespan 99
+    assert st.platform_active("MBox_360") is False  # release_year 7
+    st.year = 7
+    assert st.platform_active("MBox_360") is True
+    st.year = 14  # 7 + 7 - 1 = 13 last active year
+    assert st.platform_active("MBox_360") is False
+    st.owned_licenses.append("MBox_360")
+    assert st.platform_share("MBox_360") == 0.15  # residual
+    st.year = 1
+    assert st.platform_active("PC") is True
+    assert st.platform_share("PC") == 1.0
+
+
 def self_test() -> None:
     """Non-interactive smoke test for CI / sanity."""
+    self_test_pure_functions()
+
     eng = TycoonEngine(seed=7)
     assert eng.state.cash == START_CASH
     eng.cheats.execute("/money_boost")
@@ -1396,12 +1517,67 @@ def self_test() -> None:
     assert abs(genre_expertise_multiplier(2) - 1.10) < 1e-9
     assert apply_t_engine_bugs(9, True) == 4
     assert apply_t_engine_review(7.0, True, True) == 7.5
+
+    # 1.3 — negative investment must not grant cash
+    cash_before = eng.state.cash
+    assert eng.generate_hiring_pool(-999999) is False
+    assert eng.state.cash == cash_before
+    assert eng.generate_hiring_pool(0) is False
+    assert eng.state.cash == cash_before
+
+    # 1.1 — T-Engine halves bugs exactly once at ship
+    te = TycoonEngine(seed=99)
+    te.state.engine.has_t_engine = True
+    assert te.start_project("Halve Once", "Sci-Fi", "Action", "PC")
+    assert te.state.project is not None
+    te.state.project.phase = 3
+    te.state.project.weeks_left = 0
+    te.state.project.bugs = 20
+    te.state.project.design_points = 40
+    te.state.project.tech_points = 40
+    te.ship_game()
+    rec = te.state.telemetry.game_history_records[0]
+    assert rec["Total Bugs Shipped"] == 10, rec["Total Bugs Shipped"]
+    assert rec["Total Bugs Shipped"] == apply_t_engine_bugs(20, True)
+
+    # Phase-2 develop must NOT pre-halve (raw increment lands on p.bugs)
+    te2 = TycoonEngine(seed=123)
+    te2.state.engine.has_t_engine = True
+    te2.start_project("Phase2 Raw", "Sci-Fi", "Action", "PC")
+    assert te2.state.project is not None
+    te2.state.project.phase = 2
+    te2.state.project.weeks_left = 2
+    te2.state.project.bugs = 10
+    # Consume the same RNG sequence the function will: base 6-12, then 0-4, then 0-3
+    peek = random.Random(123)
+    peek.randint(6, 12)
+    extra = peek.randint(0, 4) + peek.randint(0, 3)
+    te2.develop_week()
+    assert te2.state.project.bugs == 10 + extra, (
+        te2.state.project.bugs,
+        10 + extra,
+    )
+
     # Ship path
     for _ in range(6):
         eng.develop_week()
     eng.ship_game()
     assert len(eng.state.telemetry.game_history_records) == 1
     assert eng.state.genre_exp.get_exp("Action") == 1
+
+    # 3.1 — RNG state survives JSON save/load
+    consumer = TycoonEngine(seed=1)
+    _ = consumer.state.rng.randint(1, 100)
+    payload = json.loads(json.dumps(consumer.state.to_save_matrix()))
+    n1 = consumer.state.rng.randint(1, 1_000_000)
+    restored = TycoonEngine(seed=999)
+    restored.state.load_save_matrix(payload)
+    n2 = restored.state.rng.randint(1, 1_000_000)
+    assert n1 == n2, (n1, n2)
+
+    # 2.1 — save to a missing directory does not crash
+    assert eng.save_to_file("/no/such/dir/studio_save.json") is False
+
     # T-engine purchase insufficient funds path preserves when broke
     eng.state.cash = 100
     eng.state.rp = 10
