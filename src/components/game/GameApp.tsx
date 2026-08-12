@@ -57,6 +57,7 @@ import { Badge, Button, Input, Modal, SearchField, cnJoin } from "@/components/u
 import { GarageLoopFlowchart, ScoringPipelineFlow } from "@/components/game/LoopFlowchart";
 import { MarketScreen } from "@/components/game/MarketScreen";
 import { SalesChart, salesPointsFromGame } from "@/components/game/SalesChart";
+import { StudioCommandDeck } from "@/components/game/StudioCommandDeck";
 import { CAMPAIGN_CATALOG } from "@/lib/game/commercial/marketing";
 import { HARDWARE_TIERS, type HardwareTierId } from "@/lib/game/tycoonLateMarket";
 import { DRM_TIERS, type DrmTier } from "@/lib/game/tycoonPiracy";
@@ -320,6 +321,7 @@ function PlayingShell() {
       <div className="se-stage">
         {/* Always-on room world */}
         <GarageRoomView immersive />
+        {screen === "studio" && <StudioCommandDeck />}
         {/* Develop sheet over the room */}
         {screen === "develop" && <DevelopOverlay sheet />}
         {/* Department panels — scroll inside only */}
@@ -359,9 +361,6 @@ function StudioTopBar({ forcePause }: { forcePause: boolean }) {
   const week = useGame((s) => s.week);
   const year = useGame((s) => s.year);
   const month = useGame((s) => s.month);
-  const cash = useGame((s) => s.cash);
-  const fans = useGame((s) => s.fans);
-  const researchPoints = useGame((s) => s.researchPoints);
   const speed = useGame((s) => s.speed);
   const setSpeed = useGame((s) => s.setSpeed);
   const setModal = useGame((s) => s.setModal);
@@ -403,18 +402,6 @@ function StudioTopBar({ forcePause }: { forcePause: boolean }) {
       )}
 
       <div className="ml-auto flex items-center gap-2 sm:gap-3">
-        <span className="se-metric se-metric-fans hidden sm:inline">{formatFans(fans)} fans</span>
-        <span
-          className={cnJoin(
-            "se-metric se-metric-cash",
-            cash < 0 ? "text-[#ff7a6a]" : "text-[#6fd39a]",
-          )}
-        >
-          {formatCash(cash)}
-        </span>
-        <span className="se-metric hidden text-[#9bb7ff] sm:inline" title="Research points">
-          {Math.floor(researchPoints)} RP
-        </span>
         <div className="se-speed" role="group" aria-label="Game speed">
           {(
             [
@@ -497,34 +484,8 @@ function StudioDock() {
 /* ═══════════════════════════ Garage room ═══════════════════════════ */
 
 function GarageRoomView({ immersive = false }: { immersive?: boolean }) {
-  const companyName = useGame((s) => s.companyName);
   const office = useGame((s) => s.office);
-  const currentProject = useGame((s) => s.currentProject);
-  const hype = useGame((s) => s.hype);
-  const researchPoints = useGame((s) => s.researchPoints);
-  const gamesPublished = useGame((s) => s.gamesPublished);
-  // Primitive deps only — never return fresh objects from the selector (infinite loop).
-  const phase = projectPhaseLabel(currentProject);
-  const setModal = useGame((s) => s.setModal);
-  const setScreen = useGame((s) => s.setScreen);
-  const busy = !!currentProject?.devPhase.includes("RUNNING");
   const art = roomArtDefForOffice(office);
-  const screen = useGame((s) => s.screen);
-  const garage = isGaragePhaseOne({ office });
-  // Read-only overview snapshot on this render (subs above drive re-renders).
-  const officeGoal = studioOverview(useGame.getState()).officeGoal;
-  // Room is always the world under chrome; hide action chrome on pure secondary screens
-  const showChrome = screen === "studio";
-
-  const primaryLabel = !currentProject
-    ? "Develop a game"
-    : currentProject.devPhase === "READY_TO_RELEASE"
-      ? "Finish & release"
-      : currentProject.devPhase.includes("CONFIG")
-        ? "Allocate stage"
-        : currentProject.devPhase === "POLISHING"
-          ? "Polish build"
-          : `Open desk · ${phase.title}`;
 
   return (
     <div className={immersive ? "se-room" : "relative mx-auto w-full max-w-5xl"}>
@@ -536,84 +497,6 @@ function GarageRoomView({ immersive = false }: { immersive?: boolean }) {
         draggable={false}
       />
       {immersive && <div className="se-room-vignette" />}
-
-      {showChrome && immersive && (
-        <>
-          <div className="se-room-caption pointer-events-none">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#f0b24a]/95">
-              {currentProject ? (busy ? art.hotspotBusy : art.hotspotOpen) : art.hotspotIdle}
-            </p>
-            <div className="mt-1 flex flex-wrap items-end justify-between gap-3">
-              <div>
-                <h1 className="text-lg font-semibold tracking-tight text-white/90 sm:text-xl">
-                  {companyName}
-                </h1>
-                <p className="text-xs text-white/45">
-                  {garage ? "Garage loft · Phase One" : office === 2 ? "Small office" : "Studio floor"}
-                </p>
-              </div>
-              {officeGoal && !officeGoal.activeMove && (
-                <p className="max-w-[18rem] text-right text-[12px] leading-snug text-white/50">
-                  <span className="text-[#f0b24a]/90">
-                    L{officeGoal.stageLevel ?? office} {officeGoal.stageName ?? "Studio"} ·{" "}
-                  </span>
-                  {officeGoal.nextName
-                    ? `Next ${officeGoal.nextName}: hold ${formatCash(officeGoal.cashNeed)}`
-                    : "Max campus"}
-                  {officeGoal.nextHint ? ` — ${officeGoal.nextHint}` : ""}
-                </p>
-              )}
-            </div>
-          </div>
-
-          {/* Contextual hotspots — no ops keypad */}
-          <div className="se-float-actions">
-            <button
-              type="button"
-              className="se-cta"
-              onClick={() => {
-                if (!currentProject) setModal("newGame");
-                else setScreen("develop");
-              }}
-            >
-              {primaryLabel}
-            </button>
-            <button type="button" className="se-cta-secondary" onClick={() => setScreen("research")}>
-              Research
-            </button>
-            {gamesPublished > 0 && (
-              <button type="button" className="se-cta-secondary" onClick={() => setScreen("games")}>
-                Library
-              </button>
-            )}
-            {!garage && (
-              <button type="button" className="se-cta-secondary" onClick={() => setScreen("market")}>
-                Marketing
-              </button>
-            )}
-            <button type="button" className="se-cta-quiet" onClick={() => setModal("loopGuide")}>
-              How it works
-            </button>
-            {(officeGoal?.offerState === "offered" || officeGoal?.offerState === "deferred") && (
-              <button type="button" className="se-cta-secondary" onClick={() => setModal("officeOffer")}>
-                Office offer
-              </button>
-            )}
-            {officeGoal?.canMove && (
-              <button
-                type="button"
-                className="se-cta"
-                onClick={() => useGame.getState().upgradeOffice()}
-              >
-                Move · {officeGoal.nextName ?? "Next office"}
-              </button>
-            )}
-          </div>
-          <p className="pointer-events-none absolute bottom-[4.6rem] left-0 right-0 text-center text-[10px] font-semibold tabular text-white/50 sm:bottom-[5.1rem]">
-            Hype {Math.round(hype)} · {Math.floor(researchPoints)} RP · {gamesPublished} shipped
-          </p>
-        </>
-      )}
     </div>
   );
 }

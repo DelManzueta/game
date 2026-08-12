@@ -48,6 +48,8 @@ RIVAL_PRESSURE_CAP = 2.5
 RIVAL_PRESSURE_STRONG_RELIEF = 0.03
 RIVAL_PRESSURE_FLOOR = 1.0
 STRONG_REVIEW_THRESHOLD = 8.0
+POINT_BAR_TARGET = 50.0  # 100% on the project-card bars
+EMPTY_SHIP_POINT_FLOOR = 1.0
 
 
 def clamp(value: float, lo: float, hi: float) -> float:
@@ -96,8 +98,8 @@ def genre_level_from_exp(exp_points: int) -> int:
 
 
 def genre_expertise_multiplier(level: int) -> float:
-    """Final_Points = Base_Points * (1.0 + (Current_Genre_Level * 0.05))"""
-    return 1.0 + (float(level) * 0.05)
+    """Lv1 = 1.00x. Each extra level adds +5%."""
+    return 1.0 + (max(0, int(level) - 1) * 0.05)
 
 
 def apply_t_engine_bugs(base_bugs: int, has_t_engine: bool) -> int:
@@ -168,18 +170,25 @@ def update_historical(historical_avg: float, total_points: float) -> float:
     return max(HISTORICAL_AVERAGE_FLOOR, nxt)
 
 
+def fan_multiplier(fans: int) -> float:
+    """Diminishing launch lift from the fanbase. 0 fans = 1.0x."""
+    return 1.0 + math.log10(1.0 + max(0, int(fans))) * 0.15
+
+
 def compute_units_sold(
     total_points: float,
     review: float,
     hype: float,
     platform_share: float,
+    fans: int = 0,
 ) -> int:
-    """Units = round(points * review^2.3 * 15 * hype_mult * share)"""
+    """Units = round(points * review^2.3 * 15 * hype_mult * share * fan_mult)"""
     pts = max(1.0, float(total_points))
     rev = clamp(float(review), 1.0, 10.0)
     hm = hype_multiplier(hype)
     share = max(0.05, float(platform_share))
-    return max(0, int(round(pts * (rev ** 2.3) * 15.0 * hm * share)))
+    fm = fan_multiplier(fans)
+    return max(0, int(round(pts * (rev ** 2.3) * 15.0 * hm * share * fm)))
 
 
 # =============================================================================
@@ -879,11 +888,8 @@ class TycoonEngine:
             st.log_msg("❌ No active project to ship.")
             return
         if p.phase < 3 or p.weeks_left > 0:
-            # Allow early ship with penalty
-            st.log_msg("⚠️ Shipping early — quality penalty applied.")
-            early_pen = EARLY_SHIP_PENALTY
-        else:
-            early_pen = 1.0
+            st.log_msg("❌ Not ready to ship. Finish all 3 phases first (Develop).")
+            return
 
         # Final bug pass with T-Engine — the ONLY halving pass
         base_bugs = p.bugs
@@ -893,9 +899,10 @@ class TycoonEngine:
         p.bugs = final_bugs
 
         # Points
-        total_points = (p.design_points + p.tech_points) * early_pen
+        total_points = p.design_points + p.tech_points
         if st.engine.has_t_engine:
             total_points += p.stability_points * 0.5
+        empty_ship = total_points < EMPTY_SHIP_POINT_FLOOR
 
         # Review
         raw_review = compute_review_score(total_points, st.historical_average)
@@ -905,19 +912,21 @@ class TycoonEngine:
         uses_3d = p.uses_3d or st.engine.uses_3d
         final_review = apply_t_engine_review(raw_review, st.engine.has_t_engine, uses_3d)
 
-        # Historical trail (after score)
-        st.historical_average = update_historical(st.historical_average, total_points)
-
-        # --- Genre expertise AFTER review, BEFORE telemetry (injection) ---
-        exp, lvl, leveled = st.genre_exp.award_ship(p.genre)
-        if leveled:
-            st.log_msg(f"⭐ {p.genre} expertise LEVEL UP → Lv{lvl} (exp={exp})")
+        # Historical trail + expertise + RP only for real products
+        if empty_ship:
+            st.log_msg("⚠️ Empty build — no expertise, RP, or industry-bar change.")
         else:
-            st.log_msg(f"📚 {p.genre} expertise +1 exp (exp={exp}, Lv{lvl})")
+            st.historical_average = update_historical(st.historical_average, total_points)
+            exp, lvl, leveled = st.genre_exp.award_ship(p.genre)
+            if leveled:
+                st.log_msg(f"⭐ {p.genre} expertise LEVEL UP → Lv{lvl} (exp={exp})")
+            else:
+                st.log_msg(f"📚 {p.genre} expertise +1 exp (exp={exp}, Lv{lvl})")
+            st.rp += st.rng.randint(8, 15)
 
         # Sales
         share = st.platform_share(p.platform)
-        units = compute_units_sold(total_points, final_review, st.hype, share)
+        units = compute_units_sold(total_points, final_review, st.hype, share, st.fans)
         # Soft rival pressure
         units = max(0, int(units / max(0.5, st.rival_pressure * 0.85)))
         price = UNIT_PRICE_DEFAULT
@@ -928,12 +937,11 @@ class TycoonEngine:
         st.cash = float(int_cash(st.cash + net))
         fan_gain = int_fans(units * 0.04 * (final_review / 10.0))
         st.fans = int_fans(st.fans + fan_gain)
-        st.rp += st.rng.randint(8, 15)
         mkt = p.marketing_allocated
         st.hype = 0  # spent at launch
 
         # Strong launches push back on the yearly rival-pressure ramp
-        if final_review >= STRONG_REVIEW_THRESHOLD:
+        if not empty_ship and final_review >= STRONG_REVIEW_THRESHOLD:
             st.rival_pressure = max(
                 RIVAL_PRESSURE_FLOOR,
                 st.rival_pressure - RIVAL_PRESSURE_STRONG_RELIEF,
@@ -986,6 +994,21 @@ class TycoonEngine:
         print("└─────────────────────────────────────────────────────────┘\n")
 
     # ── Actions ─────────────────────────────────────────────────────────────
+
+    def project_ready_to_ship(self) -> bool:
+        p = self.state.project
+        return bool(p is not None and p.phase >= 3 and p.weeks_left <= 0)
+
+    def scrap_project(self) -> bool:
+        st = self.state
+        if st.project is None:
+            st.log_msg("❌ No project to scrap.")
+            return False
+        title = st.project.title
+        sunk = int_cash(st.project.dev_cost)
+        st.project = None
+        st.log_msg(f"🗑️ Scrapped '{title}'. Sunk cost ${sunk:,} stays spent. No review, EXP, or RP.")
+        return True
 
     def start_project(
         self,
@@ -1184,64 +1207,92 @@ class TycoonEngine:
 
     # ── Dashboard ───────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _bar(value: float, target: float = POINT_BAR_TARGET, width: int = 16) -> str:
+        pct = 0.0 if target <= 0 else max(0.0, min(1.0, float(value) / float(target)))
+        filled = int(round(pct * width))
+        return "█" * filled + "░" * (width - filled), int(round(pct * 100))
+
     def print_dashboard(self) -> None:
         st = self.state
-        print("\n" + "█" * 72)
-        print(f"  STUDIO EMPIRE TYCOON ENGINE  v{ENGINE_VERSION}")
-        print("█" * 72)
-        print(
-            f"  Date  Y{st.year} M{st.month} W{st.week}   |   "
-            f"Cash ${int_cash(st.cash):,}   |   Fans {int_fans(st.fans):,}   |   RP {st.rp}"
+        next_burn = int_cash(st.monthly_rent + st.payroll())
+        payroll = st.payroll()
+        print()
+        print("─" * 64)
+        status = (
+            f"  ${int_cash(st.cash):<12,}  {int_fans(st.fans):>6,} fans   "
+            f"{st.rp:>4} RP"
         )
+        if payroll > 0 or st.week >= 4:
+            label = "Payroll due" if payroll > 0 else "Rent due"
+            status += f"    ⚠ {label} ${next_burn:,}"
+        print(status)
         print(
-            f"  Hype {st.hype}   |   HistAvg {st.historical_average:.1f}   |   "
-            f"Rent ${int_cash(st.monthly_rent):,}/mo   |   Payroll ${st.payroll():,}/mo"
+            f"  Year {st.year} · Month {st.month} · Week {st.week}"
+            f"{'':>22}Hype {st.hype}"
         )
-        print(f"  Engine: {st.engine.name}  tech×{st.engine.tech_mult} design×{st.engine.design_mult} "
-              f"T-Engine={st.engine.has_t_engine} 3D={st.engine.uses_3d}")
-        print(f"  Licenses: {', '.join(st.owned_licenses)}")
-        print("  Genre Expertise:")
-        for line in st.genre_exp.dashboard_lines():
-            print(line)
+        print("─" * 64)
+
         if st.project:
             p = st.project
-            print(
-                f"  PROJECT: {p.title} [{p.topic}/{p.genre}] {p.platform} "
-                f"phase {p.phase} weeks_left={p.weeks_left}"
-            )
-            print(
-                f"           T{p.tech_points:.1f} D{p.design_points:.1f} "
-                f"bugs={p.bugs} dev_cost=${int_cash(p.dev_cost):,}"
-            )
+            t_bar, t_pct = self._bar(p.tech_points)
+            d_bar, d_pct = self._bar(p.design_points)
+            print(f"  ┌ {p.title[:32]:<32}   Phase {p.phase} of 3 ┐")
+            print(f"  │ {p.topic} · {p.genre} · {p.platform:<18}          │")
+            print(f"  │ Tech   {t_bar}  {t_pct:>3}%                    │")
+            print(f"  │ Design {d_bar}  {d_pct:>3}%                    │")
+            if p.bugs > 0:
+                print(f"  │ ✳ {p.bugs} bugs open                                  │")
+            else:
+                print("  │   no open bugs                                   │")
+            print("  └────────────────────────────────────────────────────┘")
         else:
-            print("  PROJECT: (none)")
-        print(f"  Staff ({len(st.staff)}): " + (
-            ", ".join(f"{s.name}[E{s.energy}]" for s in st.staff) if st.staff else "(solo founder)"
-        ))
-        print(f"  Titles shipped: {len(st.telemetry.game_history_records)} | Rival pressure {st.rival_pressure:.2f}")
-        print("█" * 72)
+            print("  ┌ No active project                                 ┐")
+            print("  │ Develop starts a new title.                       │")
+            print("  └────────────────────────────────────────────────────┘")
+
+        self.print_activity(6)
+
+    def print_activity(self, last_n: int = 6) -> None:
+        print()
+        print("  Recent activity")
+        print("  " + "─" * 42)
+        rows = [line for line in self.state.log if line.strip()][-last_n:]
+        if not rows:
+            print("  (nothing yet)")
+            return
+        for line in rows:
+            # keep activity one-line and short
+            text = " ".join(line.strip().split())
+            print(f"  {text[:60]}")
 
     def print_menu(self) -> None:
+        ready = "ready" if self.project_ready_to_ship() else "locked"
+        has = "work week" if self.state.project else "new project"
         print(
-            """
-  MAIN MENU
-  ─────────────────────────────────────────
-   1) Start new game project
-   2) Advance development week / Ship when ready
-   3) Ship game now (if in production)
-   4) Marketing campaign
-   5) Build custom engine (+ optional T-Engine)
-   6) License platform dev kit
-   7) Recruit / hire staff
-   8) View telemetry ledger & analytics
-   9) Save / Load campaign
-   0) Cheat console  (or type /money_boost etc.)
-   T) Tick one idle week
-   Q) Quit
-  ─────────────────────────────────────────
-  Tip: slash commands work anytime: /money_boost /rp_max /instafans /bug_wipe
+            f"""
+  [1 Develop — {has}]   [2 Ship — {ready}]   [3 Market]   [4 Staff]
+  [M More]   [Q Quit]
 """
         )
+
+    def print_studio_details(self) -> None:
+        st = self.state
+        print("\n── Studio details ──")
+        print(f"  Engine   {st.engine.name}  tech×{st.engine.tech_mult}  "
+              f"design×{st.engine.design_mult}  T={st.engine.has_t_engine}  3D={st.engine.uses_3d}")
+        print(f"  Licenses {', '.join(st.owned_licenses)}")
+        print(f"  HistAvg  {st.historical_average:.1f}   Rival {st.rival_pressure:.2f}   "
+              f"Titles {len(st.telemetry.game_history_records)}")
+        print("  Genre expertise")
+        for line in st.genre_exp.dashboard_lines():
+            print(line)
+        if st.staff:
+            print("  Staff")
+            for s in st.staff:
+                print(f"    {s.name} T{s.tech} D{s.design} E{s.energy} ${s.salary}/mo")
+        else:
+            print("  Staff    (solo founder)")
 
 
 # =============================================================================
@@ -1267,24 +1318,23 @@ def menu_start_project(engine: TycoonEngine) -> None:
     engine.start_project(title, topic, genre, platform)
 
 
-def menu_dev_or_ship(engine: TycoonEngine) -> None:
-    st = engine.state
-    if st.project is None:
-        st.log_msg("No project — start one first.")
+def menu_develop(engine: TycoonEngine) -> None:
+    if engine.state.project is None:
+        menu_start_project(engine)
         return
-    p = st.project
-    if p.phase >= 3 and p.weeks_left <= 0:
-        confirm = prompt("Project complete. Ship now? [Y/n]: ").lower()
-        if confirm in ("", "y", "yes"):
-            engine.ship_game()
-        else:
-            engine.develop_week()
-    else:
-        engine.develop_week()
-        # Auto-offer ship when ready
-        if st.project and st.project.phase >= 3 and st.project.weeks_left <= 0:
-            if prompt("Ready to ship. Ship now? [Y/n]: ").lower() in ("", "y", "yes"):
-                engine.ship_game()
+    engine.develop_week()
+    if engine.project_ready_to_ship():
+        print("  Project is ready. Use [2 Ship] when you want to release.")
+
+
+def menu_ship(engine: TycoonEngine) -> None:
+    if engine.state.project is None:
+        engine.state.log_msg("No project to ship.")
+        return
+    if not engine.project_ready_to_ship():
+        engine.state.log_msg("❌ Ship is locked until Phase 3 is finished. Use Develop.")
+        return
+    engine.ship_game()
 
 
 def menu_marketing(engine: TycoonEngine) -> None:
@@ -1427,28 +1477,51 @@ def run_main_loop(seed: int = 42) -> None:
             print("Session ended.")
             break
         if c == "1":
-            menu_start_project(engine)
+            menu_develop(engine)
         elif c == "2":
-            menu_dev_or_ship(engine)
+            menu_ship(engine)
         elif c == "3":
-            engine.ship_game()
-        elif c == "4":
             menu_marketing(engine)
-        elif c == "5":
-            menu_engine_builder(engine)
-        elif c == "6":
-            menu_license(engine)
-        elif c == "7":
+        elif c == "4":
             menu_staff(engine)
-        elif c == "8":
-            st.telemetry.print_dashboard()
-        elif c == "9":
-            menu_save_load(engine)
+        elif c in ("m", "more"):
+            menu_more(engine)
         elif c in ("t", "tick"):
             engine.tick_weeks(1, working=False)
             st.log_msg("Idle week advanced.")
         else:
-            print("Unknown option. Enter 0–9, T, Q, or a /cheat command.")
+            print("Unknown option. 1 Develop · 2 Ship · 3 Market · 4 Staff · M More · Q Quit")
+
+
+def menu_more(engine: TycoonEngine) -> None:
+    print(
+        """
+  MORE
+  [1] New project   [2] Engine   [3] License platform
+  [4] Studio details   [5] Telemetry   [6] Save / Load
+  [7] Cheats   [8] Scrap project   [9] Idle week
+"""
+    )
+    sub = prompt("More> ").lower()
+    if sub == "1":
+        menu_start_project(engine)
+    elif sub == "2":
+        menu_engine_builder(engine)
+    elif sub == "3":
+        menu_license(engine)
+    elif sub == "4":
+        engine.print_studio_details()
+    elif sub == "5":
+        engine.state.telemetry.print_dashboard()
+    elif sub == "6":
+        menu_save_load(engine)
+    elif sub == "7":
+        engine.cheats.execute("0")
+    elif sub == "8":
+        engine.scrap_project()
+    elif sub == "9":
+        engine.tick_weeks(1, working=False)
+        engine.state.log_msg("Idle week advanced.")
 
 
 def self_test_pure_functions() -> None:
@@ -1461,6 +1534,9 @@ def self_test_pure_functions() -> None:
     u_hype0 = compute_units_sold(80, 7, 0, 1.0)
     u_hype100 = compute_units_sold(80, 7, 100, 1.0)
     assert u_hype100 > u_hype0
+    fans0 = compute_units_sold(80, 7, 0, 1.0, 0)
+    fans3k = compute_units_sold(80, 7, 0, 1.0, 3125)
+    assert fans3k > fans0
 
     # update_historical floor
     assert update_historical(1.0, 0.0) == HISTORICAL_AVERAGE_FLOOR
@@ -1514,7 +1590,8 @@ def self_test() -> None:
     assert genre_level_from_exp(0) == 1
     assert genre_level_from_exp(5) == 2
     assert genre_level_from_exp(10) == 3
-    assert abs(genre_expertise_multiplier(2) - 1.10) < 1e-9
+    assert abs(genre_expertise_multiplier(1) - 1.00) < 1e-9
+    assert abs(genre_expertise_multiplier(2) - 1.05) < 1e-9
     assert apply_t_engine_bugs(9, True) == 4
     assert apply_t_engine_review(7.0, True, True) == 7.5
 
@@ -1558,9 +1635,23 @@ def self_test() -> None:
         10 + extra,
     )
 
-    # Ship path
-    for _ in range(6):
+    # Early ship is blocked — no EXP / RP / hist change
+    early = TycoonEngine(seed=3)
+    early.start_project("Too Soon", "Sci-Fi", "Action", "PC")
+    hist0 = early.state.historical_average
+    rp0 = early.state.rp
+    early.ship_game()
+    assert early.state.project is not None
+    assert early.state.historical_average == hist0
+    assert early.state.rp == rp0
+    assert early.state.telemetry.game_history_records == []
+
+    # Ship path — develop until ready
+    for _ in range(8):
+        if eng.project_ready_to_ship():
+            break
         eng.develop_week()
+    assert eng.project_ready_to_ship()
     eng.ship_game()
     assert len(eng.state.telemetry.game_history_records) == 1
     assert eng.state.genre_exp.get_exp("Action") == 1
