@@ -1,3 +1,4 @@
+import { hashSeed } from "../scoring/rng";
 /**
  * Create engine families, versions, garage starter, and build projects.
  * Released versions are immutable snapshots.
@@ -30,8 +31,8 @@ import type {
   ModuleMaturity,
 } from "./types";
 
-function uid(prefix: string): string {
-  return `${prefix}_${Math.random().toString(36).slice(2, 9)}`;
+function uid(prefix: string, ...parts: Array<string | number | boolean | null | undefined>): string {
+  return `${prefix}_${hashSeed(prefix, ...parts).toString(16)}`;
 }
 
 export function emptyWorkshop(): EngineWorkshopState {
@@ -296,7 +297,7 @@ export function startEngineBuild(opts: {
       }
     }
   } else if (!family) {
-    familyId = uid("fam");
+    familyId = uid("fam", opts.companyId, opts.week, opts.year, opts.name);
     family = {
       familyId,
       name: opts.name.trim() || "Studio Engine",
@@ -364,7 +365,7 @@ export function startEngineBuild(opts: {
 
   const labelBase = (opts.name.trim() || family?.name || "Engine").replace(/\s+\d+(\.\d+)*$/, "");
   const project: EngineBuildProject = {
-    projectId: uid("engproj"),
+    projectId: uid("engproj", familyId!, major, minor, patch, opts.week),
     familyId: familyId!,
     major,
     minor,
@@ -465,7 +466,7 @@ export function tickEngineBuild(
 
   if (overallProgress >= 1 && weeksElapsed >= 2) {
     // Release immutable version
-    const versionId = uid("eng");
+    const versionId = uid("eng", build.familyId, build.major, build.minor, build.patch, week);
     const version = finalizeVersionFromModules({
       versionId,
       familyId: build.familyId,

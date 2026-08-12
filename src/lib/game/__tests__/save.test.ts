@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import { ALL_SAVE_KEYS, SAVE_KEY_V6, SCHEMA_VERSION } from "../contracts";
+import { SAVE_KEY } from "../data";
 import { SAVE_KEYS, findSave, parseSaveCandidate, removeAllSaves } from "../save";
 
 function memoryStorage(initial: Record<string, string> = {}) {
@@ -13,6 +15,16 @@ function memoryStorage(initial: Record<string, string> = {}) {
 }
 
 describe("save persistence boundary", () => {
+  it("keeps contracts, data, and save key lists aligned on v6", () => {
+    assert.equal(SCHEMA_VERSION, 6);
+    assert.equal(SAVE_KEY, SAVE_KEY_V6);
+    assert.equal(SAVE_KEYS[0], SAVE_KEY_V6);
+    assert.deepEqual([...SAVE_KEYS], [...ALL_SAVE_KEYS]);
+    assert.equal(ALL_SAVE_KEYS.length, 6);
+    assert.ok(ALL_SAVE_KEYS.includes("studio-empire-save-v1"));
+    assert.ok(ALL_SAVE_KEYS.includes("studio-empire-save-v6"));
+  });
+
   it("prefers the current save and recognizes every legacy key", () => {
     for (const key of SAVE_KEYS) {
       const storage = memoryStorage({ [key]: JSON.stringify({ companyName: key }) });

@@ -194,6 +194,20 @@ import {
   type ContentPack,
 } from "./digitalStorefront";
 import {
+  isGaragePhaseOne,
+  lateSystemAllowed,
+  PHASE_ONE_MARKETING_PER_YEAR,
+  marketingYearIndex,
+} from "./phaseOne";
+import {
+  emptyMarketingOpportunityState,
+  ensureYearOpportunities,
+  deferMarketingOpportunity,
+  markMarketingOpportunitySurfaced,
+  resolveMarketingOpportunity,
+} from "./marketingOpportunities";
+import { applyCashTransaction, moneyRound } from "./finance/transaction";
+import {
   canAdvanceOffice,
   normalizeOfficeLevel,
   stageForOffice,
@@ -300,6 +314,7 @@ import {
   cancelProjectProduction,
   isReleaseReady,
   productionOpenSeverity,
+  openBugsCount,
 } from "./production/bridge";
 import {
   finalizeBuild,
@@ -409,9 +424,10 @@ export function availableSizes(
 ): GameSize[] {
   const office = opts?.office ?? 1;
   const staffCount = opts?.staffCount ?? 1;
+  // Foundation Lock: Garage (office 1) is small games only.
+  if (office <= 1) return ["small"];
   const byOffice = new Set(sizesForOffice(office));
   const sizes: GameSize[] = ["small"];
-  // Medium: office 2+
   if (
     byOffice.has("medium") &&
     (researched.includes("medium_games") ||
@@ -421,11 +437,10 @@ export function availableSizes(
   ) {
     sizes.push("medium");
   }
-  // Large: office 3+ OR High-Density 2.5 with research
-  const largeEarly = office === 2 && isHighDensity(opts?.officeSubTier);
+  // High-Density early large is quarantined from Phase One product surface.
   if (
-    (byOffice.has("large") || largeEarly) &&
-    (researched.includes("large_games") || unlocks.large_games === "owned" || largeEarly) &&
+    byOffice.has("large") &&
+    (researched.includes("large_games") || unlocks.large_games === "owned") &&
     staffCount >= 2
   ) {
     sizes.push("large");
@@ -438,6 +453,62 @@ export function availableSizes(
     sizes.push("aaa");
   }
   return sizes;
+}
+
+
+function countMarketingInYear(state: GameState, yearIndex: number): number {
+  return (state.ledger?.entries ?? []).filter(
+    (e) =>
+      e.category === "marketing" &&
+      marketingYearIndex(e.week) === yearIndex &&
+      e.amount < 0,
+  ).length;
+}
+
+/** Garage Phase One: ≤2 marketing spends/year; year after a 2-spend year is closed. */
+function canPurchaseMarketing(state: GameState): string | null {
+  if (!isGaragePhaseOne(state)) return null;
+  const y = marketingYearIndex(state.week);
+  if (countMarketingInYear(state, y - 1) >= PHASE_ONE_MARKETING_PER_YEAR) {
+    return "Marketing dark year — last year used both opportunities.";
+  }
+  if (countMarketingInYear(state, y) >= PHASE_ONE_MARKETING_PER_YEAR) {
+    return "Already used both marketing opportunities this year.";
+  }
+  return null;
+}
+
+
+/** Apply cash+ledger atomically on a draft state. */
+function commitTxnResult(
+  next: GameState,
+  entry: {
+    week: number;
+    amount: number;
+    category: import("./finance/ledger").LedgerCategory;
+    label: string;
+    ref: string;
+    gameId?: string;
+  },
+): { state: GameState; applied: boolean } {
+  const txn = applyCashTransaction(next.cash, next.ledger, entry);
+  if (!txn.applied) return { state: next, applied: false };
+  return { state: { ...next, cash: txn.cash, ledger: txn.ledger }, applied: true };
+}
+
+/** Atomic cash+ledger; returns next state (unchanged if duplicate ref). */
+function commitTxn(
+  next: GameState,
+  entry: {
+    week: number;
+    amount: number;
+    category: import("./finance/ledger").LedgerCategory;
+    label: string;
+    ref: string;
+    gameId?: string;
+  },
+): GameState {
+  return commitTxnResult(next, entry).state;
 }
 
 export function hasSave(): boolean {
@@ -539,6 +610,9 @@ function initialState(): GameState {
     genreExp: { action: 0, adventure: 0, rpg: 0, simulation: 0, strategy: 0, casual: 0 },
     gameHistoryLedger: [],
     hardwareProducts: [],
+    hiringBoard: null,
+    hiringBoardRefresh: 0,
+    officeReminderYears: {},
     officeEnteredYear: START_YEAR,
     officeEnteredMonth: 1,
     officeSubTier: 2.0,
@@ -547,6 +621,7 @@ function initialState(): GameState {
     ipRoyaltyGameIds: [],
     activeMmos: [],
     digitalStorefront: emptyStorefront(),
+    marketingOpportunities: undefined,
     installedPacks: [],
     infringementDue: [],
     knownCombos: {},
@@ -567,8 +642,22 @@ function pushNote(
   text: string,
   tone: Notification["tone"] = "info",
 ): Notification[] {
+  const seq = state.notifications.length;
   return [
-    { id: uid("note"), text, tone, week: state.week, read: false },
+    {
+      id: uid(
+        "note",
+        state.campaignSeed ?? 0,
+        state.week,
+        seq,
+        text.slice(0, 48),
+        tone,
+      ),
+      text,
+      tone,
+      week: state.week,
+      read: false,
+    },
     ...state.notifications,
   ].slice(0, 40);
 }
@@ -616,113 +705,157 @@ const EVENT_POOL: EventDef[] = [
   {
     key: "trade_mag",
     title: "Trade magazine",
-    body: "A trade magazine offers coverage of indie studios. How do you respond?",
-    cd: 28,
+    body: "A trade magazine is compiling an indie studio feature. How do you respond?",
+    cd: 40,
     choices: [
-      {
-        label: "Send a press kit",
-        effect: "+hype, small cost",
-        apply: (s) => {
-          s.hype += 10;
-          s.cash -= 500;
-        },
-      },
-      {
-        label: "Stay quiet",
-        effect: "tiny organic buzz",
-        apply: (s) => {
-          s.hype += 3;
-        },
-      },
+      { label: "Full press kit + interview", effect: "−$1,200 · +hype · +fans", apply: (s) => { s.hype += 14; s.fans += 40; s.cash -= 1200; } },
+      { label: "Send a press kit", effect: "−$500 · +hype", apply: (s) => { s.hype += 10; s.cash -= 500; } },
+      { label: "One-paragraph blurb only", effect: "+small hype free", apply: (s) => { s.hype += 5; } },
+      { label: "Stay quiet", effect: "tiny organic buzz", apply: (s) => { s.hype += 2; } },
+      { label: "Trade favor for coverage", effect: "−RP · +hype", apply: (s) => { s.researchPoints = Math.max(0, s.researchPoints - 3); s.hype += 11; } },
     ],
   },
   {
     key: "hardware_short",
     title: "Hardware shortage",
-    body: "Component prices spike industry-wide. Absorb the cost or delay purchases?",
-    cd: 40,
+    body: "Component prices spike industry-wide. Absorb the cost or adapt?",
+    cd: 52,
     choices: [
-      {
-        label: "Pay the premium",
-        effect: "−$3,000",
-        apply: (s) => {
-          s.cash -= 3000;
-        },
-      },
-      {
-        label: "Wait it out",
-        effect: "−hype, save cash",
-        apply: (s) => {
-          s.hype = Math.max(0, s.hype - 4);
-        },
-      },
+      { label: "Pay full premium", effect: "−$3,000 · keep pace", apply: (s) => { s.cash -= 3000; } },
+      { label: "Buy refurbished parts", effect: "−$1,200 · slight delay risk", apply: (s) => { s.cash -= 1200; s.hype = Math.max(0, s.hype - 1); } },
+      { label: "Wait it out", effect: "−hype, save cash", apply: (s) => { s.hype = Math.max(0, s.hype - 4); } },
+      { label: "Crowdsource spares", effect: "−$400 · +fans", apply: (s) => { s.cash -= 400; s.fans += 50; } },
+      { label: "Redesign around shortage", effect: "+RP effort · −cash small", apply: (s) => { s.cash -= 600; s.researchPoints += 4; } },
     ],
   },
   {
     key: "fan_club",
     title: "Fan club forms",
-    body: "Enthusiasts want to start a club around your last title.",
-    cd: 32,
+    body: "Enthusiasts want to organize around your last title.",
+    cd: 44,
     choices: [
-      {
-        label: "Sponsor them",
-        effect: "+fans, −$1,000",
-        apply: (s) => {
-          s.fans += 280;
-          s.cash -= 1000;
-        },
-      },
-      {
-        label: "Send merch files",
-        effect: "+fans free",
-        apply: (s) => {
-          s.fans += 90;
-        },
-      },
+      { label: "Sponsor them fully", effect: "−$1,000 · +fans · +hype", apply: (s) => { s.fans += 280; s.cash -= 1000; s.hype += 6; } },
+      { label: "Seed a starter kit", effect: "−$350 · +fans", apply: (s) => { s.fans += 150; s.cash -= 350; } },
+      { label: "Send merch files only", effect: "+fans free", apply: (s) => { s.fans += 90; } },
+      { label: "Host a Q&A night", effect: "−$200 · +hype · +RP", apply: (s) => { s.cash -= 200; s.hype += 5; s.researchPoints += 2; s.fans += 60; } },
+      { label: "Ignore politely", effect: "no change", apply: () => {} },
     ],
   },
   {
     key: "dev_meetup",
     title: "Dev meetup",
-    body: "Local developers invite you to share tips.",
-    cd: 24,
+    body: "Local developers invite you to share tips — or stay heads-down shipping.",
+    cd: 36,
     choices: [
-      {
-        label: "Speak & network",
-        effect: "+RP, +hype",
-        apply: (s) => {
-          s.researchPoints += 6;
-          s.hype += 4;
-        },
-      },
-      {
-        label: "Skip — ship instead",
-        effect: "focus on product",
-        apply: (s) => {
-          s.researchPoints += 1;
-        },
-      },
+      { label: "Keynote the night", effect: "+RP · +hype · −$150", apply: (s) => { s.researchPoints += 8; s.hype += 6; s.cash -= 150; } },
+      { label: "Speak & network", effect: "+RP · +hype", apply: (s) => { s.researchPoints += 6; s.hype += 4; } },
+      { label: "Send a short talk tape", effect: "+small RP", apply: (s) => { s.researchPoints += 3; } },
+      { label: "Skip — ship instead", effect: "focus · tiny RP", apply: (s) => { s.researchPoints += 1; } },
+      { label: "Hire a recruiter booth", effect: "−$900 · future hire bias", apply: (s) => { s.cash -= 900; s.hype += 3; s.researchPoints += 2; } },
     ],
   },
   {
     key: "magazine_ad_offer",
     title: "Magazine ad slot",
     body: "A leftover ad page is available at a discount this week only.",
-    cd: 36,
+    cd: 48,
     choices: [
-      {
-        label: "Buy the slot",
-        effect: "−$4,000, +hype",
-        apply: (s) => {
-          s.cash -= 4000;
-          s.hype += 14;
-        },
-      },
-      {
-        label: "Pass",
-        effect: "no change",
-        apply: () => {},
-      },
+      { label: "Buy the full page", effect: "−$4,000 · +hype", apply: (s) => { s.cash -= 4000; s.hype += 14; } },
+      { label: "Split a half page", effect: "−$2,200 · +hype", apply: (s) => { s.cash -= 2200; s.hype += 9; } },
+      { label: "Classifieds only", effect: "−$600 · +small hype", apply: (s) => { s.cash -= 600; s.hype += 4; } },
+      { label: "Trade a review copy", effect: "−0 cash · +hype · +RP risk", apply: (s) => { s.hype += 7; s.researchPoints += 1; } },
+      { label: "Pass", effect: "no change", apply: () => {} },
+    ],
+  },
+  {
+    key: "bb_reviewer",
+    title: "Bulletin board reviewer",
+    body: "A popular sysop offers to feature your next game — for a favor.",
+    cd: 42,
+    choices: [
+      { label: "Pay for a banner week", effect: "−$1,800 · +hype · +fans", apply: (s) => { s.cash -= 1800; s.hype += 12; s.fans += 80; } },
+      { label: "Offer exclusive demo", effect: "+hype · +fans free", apply: (s) => { s.hype += 8; s.fans += 55; } },
+      { label: "Co-write a tip sheet", effect: "+RP · +small hype", apply: (s) => { s.researchPoints += 5; s.hype += 4; } },
+      { label: "Decline", effect: "no change", apply: () => {} },
+      { label: "Counter with interview", effect: "−$400 · +hype", apply: (s) => { s.cash -= 400; s.hype += 9; } },
+    ],
+  },
+  {
+    key: "power_outage",
+    title: "Neighborhood outage",
+    body: "Storms knock power for half the week. How do you adapt?",
+    cd: 60,
+    choices: [
+      { label: "Rent a generator", effect: "−$900 · keep working", apply: (s) => { s.cash -= 900; } },
+      { label: "Work from a cafe", effect: "−$120 · +tiny hype", apply: (s) => { s.cash -= 120; s.hype += 2; } },
+      { label: "Take a forced rest", effect: "+RP reflection · −hype", apply: (s) => { s.researchPoints += 3; s.hype = Math.max(0, s.hype - 2); } },
+      { label: "Paper design only", effect: "+design focus · free", apply: (s) => { s.researchPoints += 2; } },
+      { label: "Ignore and lose time", effect: "no cash · −small hype", apply: (s) => { s.hype = Math.max(0, s.hype - 3); } },
+    ],
+  },
+  {
+    key: "angel_call",
+    title: "Curious angel investor",
+    body: "Someone with deep pockets wants a chat about “optional” capital.",
+    cd: 70,
+    choices: [
+      { label: "Take a small note", effect: "+$12,000 · −future freedom feel", apply: (s) => { s.cash += 12000; s.hype += 2; } },
+      { label: "Ask for advice only", effect: "+RP · free", apply: (s) => { s.researchPoints += 6; } },
+      { label: "Pitch hard for more", effect: "50/50 vibe · +$6k · +hype", apply: (s) => { s.cash += 6000; s.hype += 5; } },
+      { label: "Politely pass", effect: "independence", apply: () => {} },
+      { label: "Show a prototype", effect: "−$300 · +hype · +RP", apply: (s) => { s.cash -= 300; s.hype += 7; s.researchPoints += 3; } },
+    ],
+  },
+  {
+    key: "rival_taunt",
+    title: "Rival studio taunt",
+    body: "A rival brags about their next launch in the trades.",
+    cd: 46,
+    choices: [
+      { label: "Ignore them", effect: "focus", apply: () => {} },
+      { label: "Quiet counter-ad", effect: "−$2,500 · +hype", apply: (s) => { s.cash -= 2500; s.hype += 10; } },
+      { label: "Double down on craft", effect: "+RP", apply: (s) => { s.researchPoints += 7; } },
+      { label: "Friendly collab feeler", effect: "−$500 · +fans", apply: (s) => { s.cash -= 500; s.fans += 70; s.hype += 3; } },
+      { label: "Leak a teaser", effect: "+hype · free", apply: (s) => { s.hype += 8; } },
+    ],
+  },
+  {
+    key: "community_bug_report",
+    title: "Community bug report",
+    body: "Players found an edge-case crash in an older build floating online.",
+    cd: 50,
+    choices: [
+      { label: "Hotfix & thank publicly", effect: "−$400 · +fans · +hype", apply: (s) => { s.cash -= 400; s.fans += 90; s.hype += 5; } },
+      { label: "Quiet patch only", effect: "−$150 · +small fans", apply: (s) => { s.cash -= 150; s.fans += 30; } },
+      { label: "Pay a bug bounty", effect: "−$800 · +RP · +fans", apply: (s) => { s.cash -= 800; s.researchPoints += 4; s.fans += 110; } },
+      { label: "Ask them to repro steps", effect: "+RP free", apply: (s) => { s.researchPoints += 2; } },
+      { label: "Shrug it off", effect: "−hype", apply: (s) => { s.hype = Math.max(0, s.hype - 5); } },
+    ],
+  },
+  {
+    key: "family_visit",
+    title: "Family drops by",
+    body: "Relatives want a garage tour and to “see the computer games.”",
+    cd: 55,
+    choices: [
+      { label: "Host a mini demo day", effect: "−$100 · +hype · +fans", apply: (s) => { s.cash -= 100; s.hype += 4; s.fans += 25; } },
+      { label: "Quick tour then back to work", effect: "tiny hype", apply: (s) => { s.hype += 1; } },
+      { label: "Ask them to playtest", effect: "+RP · free", apply: (s) => { s.researchPoints += 3; s.fans += 15; } },
+      { label: "Reschedule", effect: "no change", apply: () => {} },
+      { label: "Record a family reaction clip", effect: "+hype free", apply: (s) => { s.hype += 6; } },
+    ],
+  },
+  {
+    key: "shareware_offer",
+    title: "Shareware distributor",
+    body: "A disk catalog wants to list your games for a cut of future mail orders.",
+    cd: 58,
+    choices: [
+      { label: "Sign a trial listing", effect: "−$700 · +hype · +fans", apply: (s) => { s.cash -= 700; s.hype += 9; s.fans += 100; } },
+      { label: "Send one title only", effect: "−$250 · +hype", apply: (s) => { s.cash -= 250; s.hype += 5; s.fans += 40; } },
+      { label: "Negotiate better terms", effect: "−time · +RP · +small hype", apply: (s) => { s.researchPoints += 2; s.hype += 3; } },
+      { label: "Decline", effect: "no change", apply: () => {} },
+      { label: "Ask them to feature a demo", effect: "−$100 · +fans", apply: (s) => { s.cash -= 100; s.fans += 60; s.hype += 4; } },
     ],
   },
 ];
@@ -735,26 +868,59 @@ function tryFireEvent(next: GameState): GameState {
     next.modal === "reviews" ||
     next.modal === "report" ||
     next.modal === "newGame" ||
-    next.modal === "event"
+    next.modal === "event" ||
+    next.modal === "officeOffer"
   ) {
     return next;
   }
 
+  // Never interrupt active development stage work — only between projects or polish/idle
+  const phase = next.currentProject?.devPhase ?? "";
+  if (
+    phase.includes("RUNNING") ||
+    phase.includes("CONFIG") ||
+    phase === "POLISHING"
+  ) {
+    return next;
+  }
+
+  // Global pacing with seeded jitter so gaps feel irregular (10–22 weeks)
+  const lastAny = next.eventCooldowns["__any_event__"] ?? -999;
+  const minGap =
+    10 + (hashSeed(next.campaignSeed, "evt-gap", lastAny) % 13); // 10..22
+  if (next.week - lastAny < minGap) return next;
+
+  // Irregular chance: threshold 1–4% of weeks (seeded), not a fixed clock
+  const chancePct = 1 + (hashSeed(next.campaignSeed, next.week, "evt-chance") % 4);
   const roll = hashSeed(next.campaignSeed, next.week, "event") % 100;
-  if (roll > 10) return next;
+  if (roll >= chancePct) return next;
 
   const eligible = EVENT_POOL.filter((e) => {
     const until = next.eventCooldowns[e.key] ?? 0;
     if (next.week < until) return false;
-    if (next.recentEventKeys[0] === e.key) return false;
+    // Avoid recent repeats (last 3)
+    if (next.recentEventKeys.slice(0, 3).includes(e.key)) return false;
     return true;
   });
   if (!eligible.length) return next;
 
-  const idx = hashSeed(next.campaignSeed, next.week, "eventpick") % eligible.length;
-  const ev = eligible[idx]!;
-  // Cooldown reserved when event is *presented* so save/load cannot re-roll forever
-  next.eventCooldowns = { ...next.eventCooldowns, [ev.key]: next.week + ev.cd };
+  // Weighted-ish pick: scramble with two hashes so order isn't pool-order bias
+  const scramble = [...eligible].sort(
+    (a, b) =>
+      hashSeed(next.campaignSeed, next.week, "ep", a.key) -
+      hashSeed(next.campaignSeed, next.week, "ep", b.key),
+  );
+  const idx =
+    hashSeed(next.campaignSeed, next.week, "eventpick") % scramble.length;
+  const ev = scramble[idx]!;
+  // Per-event cooldown jitter ±8 weeks so the same story doesn't rhythm-match
+  const cdJitter = (hashSeed(next.campaignSeed, ev.key, next.week, "cdj") % 17) - 8;
+  const cd = Math.max(28, ev.cd + cdJitter);
+  next.eventCooldowns = {
+    ...next.eventCooldowns,
+    [ev.key]: next.week + cd,
+    __any_event__: next.week,
+  };
   next.recentEventKeys = [ev.key, ...next.recentEventKeys].slice(0, 8);
   next.pendingEvent = {
     id: ev.key,
@@ -764,13 +930,180 @@ function tryFireEvent(next: GameState): GameState {
   };
   next.modal = "event";
   next.speed = 0;
-  next.notifications = pushNote(next, `Decision: ${ev.title}`, "warn");
+  next.notifications = pushNote(next, `Decision: ${ev.title}`, "info");
   return next;
 }
 
 function applyEventChoice(state: GameState, choiceIndex: number): GameState {
   const pe = state.pendingEvent;
   if (!pe) return state;
+
+  // Mid-dev crisis responses (office 2+ only; never spawned in Garage)
+  const crisisCode = (pe as { crisisCode?: string }).crisisCode;
+  if (crisisCode && state.currentProject) {
+    let p = { ...state.currentProject };
+    let cash = state.cash;
+    let ledger = state.ledger;
+    let hype = state.hype;
+    let rp = state.researchPoints;
+    let note = "Crisis acknowledged.";
+    const idx = Math.max(0, choiceIndex);
+
+    const spend = (amount: number, label: string, ref: string) => {
+      const t = applyCashTransaction(cash, ledger, {
+        week: state.week,
+        amount: -amount,
+        category: "other",
+        label,
+        ref,
+      });
+      if (t.applied) {
+        cash = t.cash;
+        ledger = t.ledger;
+        return true;
+      }
+      return false;
+    };
+
+    if (crisisCode === "CRISIS_01") {
+      if (idx === 0 && spend(2500, "Contain source leak", `crisis-01-a-w${state.week}`)) {
+        rp += 8;
+        note = "Keys rotated — recovered 8 RP.";
+      } else if (idx === 1 && spend(400, "Honesty post", `crisis-01-b-w${state.week}`)) {
+        hype = Math.min(150, hype + 8);
+        note = "Public honesty landed — hype recovers.";
+      } else {
+        note = "You push on quietly.";
+      }
+    } else if (crisisCode === "CRISIS_02") {
+      if (idx === 0 && spend(1800, "Bug bash", `crisis-02-a-w${state.week}`)) {
+        p = { ...p, bugs: Math.max(0, p.bugs - 12) };
+        note = "Bug bash cleared 12 bugs.";
+      } else if (idx === 1 && spend(4000, "Contractor week", `crisis-02-b-w${state.week}`)) {
+        p = {
+          ...p,
+          bugs: Math.max(0, p.bugs - 20),
+          crisisReviewPenalty: Math.max(0, (p.crisisReviewPenalty ?? 0) - 0.5),
+        };
+        note = "Contractors crushed bugs and softened the review hit.";
+      } else {
+        note = "Triage only — penalty stands.";
+      }
+    } else if (crisisCode === "CRISIS_03") {
+      if (idx === 0) {
+        if (p.production) {
+          p = {
+            ...p,
+            production: {
+              ...p.production,
+              polishRequired: Math.max(0, (p.production.polishRequired ?? 0) - 80),
+            },
+          };
+        }
+        note = "Scope cut — polish load eased.";
+      } else if (idx === 1 && spend(3000, "Overtime art pass", `crisis-03-b-w${state.week}`)) {
+        note = "Overtime keeps the scope.";
+      } else {
+        note = "You accept the delay tax.";
+      }
+    } else if (crisisCode === "CRISIS_04") {
+      if (idx === 0 && spend(300, "Forced rest", `crisis-04-a-w${state.week}`)) {
+        p = { ...p, fluWeeksLeft: 0 };
+        note = "Rest clears the flu.";
+      } else if (idx === 1) {
+        p = { ...p, fluWeeksLeft: Math.max(0, Math.floor((p.fluWeeksLeft ?? 0) / 2)) };
+        note = "Tasks redistributed — flu impact halved.";
+      } else {
+        note = "You push through sick.";
+      }
+    }
+
+    return {
+      ...state,
+      currentProject: p,
+      cash,
+      ledger,
+      hype,
+      researchPoints: rp,
+      pendingEvent: null,
+      modal: null,
+      dirty: true,
+      speed: 1,
+      notifications: pushNote(state, note, "info"),
+    };
+  }
+
+  // Marketing opportunity events: choice 0 = Not now (dismiss, keep offered for later idle)
+  const mktId = (pe as { marketingOpportunityId?: string }).marketingOpportunityId;
+  if (mktId && state.marketingOpportunities) {
+    const offset = (pe as { marketingChoiceOffset?: number }).marketingChoiceOffset ?? 0;
+    if (offset > 0 && choiceIndex < offset) {
+      const mkt = deferMarketingOpportunity(state.marketingOpportunities, mktId);
+      // Clear display cooldown so it can re-surface next clear idle week
+      const cooldowns = { ...state.eventCooldowns };
+      delete cooldowns[`mkt-notified-${mktId}`];
+      return {
+        ...state,
+        marketingOpportunities: mkt,
+        eventCooldowns: cooldowns,
+        pendingEvent: null,
+        modal: null,
+        speed: 1,
+        dirty: true,
+        notifications: pushNote(state, "Marketing deferred — available again when idle.", "info"),
+      };
+    }
+    const due = state.marketingOpportunities.opportunities.find((o) => o.id === mktId);
+    const mapped = Math.max(0, choiceIndex - offset);
+    const choice = due?.choices[mapped] ?? due?.choices[0];
+    if (due && choice && due.status === "offered") {
+      const res = resolveMarketingOpportunity(state.marketingOpportunities, mktId, choice.id);
+      if ("error" in res) {
+        return { ...state, pendingEvent: null, modal: null, speed: 1 };
+      }
+      if (state.cash < res.choice.cost) {
+        const mkt = deferMarketingOpportunity(state.marketingOpportunities, mktId);
+        const cooldowns = { ...state.eventCooldowns };
+        delete cooldowns[`mkt-notified-${mktId}`];
+        return {
+          ...state,
+          marketingOpportunities: mkt,
+          eventCooldowns: cooldowns,
+          pendingEvent: null,
+          modal: null,
+          speed: 1,
+          dirty: true,
+          notifications: pushNote(state, `Need $${res.choice.cost.toLocaleString()} for ${res.choice.label}.`, "warn"),
+        };
+      }
+      const txn = applyCashTransaction(state.cash, state.ledger, {
+        week: state.week,
+        amount: -res.choice.cost,
+        category: "marketing",
+        label: res.choice.label,
+        ref: `mkt-opp-${mktId}-${choice.id}`,
+      });
+      if (!txn.applied) {
+        return { ...state, pendingEvent: null, modal: null, speed: 1 };
+      }
+      return {
+        ...state,
+        cash: txn.cash,
+        ledger: txn.ledger,
+        hype: Math.min(150, state.hype + res.choice.hypeGain),
+        marketingOpportunities: res.state,
+        pendingEvent: null,
+        modal: null,
+        dirty: true,
+        speed: 1,
+        notifications: pushNote(
+          state,
+          `${res.choice.label}: +${res.choice.hypeGain} hype, +${res.choice.marketingPoints} marketing points.`,
+          "good",
+        ),
+      };
+    }
+  }
 
   // Part 2 decision catalog
   if (pe.decisionChoices && pe.decisionChoices.length) {
@@ -786,8 +1119,7 @@ function applyEventChoice(state: GameState, choiceIndex: number): GameState {
     if (choice) {
       const e = choice.effects;
       if (e.cash) {
-        next.cash += e.cash;
-        next.ledger = applyLedger(next.ledger, {
+        next = commitTxn(next, {
           week: next.week,
           amount: e.cash,
           category: "other",
@@ -826,7 +1158,20 @@ function applyEventChoice(state: GameState, choiceIndex: number): GameState {
     flags: { ...state.flags },
   };
   if (choice) {
+    const cashBefore = next.cash;
     choice.apply(next);
+    const delta = moneyRound(next.cash - cashBefore);
+    // Revert raw cash mutate; re-apply atomically with ledger
+    next.cash = cashBefore;
+    if (Math.abs(delta) > 0.001) {
+      next = commitTxn(next, {
+        week: next.week,
+        amount: delta,
+        category: "other",
+        label: `${pe.title}: ${choice.label}`,
+        ref: `evt-pool-${pe.id}-${choiceIndex}-w${next.week}`,
+      });
+    }
     next.notifications = pushNote(
       next,
       `${pe.title} — ${choice.label}`,
@@ -938,14 +1283,22 @@ function releaseProject(next: GameState, project: GameProject): GameState {
   );
 
   let qualityResult = scored.qualityResult;
-  let reviewResult = undefined as import("./quality/algorithm").ReviewResult | undefined;
+  const reviewResult = undefined as import("./quality/algorithm").ReviewResult | undefined;
   let reviews: ReturnType<typeof computeReviews>;
   let productQuality: number;
   let hidden: number;
+  const cfg = scored.stageConfigs ?? emptyStageConfigs();
+  const s1 = { ...(cfg[1] ?? {}), ...(scored.sliders ?? {}) };
+  const s2 = { ...(cfg[2] ?? {}), ...(scored.sliders ?? {}) };
+  const s3 = { ...(cfg[3] ?? {}), ...(scored.sliders ?? {}) };
+  // Prefer frozen per-stage configs when present (authoritative stage intent)
+  const stage1 = Object.keys(cfg[1] ?? {}).length ? cfg[1]! : s1;
+  const stage2 = Object.keys(cfg[2] ?? {}).length ? cfg[2]! : s2;
+  const stage3 = Object.keys(cfg[3] ?? {}).length ? cfg[3]! : s3;
   const miss =
-    (sliderDeviation(scored.genreId, 1, scored.sliders) +
-      sliderDeviation(scored.genreId, 2, scored.sliders) +
-      sliderDeviation(scored.genreId, 3, scored.sliders)) /
+    (sliderDeviation(scored.genreId, 1, stage1) +
+      sliderDeviation(scored.genreId, 2, stage2) +
+      sliderDeviation(scored.genreId, 3, stage3)) /
     3;
 
   // ── Phase-weighted feature allocation (bottlenecks → bugs) ──────────────
@@ -954,18 +1307,31 @@ function releaseProject(next: GameState, project: GameProject): GameState {
     const alloc = runAllocationEngine({
       genreId: scored.genreId,
       featureIds: scored.features ?? [],
-      stage1: (scored.sliders ?? {}) as Record<string, number>,
-      stage2: (scored.sliders ?? {}) as Record<string, number>,
-      stage3: (scored.sliders ?? {}) as Record<string, number>,
+      stage1: stage1 as Record<string, number>,
+      stage2: stage2 as Record<string, number>,
+      stage3: stage3 as Record<string, number>,
       staffTech: pool.tech,
       staffDesign: pool.design,
     });
-    // Feature baseline points fold into totals; bottleneck bugs stack
+    // Feature baseline points fold into totals; bottleneck/focus bugs stack.
+    // Polish progress damps focus bugs — strong polish ships clean; poor retains them.
+    const polishNeed = Math.max(1, scored.production?.polishRequired ?? 1);
+    const polishProg = scored.production?.polishProgress ?? 0;
+    const polishRatio = Math.min(1, polishProg / polishNeed);
+    const openProd = scored.production ? openBugsCount(scored.production) : 0;
+    // Forced ship-with-bugs (pre-release skip) keeps full focus defects
+    const damp =
+      scored.production?.phase === "release_ready" && openProd === 0 && polishRatio >= 0.95
+        ? 0.15
+        : scored.production?.phase === "release_ready" && polishRatio < 0.35
+          ? 1
+          : Math.max(0.15, 1 - polishRatio * 0.85);
+    const focusBugs = Math.round(alloc.bugs * damp);
     scored = {
       ...scored,
       designPoints: scored.designPoints + alloc.design * 0.55,
       techPoints: scored.techPoints + alloc.tech * 0.55,
-      bugs: scored.bugs + alloc.bugs,
+      bugs: scored.bugs + focusBugs + openProd,
     };
     if (alloc.notes.length) {
       next.notifications = pushNote(next, alloc.notes[0]!, "warn");
@@ -1055,43 +1421,27 @@ function releaseProject(next: GameState, project: GameProject): GameState {
       } as typeof reviews;
     }
 
-    // Netflix Edition — franchise IP match on ship
-    {
+    // Netflix Edition quarantined (Foundation Lock): never mutates critic scores.
+    // Commercial IP effects only when late systems allowed.
+    if (lateSystemAllowed(next, "netflixEdition") && next.activeIpLicense) {
       const ipm = ipShipModifiers({
         active: next.activeIpLicense,
         topicId: scored.topicId,
         genreId: scored.genreId,
       });
       if (ipm.licensed) {
-        const boosted = Math.max(
-          1,
-          Math.min(10, Math.round((reviews.avg + ipm.reviewBoost) * 10) / 10),
-        );
-        const scale = reviews.avg > 0 ? boosted / reviews.avg : 1;
-        reviews.avg = boosted;
-        reviews.scores = reviews.scores.map((x) =>
-          Math.max(1, Math.min(10, Math.round(x * scale * 10) / 10)),
-        );
-        hidden = Math.max(1, Math.min(10, hidden + ipm.reviewBoost * 0.85));
-        productQuality = hidden * 10;
         (scored as { ipLicensed?: boolean; ipMatched?: boolean; ipRoyaltyRate?: number; ipHypeMult?: number }).ipLicensed =
           true;
         (scored as { ipMatched?: boolean }).ipMatched = ipm.matched;
         (scored as { ipRoyaltyRate?: number }).ipRoyaltyRate = ipm.royaltyRate;
         (scored as { ipHypeMult?: number }).ipHypeMult = ipm.hypeMult;
-        // Hype mult applied into launch hype burn path via next.hype scale
+        // Awareness only — never review points
         if (ipm.matched) {
           next.hype = Math.round(next.hype * ipm.hypeMult);
           next.notifications = pushNote(
             next,
-            `Franchise synergy: ${next.activeIpLicense?.name} — +${ipm.reviewBoost} score · ${ipm.hypeMult}× hype.`,
+            `Franchise awareness: ${next.activeIpLicense?.name} — ${ipm.hypeMult}× hype (no review boost).`,
             "good",
-          );
-        } else {
-          next.notifications = pushNote(
-            next,
-            `Franchise mismatch vs ${next.activeIpLicense?.name} — theme penalty.`,
-            "warn",
           );
         }
       }
@@ -1202,7 +1552,7 @@ function releaseProject(next: GameState, project: GameProject): GameState {
   }
   const platformAgeYears = Math.max(0, (releaseDay - pSpec.launchDay) / (48 * 7));
 
-  let sales = computeSalesCurve(hidden, {
+  const sales = computeSalesCurve(hidden, {
     size: scored.size,
     platformMarket,
     fans: next.fans,
@@ -1304,29 +1654,40 @@ function releaseProject(next: GameState, project: GameProject): GameState {
     }));
   }
 
-  // Module 21 — ops publisher matrix settlement (Vina / EA / Nintendont)
+  // Module 21 — Ops publisher: freeze terms + review obligation only.
+  // NO projected lifetime royalties at release. Weekly share applies later.
   if (next.activePublisherDealId && PUBLISHER_MATRIX.some((p) => p.id === next.activePublisherDealId)) {
     const offer = PUBLISHER_MATRIX.find((p) => p.id === next.activePublisherDealId)!;
-    const gross = (sales.totalUnits ?? 0) * (sales.price ?? 9.99);
-    const result = settlePublisherContract({
-      grossRevenue: gross,
-      finalScore: reviews.avg,
-      reqScore: offer.reqScore,
-      advancePay: offer.advancePay,
+    const met = reviews.avg + 1e-6 >= offer.reqScore;
+    if (!met) {
+      const penalty = Math.round(offer.advancePay * 0.6);
+      next = commitTxn(next, {
+        week: next.week,
+        amount: -penalty,
+        category: "publisher",
+        label: `Publisher breach: ${offer.company}`,
+        ref: `ops-breach-${offer.id}-${scored.id}`,
+      });
+      next.notifications = pushNote(
+        next,
+        `${offer.company}: missed ${offer.reqScore}+ (got ${reviews.avg.toFixed(1)}). Fine ${penalty}.`,
+        "bad",
+      );
+    } else {
+      next.notifications = pushNote(
+        next,
+        `${offer.company}: score met. Weekly revenue share ${Math.round(offer.royaltyCut * 100)}% applies on sales.`,
+        "good",
+      );
+    }
+    // Freeze deal onto scored for commercial snapshot; do not clear until freeze applied below
+    (scored as { publisherContractSnapshot?: object }).publisherContractSnapshot = {
+      source: "ops_matrix",
+      id: offer.id,
+      company: offer.company,
       royaltyCut: offer.royaltyCut,
-    });
-    next.cash += result.inflow;
-    next.ledger = applyLedger(next.ledger, {
-      week: next.week,
-      amount: result.inflow,
-      category: result.met ? "sales" : "other",
-      label: result.met
-        ? `Publisher royalties: ${offer.company}`
-        : `Publisher breach: ${offer.company}`,
-      ref: `ops-settle-${offer.id}-w${next.week}`,
-    });
-    next.notifications = pushNote(next, result.note, result.met ? "good" : "bad");
-    next.activePublisherDealId = null;
+      reqScore: offer.reqScore,
+    };
   }
 
 
@@ -1337,6 +1698,19 @@ function releaseProject(next: GameState, project: GameProject): GameState {
     next.week,
     next.year,
   );
+  // Foundation Lock: no cash/sales at release instant; residual plan may exist.
+  released.sales = 0;
+  released.revenue = 0;
+  // Freeze ops publisher onto title before commercial init; clear deal only after.
+  const snap = (scored as { publisherContractSnapshot?: { source: string; id: string; company: string; royaltyCut: number } }).publisherContractSnapshot;
+  if (snap) {
+    released.distributionType = "publisher";
+    released.publisherId = snap.id;
+    // royaltyCut is studio keep share (Vina = 0.22)
+    released.publisherRoyalty = snap.royaltyCut;
+    (released as { publisherContractSnapshot?: object }).publisherContractSnapshot = snap;
+  }
+
     if (scored.usedIllicitAssets) {
       released.litigationDueWeek = next.week + 2;
       released.usedIllicitAssets = true;
@@ -1458,6 +1832,25 @@ function releaseProject(next: GameState, project: GameProject): GameState {
   } satisfies OutcomeTrace;
 
   // Live weekly sales + marketing init (reviews already frozen above)
+  // Prefer frozen ops snapshot; else board deal still active.
+  let distType: "self" | "publisher" = "self";
+  let royalty = 0.7;
+  if (snap) {
+    distType = "publisher";
+    royalty = snap.royaltyCut; // studio keep
+    released.distributionType = "publisher";
+    released.publisherId = snap.id;
+    released.publisherRoyalty = snap.royaltyCut;
+  } else if (next.activePublisherDealId && next.publishingBoard) {
+    const deal = next.publishingBoard.deals.find((d) => d.id === next.activePublisherDealId);
+    if (deal) {
+      distType = "publisher";
+      royalty = deal.royaltyRate;
+      released.distributionType = "publisher";
+      released.publisherId = deal.publisherId;
+      released.publisherRoyalty = deal.royaltyRate;
+    }
+  }
   const commercial = initReleasedCommercial({
     released,
     state: next,
@@ -1469,8 +1862,14 @@ function releaseProject(next: GameState, project: GameProject): GameState {
     installedBase: platformSnap.installedBase,
     topicRep,
     comboMult,
-    distType: "self",
-    royalty: 0.7,
+    distType,
+    royalty,
+    publisherAwarenessMult:
+      distType === "publisher"
+        ? snap
+          ? 1.4
+          : 1.25
+        : 1,
     planUnits,
     productQuality,
     avgReview: reviews.avg,
@@ -1488,15 +1887,9 @@ function releaseProject(next: GameState, project: GameProject): GameState {
       audienceDemand: platformSnap.audienceDemand,
     };
   }
-  {
-    const classicFans = classicFansFromRelease(
-      sales.totalUnits ?? 0,
-      reviews.avg,
-    );
-    // Prefer blueprint fan curve when commercial delta is tiny
-    // GDT canon fans can fall on flops (score < 5.5)
-    const fanGain = classicFans !== 0 ? classicFans : commercial.fansDelta;
-    next.fans = Math.max(0, next.fans + fanGain);
+  // Bounded review reaction fans only (not lifetime sales projection).
+  if (commercial.fansDelta) {
+    next.fans = Math.max(0, next.fans + commercial.fansDelta);
   }
   if (commercial.notification) {
     next.notifications = pushNote(
@@ -1504,6 +1897,11 @@ function releaseProject(next: GameState, project: GameProject): GameState {
       commercial.notification.text,
       commercial.notification.tone,
     );
+  }
+
+  // Contract fully frozen into commercial release — safe to clear active deal id
+  if (snap || released.distributionType === "publisher") {
+    next.activePublisherDealId = null;
   }
 
   // No cash from sales at release — reviews first; sales start next week tick
@@ -1519,8 +1917,8 @@ function releaseProject(next: GameState, project: GameProject): GameState {
     ).ipRoyaltyRate;
     (released as { ipLicensed?: boolean }).ipLicensed = true;
   }
-  // IP infringement schedule (2 weeks) if title uses blocked trademarks without license
-  {
+  // IP infringement schedule — quarantined in Garage
+  if (lateSystemAllowed(next, "ipLitigation")) {
     const licensed = !!(next.activeIpLicense && next.activeIpLicense.licenseId !== "clear");
     if (titleLooksInfringing(released.title, licensed)) {
       next.infringementDue = [
@@ -1535,8 +1933,8 @@ function releaseProject(next: GameState, project: GameProject): GameState {
     }
   }
 
-  // MMO lifecycle registration (research mmo + large/aaa or explicit flag)
-  {
+  // MMO lifecycle registration — quarantined in Garage
+  if (lateSystemAllowed(next, "mmoLifecycle")) {
     const mmoOwned =
       next.researched.includes("mmo") ||
       next.researched.includes("mmo_games") ||
@@ -1562,35 +1960,33 @@ function releaseProject(next: GameState, project: GameProject): GameState {
     }
   }
   
-  // Publisher deal settlement (advance already paid on accept)
+  // Publisher: score/obligation check only — no projected lifetime royalty cash.
   if (next.activePublisherDealId && next.publishingBoard) {
     const deal = next.publishingBoard.deals.find((d) => d.id === next.activePublisherDealId);
     if (deal) {
-      const gross = (sales.totalUnits ?? 0) * (sales.price ?? 9.99);
       const result = evaluatePublisherDeal({
         deal,
         avgReview: reviews.avg,
         genreId: scored.genreId,
         size: scored.size,
         platformId: scored.platformId,
-        grossRevenue: gross,
+        grossRevenue: 0,
       });
-      next.cash += result.cashDelta;
-      next.ledger = applyLedger(next.ledger, {
-        week: next.week,
-        amount: result.cashDelta,
-        category: result.met ? "sales" : "other",
-        label: result.met
-          ? `Publisher royalties: ${deal.publisherName}`
-          : `Publisher penalty: ${deal.publisherName}`,
-        gameId: scored.id,
-        ref: `pub-${deal.id}-${scored.id}`,
-      });
-      next.notifications = pushNote(
-        next,
-        result.note,
-        result.met ? "good" : "bad",
-      );
+      if (result.cashDelta !== 0) {
+        const txn = applyCashTransaction(next.cash, next.ledger, {
+          week: next.week,
+          amount: result.cashDelta,
+          category: result.met ? "publisher" : "other",
+          label: result.met
+            ? `Publisher contract met: ${deal.publisherName}`
+            : `Publisher penalty: ${deal.publisherName}`,
+          gameId: scored.id,
+          ref: `pub-${deal.id}-${scored.id}`,
+        });
+        next.cash = txn.cash;
+        next.ledger = txn.ledger;
+      }
+      next.notifications = pushNote(next, result.note, result.met ? "good" : "bad");
       released.distributionType = "publisher";
       released.publisherId = deal.publisherId;
       released.publisherRoyalty = deal.royaltyRate;
@@ -1722,7 +2118,6 @@ next.gamesPublished += 1;
   return next;
 }
 
-let candidatesCache: StaffMember[] = [];
 let lastSaveAt = 0;
 
 interface Actions {
@@ -1811,6 +2206,7 @@ interface Actions {
   selectGame: (id: string | null) => void;
   completeReport: (id: string) => void;
   startTitleCampaign: (gameId: string, campaignId: string) => string | null;
+  resolveMarketingChoice: (opportunityId: string, choiceId: string) => string | null;
   runStudioMarketing: (campaignId: string) => string | null;
   toggleCrunchMode: () => string | null;
   setSecondaryPlatforms: (ids: string[]) => string | null;
@@ -1986,7 +2382,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     s.knowledge = emptyKnowledge();
     s.notifications = [
       {
-        id: uid("note"),
+        id: uid("note", s.campaignSeed, 0, "welcome", s.companyName),
         text: `Welcome to ${s.companyName}. Create a game — you choose every development stage.`,
         tone: "info",
         week: 0,
@@ -2184,6 +2580,59 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     next.year = date.year;
     next.month = date.month;
     next.dirty = true;
+    if (isGaragePhaseOne(next)) {
+      const mkt = ensureYearOpportunities(
+        next.marketingOpportunities ?? emptyMarketingOpportunityState(),
+        next.week,
+        next.campaignSeed,
+      );
+      next.marketingOpportunities = mkt;
+      // Soft offer: notify once when an opportunity becomes due — never spam-pause gameplay.
+      // Player can open it from notifications / wait; only surface modal if idle (no project).
+      const due = mkt.opportunities.find((o) => o.status === "offered");
+      const notifiedKey = due ? `mkt-notified-${due.id}` : "";
+      const canSurfaceMkt =
+        !!due &&
+        !next.pendingEvent &&
+        next.modal == null &&
+        !next.currentProject;
+      if (canSurfaceMkt) {
+        next.eventCooldowns = { ...next.eventCooldowns, [notifiedKey]: next.week };
+        const head = due!.headline ?? "A marketing window opened.";
+        next.pendingEvent = {
+          id: due!.id,
+          title: "Marketing opportunity",
+          body: `${head}\n\nPick a channel — or wait.`,
+          choices: [
+            { label: "Not now", effect: "Keep offer · no spend" },
+            ...due!.choices.map((c) => ({
+              label: c.label,
+              effect:
+                c.cost <= 0
+                  ? `Free · +${c.hypeGain} hype${c.blurb ? ` · ${c.blurb}` : ""}`
+                  : `$${c.cost.toLocaleString()} · +${c.hypeGain} hype · +${c.marketingPoints} mkt${
+                      c.blurb ? ` · ${c.blurb}` : ""
+                    }`,
+            })),
+          ],
+        };
+        (next.pendingEvent as { marketingOpportunityId?: string }).marketingOpportunityId = due!.id;
+        (next.pendingEvent as { marketingChoiceOffset?: number }).marketingChoiceOffset = 1;
+        next.marketingOpportunities = markMarketingOpportunitySurfaced(mkt, due!.id);
+        next.modal = "event";
+        next.speed = 0;
+      } else if (due && (next.currentProject || next.pendingEvent || next.modal)) {
+        // Keep duePending; soft note once per opportunity while blocked
+        if (next.eventCooldowns[notifiedKey] == null) {
+          next.eventCooldowns = { ...next.eventCooldowns, [notifiedKey]: next.week };
+          next.notifications = pushNote(
+            next,
+            `Marketing option waiting — surfaces next clear idle week.`,
+            "info",
+          );
+        }
+      }
+    }
 
     // Progression tenure + office offers + move completion (CP1)
     if (isFeatureEnabled("officeFoundation")) {
@@ -2205,17 +2654,90 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         next.modal = "officeOffer";
         next.speed = 0;
       }
+      // Deferred FO reminders: schedule due windows; show on next clear week (max 2/year)
+      if (fo && (fo.state === "deferred" || fo.state === "offered") && prog.studioTier === 1) {
+        const y = Math.floor(next.week / 48);
+        const yearStart = y * 48;
+        const windows = [yearStart + 16, yearStart + 40];
+        let reminders = fo.reminderWeeks ?? [];
+        let dues = fo.reminderDueWeeks ?? [];
+        const yearReminders = reminders.filter((w) => Math.floor(w / 48) === y);
+        // Enqueue due when window hits (even if UI blocked)
+        if (
+          yearReminders.length + dues.filter((w) => Math.floor(w / 48) === y).length < 2 &&
+          windows.includes(next.week) &&
+          !reminders.includes(next.week) &&
+          !dues.includes(next.week)
+        ) {
+          dues = [...dues, next.week];
+          prog = {
+            ...prog,
+            offers: {
+              ...prog.offers,
+              first_office: { ...fo, reminderDueWeeks: dues },
+            },
+          };
+          next.progression = prog;
+        }
+        // Surface on clear week if any due pending
+        const canShow =
+          !next.pendingEvent &&
+          next.modal !== "event" &&
+          next.modal !== "reviews" &&
+          next.modal !== "officeOffer" &&
+          next.modal !== "report";
+        if (canShow && dues.length > 0 && yearReminders.length < 2) {
+          const dueW = dues[0]!;
+          reminders = [...reminders, next.week];
+          dues = dues.slice(1);
+          const fo2 = prog.offers.first_office!;
+          next.progression = {
+            ...prog,
+            offers: {
+              ...prog.offers,
+              first_office: {
+                ...fo2,
+                reminderWeeks: reminders,
+                reminderDueWeeks: dues,
+              },
+            },
+          };
+          next.modal = "officeOffer";
+          next.speed = 0;
+          next.notifications = pushNote(
+            next,
+            "Reminder: First Office offer still available (terms unchanged).",
+            "info",
+          );
+        }
+      }
     }
 
     const payroll = next.staff.reduce((s, m) => s + m.salary, 0);
-    next.cash -= payroll / 4;
+    if (payroll > 0) {
+      next = commitTxn(next, {
+        week: next.week,
+        amount: -(payroll / 4),
+        category: "payroll",
+        label: "Weekly payroll",
+        ref: `payroll-w${next.week}`,
+      });
+    }
     if (date.weekOfMonth === 1) {
       const rent =
           (next.office === 2 && isHighDensity(next.officeSubTier)
             ? HIGH_DENSITY.rent
             : OFFICE_INFO[next.office as 1 | 2 | 3 | 4 | 5].rent) +
           clutterTax((next.hardwareProducts ?? []).filter((h) => (h.fabWeeksLeft ?? 0) <= 0 || h.workbenchMode).length);
-      if (rent > 0) next.cash -= rent;
+      if (rent > 0) {
+        next = commitTxn(next, {
+          week: next.week,
+          amount: -rent,
+          category: "rent",
+          label: "Monthly office rent",
+          ref: `rent-w${next.week}`,
+        });
+      }
     }
 
     // Staff energy + Module 20 burnout fatigue
@@ -2225,7 +2747,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       }
       const crunch = !!next.currentProject?.crunchMode;
       const working = !!next.currentProject && (m.busy || m.id === "founder");
-      let status = (m.workStatus ?? "Active") as "Active" | "Vacation";
+      const status = (m.workStatus ?? "Active") as "Active" | "Vacation";
       let fatigue = m.fatigue ?? Math.max(0, 100 - (m.energy ?? 100));
       // Map vacation force when not working optional rest
       if (!working && status === "Active" && fatigue > 60 && !crunch) {
@@ -2371,8 +2893,13 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       }
     }
 
-    // Part 2: decision events (not pure flavor)
-    if (!next.pendingEvent && next.modal == null) {
+    // Part 2: decision events — idle weeks only, low rate (see maybeSpawnDecisionEvent)
+    if (
+      !next.pendingEvent &&
+      next.modal == null &&
+      !next.currentProject &&
+      (next.eventCooldowns["__any_event__"] ?? -999) <= next.week - 20
+    ) {
       const pending = maybeSpawnDecisionEvent({
         year: next.year,
         week: next.week,
@@ -2380,23 +2907,27 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         office: next.office,
         cooldowns: next.eventCooldowns,
         campaignSeed: next.campaignSeed,
-        hasProject: !!next.currentProject,
-        eventSeverity: next.difficulty?.eventSeverity ?? 1,
+        hasProject: false,
+        eventSeverity: Math.min(0.55, next.difficulty?.eventSeverity ?? 1) * 0.45,
       });
       if (pending) {
         next.pendingEvent = {
-          id: uid("evt"),
+          id: uid("evt", next.campaignSeed, next.week, pending.defId),
           title: pending.title,
           body: pending.body,
           decisionDefId: pending.defId,
           decisionChoices: pending.choices,
           choices: pending.choices.map((c) => ({
             label: c.label,
-            effect: c.id,
+            effect: c.summary,
           })),
         };
         next.modal = "event";
-        next.eventCooldowns = { ...next.eventCooldowns, [pending.defId]: next.week };
+        next.eventCooldowns = {
+          ...next.eventCooldowns,
+          [pending.defId]: next.week + 36,
+          __any_event__: next.week,
+        };
         next.speed = 0;
       }
     }
@@ -2488,8 +3019,8 @@ export const useGame = create<GameState & Actions>((set, get) => ({
             dGain *= ge;
             tGain *= ge;
           }
-          // Module 22 — tech debt on active engine
-          {
+          // Module 22 — tech debt only after First Office (garage engines do not "fail" post-ship)
+          if (!isGaragePhaseOne(next)) {
             const eng =
               next.engines.find((e) => e.id === next.currentProject!.engineId) ??
               next.engines[0];
@@ -2541,8 +3072,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         next.currentProject = { ...next.currentProject, bugs: 0 };
       }
       if (adv.cashCost > 0) {
-        next.cash -= adv.cashCost;
-        next.ledger = applyLedger(next.ledger, {
+        const t = applyCashTransaction(next.cash, next.ledger, {
           week: next.week,
           amount: -adv.cashCost,
           category: "development",
@@ -2550,11 +3080,14 @@ export const useGame = create<GameState & Actions>((set, get) => ({
           gameId: adv.project.id,
           ref: `dev-${adv.project.id}-w${next.week}`,
         });
+        if (t.applied) {
+          next = { ...next, cash: t.cash, ledger: t.ledger };
+        }
       }
       next.staff = next.staff.map((m) =>
         m.id === "founder" ? { ...m, energy: 100 } : m,
       );
-      if (adv.stageJustFinished) {
+      if (adv.stageJustFinished && next.currentProject) {
         next.speed = 0;
         const ph = next.currentProject.devPhase;
         if (ph === "STAGE_2_CONFIG" || ph === "STAGE_3_CONFIG") {
@@ -2575,7 +3108,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
           );
         }
       }
-      if (next.currentProject.devPhase === "READY_TO_RELEASE") {
+      if (next.currentProject?.devPhase === "READY_TO_RELEASE") {
         next.speed = 0;
         next.notifications = pushNote(
           next,
@@ -2604,11 +3137,17 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       }
     }
 
-    // Module 8 — crisis every 2 weeks while developing
+    // Module 8 — mid-dev crises: NEVER in Garage (office 1 / Phase One).
+    // From First Office (office >= 2): full crisis rolls every 6 running weeks,
+    // with player choices to absorb, mitigate, or push through.
     if (
+      !isGaragePhaseOne(next) &&
+      (next.office ?? 1) >= 2 &&
       next.currentProject &&
       next.currentProject.devPhase.includes("RUNNING") &&
-      next.week % 2 === 0 &&
+      !next.pendingEvent &&
+      next.modal == null &&
+      next.week % 6 === 0 &&
       next.currentProject.lastCrisisWeek !== next.week
     ) {
       const crisis = rollDevelopmentCrisis({
@@ -2620,57 +3159,71 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       let p = {
         ...next.currentProject,
         lastCrisisWeek: next.week,
-        bugs: next.currentProject.bugs + crisis.bugsDelta,
-        crisisReviewPenalty:
-          (next.currentProject.crisisReviewPenalty ?? 0) + crisis.reviewPenalty,
-        fluWeeksLeft: Math.max(
-          next.currentProject.fluWeeksLeft ?? 0,
-          crisis.designGenMultWeeks,
-        ),
       };
-      if (crisis.extraWeeks > 0) {
+      if (crisis.code === "CRISIS_05") {
+        next.currentProject = p;
+        // Clean week — quiet (no modal)
+      } else {
+        // Stage mechanical baseline (mitigation choices may soften further in resolveEvent)
         p = {
           ...p,
-          weeksDev: (p.weeksDev ?? 0) - crisis.extraWeeks, // effectively need more calendar time
-          production: p.production
-            ? {
-                ...p.production,
-                polishRequired: (p.production.polishRequired ?? 0) + crisis.extraWeeks * 80,
-              }
-            : p.production,
+          bugs: p.bugs + crisis.bugsDelta,
+          crisisReviewPenalty:
+            (p.crisisReviewPenalty ?? 0) + crisis.reviewPenalty,
+          fluWeeksLeft: Math.max(p.fluWeeksLeft ?? 0, crisis.designGenMultWeeks),
         };
-      }
-      next.currentProject = p;
-      if (crisis.rpDelta) {
-        next.researchPoints = Math.max(0, next.researchPoints + crisis.rpDelta);
-      }
-      if (crisis.hypeDelta) {
-        next.hype = Math.max(0, next.hype + crisis.hypeDelta);
-      }
-      if (crisis.chargeRentNow) {
-        const rent =
-          (next.office === 2 && isHighDensity(next.officeSubTier)
-            ? HIGH_DENSITY.rent
-            : OFFICE_INFO[next.office as 1 | 2 | 3 | 4 | 5].rent) +
-          clutterTax((next.hardwareProducts ?? []).filter((h) => (h.fabWeeksLeft ?? 0) <= 0 || h.workbenchMode).length);
-        if (rent > 0) {
-          next.cash -= rent;
-          next.ledger = applyLedger(next.ledger, {
-            week: next.week,
-            amount: -rent,
-            category: "rent",
-            label: "Over-scope overhead (crisis)",
-            ref: `crisis-rent-w${next.week}`,
-          });
+        if (crisis.extraWeeks > 0 && p.production) {
+          p = {
+            ...p,
+            production: {
+              ...p.production,
+              polishRequired: (p.production.polishRequired ?? 0) + crisis.extraWeeks * 60,
+            },
+          };
         }
-      }
-      if (crisis.code !== "CRISIS_05") {
+        next.currentProject = p;
+        if (crisis.rpDelta) {
+          next.researchPoints = Math.max(0, next.researchPoints + crisis.rpDelta);
+        }
+        if (crisis.hypeDelta) {
+          next.hype = Math.max(0, next.hype + crisis.hypeDelta);
+        }
+        // Present choice menu (not a dead-end "engine failed" dump)
+        const choicesByCode: Record<
+          string,
+          { label: string; effect: string }[]
+        > = {
+          CRISIS_01: [
+            { label: "Contain & rotate keys", effect: "−$2,500 · recover 8 RP" },
+            { label: "Public honesty post", effect: "+hype repair · −$400" },
+            { label: "Stay quiet & push", effect: "Accept the hit" },
+          ],
+          CRISIS_02: [
+            { label: "All-hands bug bash", effect: "−$1,800 · −12 bugs" },
+            { label: "Hire a contractor week", effect: "−$4,000 · −20 bugs · clear 0.5 score hit" },
+            { label: "Ship-quality triage only", effect: "Keep current bugs/penalty" },
+          ],
+          CRISIS_03: [
+            { label: "Cut scope immediately", effect: "Reduce polish load · free" },
+            { label: "Pay overtime art pass", effect: "−$3,000 · keep scope" },
+            { label: "Accept the delay tax", effect: "Keep extra polish debt" },
+          ],
+          CRISIS_04: [
+            { label: "Forced rest + soup", effect: "Clear flu · −$300" },
+            { label: "Redistribute tasks", effect: "Halve flu impact" },
+            { label: "Push through sick", effect: "Keep flu weeks" },
+          ],
+        };
         next.notifications = pushNote(next, crisis.note, "warn");
         next.pendingEvent = {
           id: `crisis_${crisis.code}_${next.week}`,
           title: crisis.name,
-          body: crisis.note,
+          body: `${crisis.note}\n\nHow do you respond?`,
+          choices: choicesByCode[crisis.code] ?? [
+            { label: "Continue", effect: "Dismiss" },
+          ],
         };
+        (next.pendingEvent as { crisisCode?: string }).crisisCode = crisis.code;
         next.modal = "event";
         next.speed = 0;
       }
@@ -2688,7 +3241,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
           historicalAverage: next.targetHighScore ?? 35,
           rivalIndex: idx,
         });
-        next.targetHighScore = clampHistoricalAverage(rel.nextHistorical);
+        // Foundation Lock: rival releases never mutate player scoring target.
         next.lastRivalReleaseWeek = next.week;
         next.rivalRotateIndex = (idx + 1) % 3;
         // Genre saturation 8 weeks
@@ -2703,8 +3256,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
           const c0 = shippingHw[0]!;
           const rivalGross = rel.totalPoints * 800; // abstract
           const cut = rivalGross * c0.royaltyRate;
-          next.cash += cut;
-          next.ledger = applyLedger(next.ledger, {
+          next = commitTxn(next, {
             week: next.week,
             amount: cut,
             category: "sales",
@@ -2762,11 +3314,20 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     if (next.activeContract) {
       const c = { ...next.activeContract, progress: next.activeContract.progress + 1 };
       if (c.progress >= c.weeks) {
-        next.cash += c.reward;
+        next = commitTxn(next, {
+          week: next.week,
+          amount: c.reward,
+          category: "sales",
+          label: `Contract complete: ${c.title}`,
+          ref: `contract-done-${c.id}-w${next.week}`,
+        });
         next.researchPoints += c.researchReward;
         next.notifications = pushNote(next, `Contract complete: +${formatCash(c.reward)}`, "good");
         next.activeContract = null;
-        next.contracts = generateContracts(3, next.year);
+        next.contracts = generateContracts(3, next.year, {
+          campaignSeed: next.campaignSeed,
+          week: next.week,
+        });
       } else {
         next.activeContract = c;
       }
@@ -2774,8 +3335,8 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       next.contracts = generateContracts(3, next.year);
     }
 
-    // Publisher board (Module 3) — season refresh when unlocked
-    {
+    // Publisher board — inert in Garage Phase One (Foundation Lock quarantine)
+    if (!isGaragePhaseOne(next) && lateSystemAllowed(next, "publishers")) {
       const unlocked =
         publishingUnlocked({
           gamesPublished: next.gamesPublished,
@@ -2795,7 +3356,10 @@ export const useGame = create<GameState & Actions>((set, get) => ({
 
     next = tryFireEvent(next);
     // Netflix Edition — streamer hype decays faster
-    if ((next.streamerHypeWeeksLeft ?? 0) > 0) {
+    if (
+      lateSystemAllowed(next, "streamerMarketing") &&
+      (next.streamerHypeWeeksLeft ?? 0) > 0
+    ) {
       next.hype = streamerHypeDecay(next.hype, next.streamerHypeWeeksLeft ?? 0);
       next.streamerHypeWeeksLeft = Math.max(0, (next.streamerHypeWeeksLeft ?? 0) - 1);
     } else {
@@ -2803,8 +3367,8 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     }
 
 
-    // Trademark infringement (banned names without license)
-    if ((next.infringementDue ?? []).length) {
+    // Trademark infringement (banned names without license) — quarantined in Garage
+    if (lateSystemAllowed(next, "ipLitigation") && (next.infringementDue ?? []).length) {
       const due = next.infringementDue ?? [];
       const remain = [];
       for (const item of due) {
@@ -2812,7 +3376,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
           remain.push(item);
           continue;
         }
-        const lit = rollInfringementLitigation(() => Math.random());
+        const lit = rollInfringementLitigation(() => hashSeed(next.campaignSeed, "litigation", item.gameId, next.week) / 4294967296);
         let sales = [...next.activeSales];
         let games = [...next.releasedGames];
         if (lit.salesHalted) {
@@ -2830,8 +3394,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
           );
         }
         if (lit.penaltyCash > 0) {
-          next.cash -= lit.penaltyCash;
-          next.ledger = applyLedger(next.ledger, {
+          next = commitTxn(next, {
             week: next.week,
             amount: -lit.penaltyCash,
             category: "other",
@@ -2842,13 +3405,6 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         next.activeSales = sales;
         next.releasedGames = games;
         next.notifications = pushNote(next, `"${item.title}" — ${lit.msg}`, lit.salesHalted ? "bad" : "warn");
-        next.pendingEvent = {
-          id: `tm_${item.gameId}`,
-          title: lit.code.replace(/_/g, " "),
-          body: lit.msg,
-        };
-        next.modal = "event";
-        next.speed = 0;
       }
       next.infringementDue = remain;
     }
@@ -2882,8 +3438,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
             .map((x) => (x.id === g.id ? patched : x))
             .filter((x) => x.onSale && !x.dormant);
           if (lit.penaltyCash > 0) {
-            next.cash -= lit.penaltyCash;
-            next.ledger = applyLedger(next.ledger, {
+            next = commitTxn(next, {
               week: next.week,
               amount: -lit.penaltyCash,
               category: "other",
@@ -2892,25 +3447,21 @@ export const useGame = create<GameState & Actions>((set, get) => ({
               ref: `lit-${g.id}`,
             });
           }
+          // Notification only — never pause the campaign with a post-ship "engine/IP fail" modal
           next.notifications = pushNote(next, lit.note, lit.salesHalted ? "bad" : "warn");
-          next.pendingEvent = {
-            id: `lit_${g.id}`,
-            title: "IP Litigation",
-            body: `"${g.title}" — ${lit.note}`,
-          };
-          next.modal = "event";
-          next.speed = 0;
         }
       }
       next.releasedGames = games;
       next.activeSales = sales;
     // Module 23 — physical merch weekly shelves
-    if ((next.hardwareProducts ?? []).length) {
+    if (
+      lateSystemAllowed(next, "hardwareMerch") &&
+      (next.hardwareProducts ?? []).length
+    ) {
       const hw = processHardwareWeek(next.hardwareProducts ?? []);
       next.hardwareProducts = hw.products;
       if (hw.cashDelta !== 0) {
-        next.cash += hw.cashDelta;
-        next.ledger = applyLedger(next.ledger, {
+        next = commitTxn(next, {
           week: next.week,
           amount: hw.cashDelta,
           category: "sales",
@@ -2941,7 +3492,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
           yearReleased: g.yearReleased ?? next.year,
         }));
         // Light rival synthetic entries so awards aren't empty early
-        if (titles.length) {
+        if (lateSystemAllowed(next, "awardsG3") && titles.length) {
           const awards = resolveAnnualAwards({ year: next.year, titles });
           next.lastAwardsYear = next.year;
           let fanGain = 0;
@@ -2957,9 +3508,8 @@ export const useGame = create<GameState & Actions>((set, get) => ({
           }
           next.fans = Math.max(0, next.fans + fanGain);
           next.researchPoints += rpGain;
-          next.cash += cashGain;
-          if (cashGain > 0) {
-            next.ledger = applyLedger(next.ledger, {
+          if (cashGain !== 0) {
+            next = commitTxn(next, {
               week: next.week,
               amount: cashGain,
               category: "sales",
@@ -2978,24 +3528,30 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       }
     }
 
-    // NeonStore monthly rival royalties
-    if (((next.week - 1) % 4) === 0 && next.digitalStorefront?.active) {
-      const roy = monthlyPlatformRoyalties(next.fans, () => Math.random());
-      next.cash += roy.revenue;
-      next.digitalStorefront = {
-        ...next.digitalStorefront,
-        lastMonthRoyalties: roy.revenue,
-        lifetimeRivalRoyalties:
-          (next.digitalStorefront.lifetimeRivalRoyalties ?? 0) + roy.revenue,
-        rivalTitlesHosted: (next.digitalStorefront.rivalTitlesHosted ?? 0) + 1,
-      };
-      next.ledger = applyLedger(next.ledger, {
+    // NeonStore monthly rival royalties — quarantined in Garage / flag off
+    if (
+      lateSystemAllowed(next, "digitalStorefront") &&
+      ((next.week - 1) % 4) === 0 &&
+      next.digitalStorefront?.active
+    ) {
+      const roy = monthlyPlatformRoyalties(next.fans, () =>
+        hashSeed(next.campaignSeed, "store-royalty", next.week) / 4294967296,
+      );
+      const storeName = next.digitalStorefront.name;
+      next = commitTxn(next, {
         week: next.week,
         amount: roy.revenue,
         category: "sales",
-        label: `${next.digitalStorefront.name} rival royalties (${roy.units} units)`,
+        label: `${storeName} rival royalties (${roy.units} units)`,
         ref: `store-royalty-w${next.week}`,
       });
+      const ds = next.digitalStorefront!;
+      next.digitalStorefront = {
+        ...ds,
+        lastMonthRoyalties: roy.revenue,
+        lifetimeRivalRoyalties: (ds.lifetimeRivalRoyalties ?? 0) + roy.revenue,
+        rivalTitlesHosted: (ds.rivalTitlesHosted ?? 0) + 1,
+      };
       if (roy.revenue > 500) {
         next.notifications = pushNote(
           next,
@@ -3005,13 +3561,16 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       }
     }
 
-    // MMO monthly economics (on month boundary — week 1 of month)
-    if (((next.week - 1) % 4) === 0 && (next.activeMmos ?? []).some((m) => m.active)) {
+    // MMO monthly economics — quarantined in Garage
+    if (
+      lateSystemAllowed(next, "mmoLifecycle") &&
+      ((next.week - 1) % 4) === 0 &&
+      (next.activeMmos ?? []).some((m) => m.active)
+    ) {
       const mmo = processMmoMonth(next.activeMmos ?? []);
       next.activeMmos = mmo.mmos;
       if (mmo.cashDelta !== 0) {
-        next.cash += mmo.cashDelta;
-        next.ledger = applyLedger(next.ledger, {
+        next = commitTxn(next, {
           week: next.week,
           amount: mmo.cashDelta,
           category: mmo.cashDelta >= 0 ? "sales" : "other",
@@ -3024,23 +3583,20 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       }
     }
 
-    // Module 13 — player console tick
-    if (next.playerConsoles?.length) {
+    // Module 13 — player console tick — quarantined in Garage
+    if (lateSystemAllowed(next, "playerConsoles") && next.playerConsoles?.length) {
       const updated = [];
       for (const c of next.playerConsoles) {
         const r = tickPlayerConsole(c, next.week, next.fans);
         updated.push(r.console);
         if (r.cashDelta !== 0) {
-          next.cash += r.cashDelta;
-          if (Math.abs(r.cashDelta) > 100) {
-            next.ledger = applyLedger(next.ledger, {
-              week: next.week,
-              amount: r.cashDelta,
-              category: r.cashDelta >= 0 ? "sales" : "other",
-              label: `${c.name} hardware`,
-              ref: `hw-${c.id}-w${next.week}`,
-            });
-          }
+          next = commitTxn(next, {
+            week: next.week,
+            amount: r.cashDelta,
+            category: r.cashDelta >= 0 ? "sales" : "other",
+            label: `${c.name} hardware`,
+            ref: `hw-${c.id}-w${next.week}`,
+          });
         }
         if (r.note) next.notifications = pushNote(next, r.note, "good");
       }
@@ -3049,8 +3605,9 @@ export const useGame = create<GameState & Actions>((set, get) => ({
 
 
     // Module 15 — bankruptcy halt (no further auto-advance)
-    next.cash = intCash(next.cash);
+    next.cash = moneyRound(next.cash);
     next.fans = intFans(next.fans);
+
     if (isBankrupt(next.cash, !!next.settings.disableBankruptcy)) {
       next.speed = 0;
       if (next.cash < -5000 && !next.currentProject && next.activeSales.length === 0) {
@@ -3184,8 +3741,18 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       year: state.year,
     });
 
+    {
+    const txn = applyCashTransaction(state.cash, state.ledger, {
+      week: state.week,
+      amount: -cost,
+      category: "development",
+      label: `Start project: ${project.title}`,
+      ref: `dev-start-${project.id}`,
+    });
+    if (!txn.applied) return "Project start already charged.";
     set({
-      cash: state.cash - cost,
+      cash: txn.cash,
+      ledger: txn.ledger,
       currentProject: project,
       engineWorkshop: workshop,
       speed: 0,
@@ -3198,6 +3765,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         "info",
       ),
     });
+    }
     return null;
   },
 
@@ -3246,14 +3814,20 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     );
     if (planned.error) return planned.error;
     let project = planned.project;
-    let cash = state.cash;
     let notes = pushNote(state, `Stage ${stageNum} started.`, "info");
     let modal: GameState["modal"] = null;
     let pendingEvent: GameState["pendingEvent"] = state.pendingEvent;
 
-    // Quality crisis table once per project at Stage 1 start
-    if (stageNum === 1 && !(project as { qualityCrisisRolled?: boolean }).qualityCrisisRolled) {
-      const crisis = rollQualityCrisis(() => Math.random());
+    // Quality crisis — never in Garage; optional later systems only
+    if (
+      !isGaragePhaseOne(state) &&
+      lateSystemAllowed(state, "qualityCrisisEvents") &&
+      stageNum === 1 &&
+      !(project as { qualityCrisisRolled?: boolean }).qualityCrisisRolled
+    ) {
+      const crisis = rollQualityCrisis(
+        () => hashSeed(state.campaignSeed, project.id, "quality-crisis", state.week) / 4294967296,
+      );
       (project as { qualityCrisisRolled?: boolean }).qualityCrisisRolled = true;
       if (crisis.code !== "EVT_CLEAN") {
         if (crisis.hypeDelta) {
@@ -3285,28 +3859,30 @@ export const useGame = create<GameState & Actions>((set, get) => ({
           modal = "event";
         }
         notes = pushNote({ ...state, notifications: notes }, crisis.note, "warn");
-        set({
-          cash: cash + crisis.cashDelta,
-          researchPoints: Math.max(0, state.researchPoints + crisis.rpDelta),
-          hype: Math.max(0, state.hype + crisis.hypeDelta),
-          currentProject: project,
-          speed: crisis.code === "EVT_COPY" ? 0 : 1,
-          screen: "develop",
-          dirty: true,
-          notifications: notes,
-          modal,
-          pendingEvent,
-          ledger:
-            crisis.cashDelta !== 0
-              ? applyLedger(state.ledger, {
-                  week: state.week,
-                  amount: crisis.cashDelta,
-                  category: "other",
-                  label: crisis.title,
-                  ref: `qcrisis-${crisis.code}-w${state.week}`,
-                })
-              : state.ledger,
-        });
+        {
+          let st: GameState = {
+            ...state,
+            researchPoints: Math.max(0, state.researchPoints + crisis.rpDelta),
+            hype: Math.max(0, state.hype + crisis.hypeDelta),
+            currentProject: project,
+            speed: crisis.code === "EVT_COPY" ? 0 : 1,
+            screen: "develop",
+            dirty: true,
+            notifications: notes,
+            modal,
+            pendingEvent,
+          };
+          if (crisis.cashDelta !== 0) {
+            st = commitTxn(st, {
+              week: state.week,
+              amount: crisis.cashDelta,
+              category: "other",
+              label: crisis.title,
+              ref: `qcrisis-${crisis.code}-w${state.week}`,
+            });
+          }
+          set(st);
+        }
         return null;
       }
     }
@@ -3327,43 +3903,17 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     const state = get();
     const p = state.currentProject;
     if (!p) return "No project.";
-    if (p.devPhase !== "POLISHING" && p.production?.phase !== "bug_fixing" && p.production?.phase !== "polish" && p.production?.phase !== "finalize_build") {
+    if (
+      p.devPhase !== "POLISHING" &&
+      p.production?.phase !== "bug_fixing" &&
+      p.production?.phase !== "polish" &&
+      p.production?.phase !== "finalize_build"
+    ) {
       return "Only available during polish / bug-fix.";
     }
-    const w = state.week + 1;
-    const d = weekToDate(w, START_YEAR);
-    const day = weekToCampaignDay(state.week);
-    const adv = advanceProductionWeek(p, {
-      campaignSeed: state.campaignSeed,
-      staff: state.staff,
-      startDay: p.production?.asOfDay ?? day,
-    });
-    const next: GameState = {
-      ...state,
-      week: w,
-      year: d.year,
-      month: d.month,
-      currentProject: state.settings.noBugsMode
-        ? { ...adv.project, bugs: 0 }
-        : adv.project,
-      dirty: true,
-    };
-    if (adv.cashCost > 0) {
-      next.cash -= adv.cashCost;
-      next.ledger = applyLedger(next.ledger, {
-        week: w,
-        amount: -adv.cashCost,
-        category: "development",
-        label: `Polish/QA: ${p.title}`,
-        gameId: p.id,
-        ref: `polish-${p.id}-w${w}`,
-      });
-    }
-    next.staff = next.staff.map((m) =>
-      m.id === "founder" ? { ...m, energy: 100 } : m,
-    );
-    set(next);
-    return null;
+    // Foundation Lock: same weekly settlement as advanceWeek (rent/sales/etc).
+    // Production polish progress is applied inside tick() for active projects.
+    return get().advanceWeek();
   },
 
   enterPreRelease: () => {
@@ -3374,7 +3924,10 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     if (
       p.devPhase !== "POLISHING" &&
       p.devPhase !== "READY_TO_RELEASE" &&
-      p.production?.phase !== "release_ready"
+      p.production?.phase !== "release_ready" &&
+      p.production?.phase !== "polish" &&
+      p.production?.phase !== "bug_fixing" &&
+      p.production?.phase !== "finalize_build"
     ) {
       return "Finish development first.";
     }
@@ -3390,10 +3943,24 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       }
       if (proj.production?.phase === "release_ready") {
         proj = { ...proj, devPhase: "READY_TO_RELEASE" };
-      } else if (proj.production?.phase === "bug_fixing") {
-        return "Fix remaining bugs (Work on bugs) before Pre-Release.";
-      } else if (proj.production?.phase === "polish") {
-        return "Keep polishing until the build is finalized.";
+      } else if (
+        proj.production?.phase === "bug_fixing" ||
+        proj.production?.phase === "polish" ||
+        proj.production?.phase === "finalize_build"
+      ) {
+        // Ship-with-bugs / light-polish path: fold open defects and mark release-ready.
+        // Strong campaigns polish first via workPolishWeek; poor may enter here intentionally.
+        const open = openBugsCount(proj.production);
+        const openSev = productionOpenSeverity(proj);
+        proj = {
+          ...proj,
+          bugs: Math.max(proj.bugs, open) + Math.max(0, Math.floor(openSev * 0.35)),
+          production: {
+            ...proj.production,
+            phase: "release_ready",
+          },
+          devPhase: "READY_TO_RELEASE",
+        };
       }
     }
 
@@ -3406,13 +3973,15 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         ? "Pre-Release blocked by certification or blockers — see tech gates."
         : rec === "hold"
           ? "Pre-Release: tech recommends holding. Set title/price or keep fixing."
-          : "Pre-Release: set final title and price.";
+          : proj.bugs > 0
+            ? `Pre-Release with ${proj.bugs} open bugs — reviews will notice.`
+            : "Pre-Release: set final title and price.";
 
     set({
       currentProject: { ...proj, devPhase: "READY_TO_RELEASE" },
       speed: 0,
       dirty: true,
-      notifications: pushNote(state, note, rec === "blocked" ? "warn" : "info"),
+      notifications: pushNote(state, note, rec === "blocked" || proj.bugs > 5 ? "warn" : "info"),
     });
     return null;
   },
@@ -3538,7 +4107,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       set({
         researchPoints: state.researchPoints - topic.researchCost,
         activeResearch: {
-          id: uid("job"),
+          id: uid("job", state.campaignSeed, "topic", id, state.week),
           kind: "topic",
           targetId: id,
           name: topic.name,
@@ -3583,35 +4152,57 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       const weeks = started.weeks || item?.weeks || 2;
       // Design-only instant path
       if (weeks === 0) {
-        set({
+        let st: GameState = {
+          ...state,
           researchPoints: state.researchPoints - cost,
-          cash: state.cash - (catalogTech.researchCash || 0),
           researched: [...state.researched, id],
           researchPipeline: pipe,
           dirty: true,
-          notifications: pushNote(state, `${catalogTech.name} ready for production (design feature).`, "good"),
-        });
+        };
+        if ((catalogTech.researchCash || 0) > 0) {
+          st = commitTxn(st, {
+            week: state.week,
+            amount: -(catalogTech.researchCash || 0),
+            category: "research",
+            label: `Research: ${catalogTech.name}`,
+            ref: `research-cash-${id}-w${state.week}`,
+          });
+        }
+        st.notifications = pushNote(st, `${catalogTech.name} ready for production (design feature).`, "good");
+        set(st);
         return null;
       }
-      set({
-        researchPoints: state.researchPoints - cost,
-        cash: state.cash - (catalogTech.researchCash || 0),
-        researchPipeline: pipe,
-        activeResearch: {
-          id: uid("job"),
-          kind: "tech",
-          targetId: id,
-          name: catalogTech.name,
-          weeksLeft: weeks,
-          totalWeeks: weeks,
-        },
-        dirty: true,
-        notifications: pushNote(
-          state,
+      {
+        let st: GameState = {
+          ...state,
+          researchPoints: state.researchPoints - cost,
+          researchPipeline: pipe,
+          activeResearch: {
+            id: uid("job", state.campaignSeed, id, state.week),
+            kind: "tech",
+            targetId: id,
+            name: catalogTech.name,
+            weeksLeft: weeks,
+            totalWeeks: weeks,
+          },
+          dirty: true,
+        };
+        if ((catalogTech.researchCash || 0) > 0) {
+          st = commitTxn(st, {
+            week: state.week,
+            amount: -(catalogTech.researchCash || 0),
+            category: "research",
+            label: `Research: ${catalogTech.name}`,
+            ref: `research-cash-${id}-w${state.week}`,
+          });
+        }
+        st.notifications = pushNote(
+          st,
           `Researching: ${catalogTech.name} (${weeks}w) — pipeline, not a shop purchase.`,
           "info",
-        ),
-      });
+        );
+        set(st);
+      }
       return null;
     }
 
@@ -3622,7 +4213,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       researchPoints: state.researchPoints - item.cost,
       researchPipeline: pipe,
       activeResearch: {
-        id: uid("job"),
+        id: uid("job", state.campaignSeed, "tech", id, state.week),
         kind: "tech",
         targetId: id,
         name: item.name,
@@ -3657,23 +4248,25 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         : "";
     let next: GameState = {
       ...state,
-      cash: state.cash - packageCost,
       staff: [...state.staff, { ...candidate, energy: 100, training: null }],
       dirty: true,
-      notifications: pushNote(
-        state,
-        `Hired ${candidate.name} (Lv ${candidate.level}).${starNote}`,
-        candidate.level >= 5 ? "good" : "info",
-      ),
       researchPointsFrac: (state.researchPointsFrac ?? 0) + 0.4, // learn-by-doing: recruiting
     };
-    next.ledger = applyLedger(next.ledger, {
+    next = commitTxn(next, {
       week: next.week,
       amount: -packageCost,
       category: "payroll",
       label: `Signing: ${candidate.name}`,
       ref: `hire-${candidate.id}`,
     });
+    if (next.cash === state.cash && packageCost > 0) {
+      return "Signing fee already applied or blocked.";
+    }
+    next.notifications = pushNote(
+      next,
+      `Hired ${candidate.name} (Lv ${candidate.level}).${starNote}`,
+      candidate.level >= 5 ? "good" : "info",
+    );
     next = applyUnlockNotes(next);
     set(next);
     return null;
@@ -3689,23 +4282,52 @@ export const useGame = create<GameState & Actions>((set, get) => ({
   },
 
   refreshCandidates: () => {
-    const y = get().year;
-    const bias = 1 + Math.min(1.2, (y - 1979) * 0.015);
-    candidatesCache = Array.from({ length: 5 }, (_, i) =>
-      generateStaff(bias + Math.random() * 0.35, y, { forceStar: i === 0 && Math.random() < 0.2 }),
-    );
-    // Guarantee at least one above-average candidate
-    if (!candidatesCache.some((c) => c.level >= 3)) {
-      candidatesCache[0] = generateStaff(bias + 0.5, y, { forceStar: true });
+    const state = get();
+    if (isGaragePhaseOne(state) || state.office < 2) {
+      return state.hiringBoard ?? [];
     }
-    return candidatesCache;
+    const y = state.year;
+    const refresh = (state.hiringBoardRefresh ?? 0) + 1;
+    const bias = 1 + Math.min(1.2, (y - 1979) * 0.015);
+    const board = Array.from({ length: 5 }, (_, i) =>
+      generateStaff(
+        bias + (hashSeed(state.campaignSeed, "hire-bias", refresh, i) / 4294967296) * 0.35,
+        y,
+        {
+          forceStar: i === 0 && hashSeed(state.campaignSeed, "hire-star", refresh) / 4294967296 < 0.2,
+          seed: hashSeed(state.campaignSeed, "hire", refresh, i),
+          candidateIndex: i,
+        },
+      ),
+    );
+    // Guarantee at least one above-average candidate (still pure via seed)
+    if (!board.some((c) => c.level >= 3)) {
+      board[0] = generateStaff(bias + 0.5, y, {
+        forceStar: true,
+        seed: hashSeed(state.campaignSeed, "hire-star-force", refresh),
+        candidateIndex: 0,
+      });
+    }
+    set({ hiringBoard: board, hiringBoardRefresh: refresh, dirty: true });
+    return board;
   },
   getCandidates: () => {
-    if (!candidatesCache.length) {
-      const y = get().year;
-      candidatesCache = Array.from({ length: 5 }, () => generateStaff(1.1, y));
+    const state = get();
+    if (isGaragePhaseOne(state) || state.office < 2) {
+      return state.hiringBoard ?? [];
     }
-    return candidatesCache;
+    if (state.hiringBoard?.length) return state.hiringBoard;
+    // First view generates refresh 1 without mutating if empty path — generate & persist
+    const y = state.year;
+    const refresh = 1;
+    const board = Array.from({ length: 5 }, (_, i) =>
+      generateStaff(1.1, y, {
+        seed: hashSeed(state.campaignSeed, "hire", refresh, i),
+        candidateIndex: i,
+      }),
+    );
+    set({ hiringBoard: board, hiringBoardRefresh: refresh });
+    return board;
   },
 
   getTrainingCourses: () => TRAINING_COURSES,
@@ -3725,23 +4347,24 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     if (typeof result === "string") return result;
     let next: GameState = {
       ...state,
-      cash: state.cash - course.cashCost,
       researchPoints: state.researchPoints - course.rpCost,
       staff: state.staff.map((m) => (m.id === staffId ? result : m)),
       dirty: true,
-      notifications: pushNote(
-        state,
-        `${member.name} started ${course.name} (${course.weeks}w).`,
-        "info",
-      ),
     };
-    next.ledger = applyLedger(next.ledger, {
-      week: next.week,
-      amount: -course.cashCost,
-      category: "research",
-      label: `Training: ${course.name}`,
-      ref: `train-${staffId}-${courseId}-${next.week}`,
-    });
+    if (course.cashCost > 0) {
+      next = commitTxn(next, {
+        week: next.week,
+        amount: -course.cashCost,
+        category: "research",
+        label: `Training: ${course.name}`,
+        ref: `train-${staffId}-${courseId}-${next.week}`,
+      });
+    }
+    next.notifications = pushNote(
+      next,
+      `${member.name} started ${course.name} (${course.weeks}w).`,
+      "info",
+    );
     set(next);
     return null;
   },
@@ -3753,12 +4376,24 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     if (!plat) return "Unknown platform.";
     if (state.year < plat.year) return "Not released yet.";
     if (state.cash < plat.licenseCost) return `Need ${formatCash(plat.licenseCost)}.`;
-    set({
-      cash: state.cash - plat.licenseCost,
-      unlockedPlatforms: [...state.unlockedPlatforms, id],
-      dirty: true,
-      notifications: pushNote(state, `Licensed ${plat.name}.`, "good"),
-    });
+    {
+      let next: GameState = {
+        ...state,
+        unlockedPlatforms: [...state.unlockedPlatforms, id],
+        dirty: true,
+      };
+      if (plat.licenseCost > 0) {
+        next = commitTxn(next, {
+          week: state.week,
+          amount: -plat.licenseCost,
+          category: "other",
+          label: `License: ${plat.name}`,
+          ref: `plat-lic-${id}-w${state.week}`,
+        });
+      }
+      next.notifications = pushNote(next, `Licensed ${plat.name}.`, "good");
+      set(next);
+    }
     return null;
   },
 
@@ -3782,19 +4417,13 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     const stage = stageForOffice(check.next);
     let next: GameState = {
       ...state,
-      cash: state.cash - check.cost,
       office: check.next,
       officeEnteredYear: state.year,
       officeEnteredMonth: state.month,
       dirty: true,
-      notifications: pushNote(
-        state,
-        `Moved into ${stage.name}. Rent ${formatCash(stage.rent)}/mo · seats ${stage.staffMax} · sizes: ${stage.allowedSizes.join(", ")}.`,
-        "good",
-      ),
     };
     if (check.cost > 0) {
-      next.ledger = applyLedger(next.ledger, {
+      next = commitTxn(next, {
         week: next.week,
         amount: -check.cost,
         category: "other",
@@ -3802,6 +4431,11 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         ref: `office-${check.next}-y${state.year}`,
       });
     }
+    next.notifications = pushNote(
+      next,
+      `Moved into ${stage.name}. Rent ${formatCash(stage.rent)}/mo · seats ${stage.staffMax} · sizes: ${stage.allowedSizes.join(", ")}.`,
+      "good",
+    );
     // Unlock notes by level
     if (check.next === 2) {
       next.unlocks = { ...next.unlocks, hiring: "owned", training: "owned", publishing: "owned" };
@@ -3900,16 +4534,28 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       cash: state.cash,
     });
     if (!result.ok) return result.error;
-    set({
-      cash: state.cash - result.cost,
-      engineWorkshop: result.workshop,
-      dirty: true,
-      notifications: pushNote(
-        state,
+    {
+      let next: GameState = {
+        ...state,
+        engineWorkshop: result.workshop,
+        dirty: true,
+      };
+      if (result.cost > 0) {
+        next = commitTxn(next, {
+          week: state.week,
+          amount: -result.cost,
+          category: "research",
+          label: `Engine project: ${result.project.name}`,
+          ref: `eng-proj-${String(result.project.name)}-w${state.week}`,
+        });
+      }
+      next.notifications = pushNote(
+        next,
         `Engine project started: ${result.project.name} (~${result.project.weeksEstimate}w, ${formatCash(result.cost)}).`,
         "info",
-      ),
-    });
+      );
+      set(next);
+    }
     return null;
   },
 
@@ -3965,6 +4611,9 @@ export const useGame = create<GameState & Actions>((set, get) => ({
 
   acceptPublisherDeal: (id) => {
     const state = get();
+    if (isGaragePhaseOne(state) || !lateSystemAllowed(state, "publishers")) {
+      return "Publishing locked during Garage Phase One.";
+    }
     const unlocked =
       publishingUnlocked({
         gamesPublished: state.gamesPublished,
@@ -3980,8 +4629,17 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     if (!deal) return "Unknown deal.";
     if (state.week >= deal.expirationWeek) return "That offer expired.";
     // Upfront cash (covers development risk)
+    const txn = applyCashTransaction(state.cash, state.ledger, {
+      week: state.week,
+      amount: deal.upfrontPayment,
+      category: "publisher",
+      label: `Publisher advance: ${deal.publisherName}`,
+      ref: `pub-advance-${deal.id}`,
+    });
+    if (!txn.applied) return "Advance already recorded.";
     set({
-      cash: state.cash + deal.upfrontPayment,
+      cash: txn.cash,
+      ledger: txn.ledger,
       activePublisherDealId: deal.id,
       dirty: true,
       notifications: pushNote(
@@ -3989,19 +4647,15 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         `${deal.publisherName} signed: +${formatCash(deal.upfrontPayment)} advance. Hit ${deal.minimumReviewScore}+ reviews.`,
         "good",
       ),
-      ledger: applyLedger(state.ledger, {
-        week: state.week,
-        amount: deal.upfrontPayment,
-        category: "other",
-        label: `Publisher advance: ${deal.publisherName}`,
-        ref: `pub-advance-${deal.id}`,
-      }),
     });
     return null;
   },
 
   refreshPublisherBoard: () => {
     const state = get();
+    if (isGaragePhaseOne(state) || !lateSystemAllowed(state, "publishers")) {
+      return "Publishing locked during Garage Phase One.";
+    }
     const board = state.publishingBoard ?? generatePublishingBoard({
       campaignSeed: state.campaignSeed,
       week: state.week,
@@ -4016,22 +4670,24 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       cash: state.cash,
     });
     if (res.error) return res.error;
-    set({ publishingBoard: res.board, cash: res.cash, dirty: true });
+    const fee = state.cash - res.cash;
+    let next: GameState = { ...state, publishingBoard: res.board, dirty: true };
+    if (fee > 0) {
+      const txn = commitTxnResult(next, {
+        week: state.week,
+        amount: -fee,
+        category: "publisher",
+        label: "Publisher board refresh",
+        ref: `pub-refresh-w${state.week}-s${board.seasonStartWeek}`,
+      });
+      if (!txn.applied) return "Refresh fee already applied this season.";
+      next = txn.state;
+    }
+    set(next);
     return null;
   },
 
-  clearPublisherDeal: () => set({ activePublisherDealId: null,
-    unlockedDrm: ["None"],
-    postMortems: [],
-    genreExp: { action: 0, adventure: 0, rpg: 0, simulation: 0, strategy: 0, casual: 0 },
-    gameHistoryLedger: [],
-    hardwareProducts: [],
-    knownCombos: {},
-    playerConsoles: [],
-    lastAwardsYear: 0,
-    lastRivalReleaseWeek: 0,
-    rivalRotateIndex: 0,
-    rivalGenrePressure: {}, dirty: true }),
+  clearPublisherDeal: () => set({ activePublisherDealId: null, dirty: true }),
 
   takeContract: (id) => {
     const state = get();
@@ -4152,28 +4808,30 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         },
       };
     }
-    set({
-      cash: state.cash - fee,
-      currentProject: nextP,
-      dirty: true,
-      notifications: pushNote(
-        state,
+    {
+      let next: GameState = {
+        ...state,
+        currentProject: nextP,
+        dirty: true,
+      };
+      if (fee > 0) {
+        next = commitTxn(next, {
+          week: state.week,
+          amount: -fee,
+          category: "other",
+          label: "Multi-platform kits",
+          ref: `mp-kit-${p.id}`,
+        });
+      }
+      next.notifications = pushNote(
+        next,
         uniq.length
           ? `Multi-platform: ${uniq.join(", ")} (+${weeksExtra}w${fee ? `, −${formatCash(fee)}` : ""}).`
           : "Secondary platforms cleared.",
         "info",
-      ),
-      ledger:
-        fee > 0
-          ? applyLedger(state.ledger, {
-              week: state.week,
-              amount: -fee,
-              category: "other",
-              label: "Multi-platform kits",
-              ref: `mp-kit-${p.id}`,
-            })
-          : state.ledger,
-    });
+      );
+      set(next);
+    }
     return null;
   },
 
@@ -4216,16 +4874,15 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     }
     // Instant resolve after "2 weeks" abstracted as immediate for UX; cost is time opportunity - charge small cash
     const units = dlcUnitsSold(g.sales, g.avgReview);
-    const revenue = units * DLC.price * 0.85;
-    set({
-      cash: state.cash + revenue,
+    const revenue = moneyRound(units * DLC.price * 0.85);
+    let next: GameState = {
+      ...state,
       releasedGames: state.releasedGames.map((x) =>
         x.id === gameId
           ? {
               ...x,
               hasDlc: true,
               dlcRevenue: (x.dlcRevenue ?? 0) + revenue,
-              // shelf life extension: add 4 weeks residual if empty
               weeklySalesLeft: [
                 ...(x.weeklySalesLeft ?? []),
                 ...Array.from({ length: 4 }, () => Math.max(10, Math.floor(units / 8))),
@@ -4235,41 +4892,25 @@ export const useGame = create<GameState & Actions>((set, get) => ({
             }
           : x,
       ),
-      activeSales: (() => {
-        const updated = state.releasedGames
-          .map((x) =>
-            x.id === gameId
-              ? {
-                  ...x,
-                  hasDlc: true,
-                  dlcRevenue: (x.dlcRevenue ?? 0) + revenue,
-                  weeklySalesLeft: [
-                    ...(x.weeklySalesLeft ?? []),
-                    ...Array.from({ length: 4 }, () => Math.max(10, Math.floor(units / 8))),
-                  ],
-                  onSale: true,
-                  dormant: false,
-                }
-              : x,
-          )
-          .filter((x) => x.onSale && !x.dormant);
-        return updated;
-      })(),
       dirty: true,
-      notifications: pushNote(
-        state,
-        `DLC for "${g.title}": ${units.toLocaleString()} packs · +${formatCash(revenue)}.`,
-        "good",
-      ),
-      ledger: applyLedger(state.ledger, {
+    };
+    next.activeSales = next.releasedGames.filter((x) => x.onSale && !x.dormant);
+    if (revenue !== 0) {
+      next = commitTxn(next, {
         week: state.week,
         amount: revenue,
         category: "sales",
         label: `DLC: ${g.title}`,
         gameId,
         ref: `dlc-${gameId}`,
-      }),
-    });
+      });
+    }
+    next.notifications = pushNote(
+      next,
+      `DLC for "${g.title}": ${units.toLocaleString()} packs · +${formatCash(revenue)}.`,
+      "good",
+    );
+    set(next);
     return null;
   },
 
@@ -4292,28 +4933,31 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     });
     // Register as platform for first-party shipping
     const platId = started.console.id;
-    set({
-      cash: state.cash - started.cost,
-      researchPoints: state.researchPoints - started.rp,
-      playerConsoles: [...(state.playerConsoles ?? []), started.console],
-      unlockedPlatforms: state.unlockedPlatforms.includes(platId)
-        ? state.unlockedPlatforms
-        : [...state.unlockedPlatforms, platId],
-      flags: { ...state.flags, hardwareLab: true },
-      dirty: true,
-      notifications: pushNote(
-        state,
-        `Hardware program: ${started.console.name} (${started.console.weeksLeft}w, −${formatCash(started.cost)}).`,
-        "info",
-      ),
-      ledger: applyLedger(state.ledger, {
+    {
+      let next: GameState = {
+        ...state,
+        researchPoints: state.researchPoints - started.rp,
+        playerConsoles: [...(state.playerConsoles ?? []), started.console],
+        unlockedPlatforms: state.unlockedPlatforms.includes(platId)
+          ? state.unlockedPlatforms
+          : [...state.unlockedPlatforms, platId],
+        flags: { ...state.flags, hardwareLab: true },
+        dirty: true,
+      };
+      next = commitTxn(next, {
         week: state.week,
         amount: -started.cost,
         category: "other",
         label: `Console R&D: ${started.console.name}`,
         ref: `console-${platId}`,
-      }),
-    });
+      });
+      next.notifications = pushNote(
+        next,
+        `Hardware program: ${started.console.name} (${started.console.weeksLeft}w, −${formatCash(started.cost)}).`,
+        "info",
+      );
+      set(next);
+    }
     return null;
   },
 
@@ -4337,6 +4981,9 @@ export const useGame = create<GameState & Actions>((set, get) => ({
 
   toggleIllicitAssets: () => {
     const state = get();
+    if (isGaragePhaseOne(state) || !lateSystemAllowed(state, "ipLitigation")) {
+      return "Illicit assets locked during Garage Phase One.";
+    }
     const p = state.currentProject;
     if (!p) return "No active project.";
     const on = !p.usedIllicitAssets;
@@ -4409,29 +5056,31 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     if (!eng) return "No engine.";
     if (state.cash < ENGINE_REFACTOR.cash) return `Need ${formatCash(ENGINE_REFACTOR.cash)}.`;
     if (state.researchPoints < ENGINE_REFACTOR.rp) return `Need ${ENGINE_REFACTOR.rp} RP.`;
-    set({
-      cash: state.cash - ENGINE_REFACTOR.cash,
-      researchPoints: state.researchPoints - ENGINE_REFACTOR.rp,
-      week: state.week, // week cost applied by caller advance optional
-      engines: state.engines.map((e) =>
-        e.id === eng.id
-          ? { ...e, gamesShippedCount: 0, chronologicalAgeYears: 0 }
-          : e,
-      ),
-      dirty: true,
-      notifications: pushNote(
-        state,
-        `Refactored "${eng.name}" — tech debt cleared (−${formatCash(ENGINE_REFACTOR.cash)}, −${ENGINE_REFACTOR.rp} RP).`,
-        "good",
-      ),
-      ledger: applyLedger(state.ledger, {
+    {
+      let next: GameState = {
+        ...state,
+        researchPoints: state.researchPoints - ENGINE_REFACTOR.rp,
+        engines: state.engines.map((e) =>
+          e.id === eng.id
+            ? { ...e, gamesShippedCount: 0, chronologicalAgeYears: 0 }
+            : e,
+        ),
+        dirty: true,
+      };
+      next = commitTxn(next, {
         week: state.week,
         amount: -ENGINE_REFACTOR.cash,
         category: "research",
         label: "Engine refactor",
         ref: `refactor-${eng.id}-${state.week}`,
-      }),
-    });
+      });
+      next.notifications = pushNote(
+        next,
+        `Refactored "${eng.name}" — tech debt cleared (−${formatCash(ENGINE_REFACTOR.cash)}, −${ENGINE_REFACTOR.rp} RP).`,
+        "good",
+      );
+      set(next);
+    }
     return null;
   },
 
@@ -4454,12 +5103,24 @@ export const useGame = create<GameState & Actions>((set, get) => ({
 
   signOpsPublisher: (publisherId: string) => {
     const state = get();
+    if (isGaragePhaseOne(state) || !lateSystemAllowed(state, "publishers")) {
+      return "Publishing locked during Garage Phase One.";
+    }
     const offer = PUBLISHER_MATRIX.find((p) => p.id === publisherId);
     if (!offer) return "Unknown publisher.";
     if (state.fans < offer.minFans) return `Need ${offer.minFans.toLocaleString()} fans.`;
     if (state.activePublisherDealId) return "Already bound to a publisher deal.";
+    const txn = applyCashTransaction(state.cash, state.ledger, {
+      week: state.week,
+      amount: offer.advancePay,
+      category: "publisher",
+      label: `Publisher advance: ${offer.company}`,
+      ref: `ops-pub-${offer.id}`,
+    });
+    if (!txn.applied) return "Advance already recorded.";
     set({
-      cash: state.cash + offer.advancePay,
+      cash: txn.cash,
+      ledger: txn.ledger,
       activePublisherDealId: offer.id,
       dirty: true,
       notifications: pushNote(
@@ -4467,13 +5128,6 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         `${offer.company} advance +${formatCash(offer.advancePay)}. Hit ${offer.reqScore}+ or pay 60% breach fine.`,
         "good",
       ),
-      ledger: applyLedger(state.ledger, {
-        week: state.week,
-        amount: offer.advancePay,
-        category: "other",
-        label: `Publisher advance: ${offer.company}`,
-        ref: `ops-pub-${offer.id}`,
-      }),
     });
     return null;
   },
@@ -4483,24 +5137,27 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     if (state.office !== 2) return "High-Density Bay is a Tech Park (Level 2) renovation.";
     if (isHighDensity(state.officeSubTier)) return "Already renovated to High-Density Bay.";
     if (state.cash < HIGH_DENSITY.cashCost) return `Need ${formatCash(HIGH_DENSITY.cashCost)}.`;
-    set({
-      cash: state.cash - HIGH_DENSITY.cashCost,
-      officeSubTier: 2.5,
-      dirty: true,
-      notifications: pushNote(
-        state,
-        `High-Density Bay online — seats ${HIGH_DENSITY.staffMax}, rent ${formatCash(HIGH_DENSITY.rent)}/mo, workbench unlocked.`,
-        "good",
-      ),
-      ledger: applyLedger(state.ledger, {
+    {
+      let next: GameState = {
+        ...state,
+        officeSubTier: 2.5,
+        dirty: true,
+        unlocks: { ...state.unlocks, hiring: "owned" },
+      };
+      next = commitTxn(next, {
         week: state.week,
         amount: -HIGH_DENSITY.cashCost,
         category: "other",
         label: "High-Density Bay renovation",
         ref: `hd-reno-w${state.week}`,
-      }),
-      unlocks: { ...state.unlocks, hiring: "owned" },
-    });
+      });
+      next.notifications = pushNote(
+        next,
+        `High-Density Bay online — seats ${HIGH_DENSITY.staffMax}, rent ${formatCash(HIGH_DENSITY.rent)}/mo, workbench unlocked.`,
+        "good",
+      );
+      set(next);
+    }
     return null;
   },
 
@@ -4528,22 +5185,25 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       return "No patent scare pending.";
     }
     if (state.cash < 45000) return "Need $45,000 for settlement.";
-    set({
-      cash: state.cash - 45000,
-      currentProject: {
-        ...p,
-        pendingCopyCrisis: false,
-      } as typeof p,
-      dirty: true,
-      notifications: pushNote(state, "Paid $45k patent settlement — score safe.", "info"),
-      ledger: applyLedger(state.ledger, {
+    {
+      let next: GameState = {
+        ...state,
+        currentProject: {
+          ...p,
+          pendingCopyCrisis: false,
+        } as typeof p,
+        dirty: true,
+      };
+      next = commitTxn(next, {
         week: state.week,
         amount: -45000,
         category: "other",
         label: "Patent settlement",
         ref: `copy-settle-w${state.week}`,
-      }),
-    });
+      });
+      next.notifications = pushNote(next, "Paid $45k patent settlement — score safe.", "info");
+      set(next);
+    }
     return null;
   },
 
@@ -4571,6 +5231,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
 
   launchDigitalStorefront: (name) => {
     const state = get();
+    if (!lateSystemAllowed(state, "digitalStorefront")) return "Locked until after Garage Phase One.";
     const store = state.digitalStorefront ?? emptyStorefront();
     const check = canLaunchStorefront({
       office: state.office,
@@ -4579,33 +5240,39 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     });
     if (!check.ok) return check.error;
     const storeName = (name?.trim() || NEON_STORE.name).slice(0, 32);
-    set({
-      cash: state.cash - NEON_STORE.launchCost,
-      digitalStorefront: {
-        ...store,
-        active: true,
-        name: storeName,
-        launchedWeek: state.week,
-      },
-      dirty: true,
-      notifications: pushNote(
-        state,
-        `${storeName} live — 0% cut on your titles, 30% on rival digital sales. −${formatCash(NEON_STORE.launchCost)}.`,
-        "good",
-      ),
-      ledger: applyLedger(state.ledger, {
+    {
+      let next: GameState = {
+        ...state,
+        digitalStorefront: {
+          ...store,
+          active: true,
+          name: storeName,
+          launchedWeek: state.week,
+        },
+        dirty: true,
+      };
+      next = commitTxn(next, {
         week: state.week,
         amount: -NEON_STORE.launchCost,
         category: "other",
         label: `${storeName} platform launch`,
         ref: `neonstore-w${state.week}`,
-      }),
-    });
+      });
+      next.notifications = pushNote(
+        next,
+        `${storeName} live — 0% cut on your titles, 30% on rival digital sales. −${formatCash(NEON_STORE.launchCost)}.`,
+        "good",
+      );
+      set(next);
+    }
     return null;
   },
 
   installContentPack: (packId) => {
     const state = get();
+    if (isGaragePhaseOne(state)) {
+      return "Content packs locked during Garage Phase One.";
+    }
     const pack = BUILTIN_PACKS.find((p) => p.id === packId);
     if (!pack) return "Unknown content pack.";
     const res = installPack(pack, state.installedPacks ?? []);
@@ -4614,82 +5281,102 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     for (const t of pack.topics ?? []) topics.add(t);
     const genres = new Set(state.unlockedGenres as string[]);
     for (const g of pack.genres ?? []) genres.add(g);
-    set({
-      cash: state.cash + res.grantCash,
-      researchPoints: state.researchPoints + res.grantRp,
-      unlockedTopics: [...topics],
-      unlockedGenres: [...genres] as typeof state.unlockedGenres,
-      installedPacks: [...(state.installedPacks ?? []), pack.id],
-      dirty: true,
-      notifications: pushNote(state, `Installed pack: ${pack.name} v${pack.version}.`, "good"),
-    });
+    {
+      let next: GameState = {
+        ...state,
+        researchPoints: state.researchPoints + res.grantRp,
+        unlockedTopics: [...topics],
+        unlockedGenres: [...genres] as typeof state.unlockedGenres,
+        installedPacks: [...(state.installedPacks ?? []), pack.id],
+        dirty: true,
+      };
+      if (res.grantCash) {
+        next = commitTxn(next, {
+          week: state.week,
+          amount: res.grantCash,
+          category: "other",
+          label: `Content pack: ${pack.name}`,
+          ref: `pack-${pack.id}`,
+        });
+      }
+      next.notifications = pushNote(next, `Installed pack: ${pack.name} v${pack.version}.`, "good");
+      set(next);
+    }
     return null;
   },
 
   licenseFranchise: (licenseId) => {
     const state = get();
+    if (!lateSystemAllowed(state, "netflixEdition")) return "Locked until after Garage Phase One.";
     const res = purchaseLicense(licenseId, state.cash);
     if (!res.ok) return res.error;
-    set({
-      cash: state.cash - res.cost,
-      activeIpLicense: res.state,
-      dirty: true,
-      notifications: pushNote(
-        state,
+    {
+      let next: GameState = {
+        ...state,
+        activeIpLicense: res.state,
+        dirty: true,
+      };
+      if (res.cost > 0) {
+        next = commitTxn(next, {
+          week: state.week,
+          amount: -res.cost,
+          category: "marketing",
+          label: `IP license: ${res.state.name}`,
+          ref: `ip-${res.state.licenseId}-w${state.week}`,
+        });
+      }
+      next.notifications = pushNote(
+        next,
         res.state.licenseId === "clear"
           ? "Franchise license cleared — no royalty obligations."
           : `IP rights locked: ${res.state.name} (−${formatCash(res.cost)}). Match theme for 1.4× hype & +1.5 score; 15% royalty.`,
         res.state.licenseId === "clear" ? "info" : "good",
-      ),
-      ledger:
-        res.cost > 0
-          ? applyLedger(state.ledger, {
-              week: state.week,
-              amount: -res.cost,
-              category: "marketing",
-              label: `IP license: ${res.state.name}`,
-              ref: `ip-${res.state.licenseId}-w${state.week}`,
-            })
-          : state.ledger,
-    });
+      );
+      set(next);
+    }
     return null;
   },
 
   runStreamerCampaign: (tierId) => {
     const state = get();
+    if (!lateSystemAllowed(state, "streamerMarketing")) return "Locked until after Garage Phase One.";
     const tier = STREAMER_TIERS.find((t) => t.id === tierId);
     if (!tier) return "Unknown streamer tier.";
     if (state.cash < tier.cost) return `Need ${formatCash(tier.cost)}.`;
-    const rng = () => Math.random();
+    const rng = () => hashSeed(state.campaignSeed, "streamer", tierId, state.week) / 4294967296;
     const gain = streamerHypeGain(tier, state.fans, rng);
-    set({
-      cash: state.cash - tier.cost,
-      hype: state.hype + gain,
-      streamerHypeWeeksLeft: Math.max(state.streamerHypeWeeksLeft ?? 0, tier.id === "mega" ? 6 : 4),
-      dirty: true,
-      notifications: pushNote(
-        state,
-        `${tier.name}: +${gain} hype (fan-scaled). Fast decay window open.`,
-        "good",
-      ),
-      ledger: applyLedger(state.ledger, {
+    {
+      let next: GameState = {
+        ...state,
+        hype: state.hype + gain,
+        streamerHypeWeeksLeft: Math.max(state.streamerHypeWeeksLeft ?? 0, tier.id === "mega" ? 6 : 4),
+        dirty: true,
+      };
+      next = commitTxn(next, {
         week: state.week,
         amount: -tier.cost,
         category: "marketing",
         label: tier.name,
         ref: `stream-${tier.id}-w${state.week}`,
-      }),
-    });
+      });
+      next.notifications = pushNote(
+        next,
+        `${tier.name}: +${gain} hype (fan-scaled). Fast decay window open.`,
+        "good",
+      );
+      set(next);
+    }
     return null;
   },
 
   hostStudioConvention: (ticketPrice, focus) => {
     const state = get();
+    if (!lateSystemAllowed(state, "studioConventions")) return "Locked until after Garage Phase One.";
     if (!canHostConvention({ office: state.office, fans: state.fans })) {
       return "Need Level 3 office or 100,000 fans to host a studio convention.";
     }
     if (!Number.isFinite(ticketPrice) || ticketPrice < 5) return "Ticket price must be ≥ $5.";
-    const rng = () => Math.random();
+    const rng = () => hashSeed(state.campaignSeed, "convention", focus, state.week) / 4294967296;
     const out = conventionOutcome({
       ticketPrice,
       focus,
@@ -4698,34 +5385,35 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       rng,
     });
     if (state.cash < out.cost) return `Need ${formatCash(out.cost)} to host.`;
-    const net = out.ticketRevenue - out.cost;
-    set({
-      cash: state.cash + net,
-      fans: state.fans + out.fansGained,
-      hype: state.hype + out.hypeGained,
-      dirty: true,
-      notifications: pushNote(
-        state,
+        const net = out.ticketRevenue - out.cost;
+    {
+      let next: GameState = {
+        ...state,
+        fans: state.fans + out.fansGained,
+        hype: state.hype + out.hypeGained,
+        dirty: true,
+      };
+      next = commitTxn(next, {
+        week: state.week,
+        amount: -out.cost,
+        category: "marketing",
+        label: "Studio convention ops",
+        ref: `con-cost-w${state.week}`,
+      });
+      next = commitTxn(next, {
+        week: state.week,
+        amount: out.ticketRevenue,
+        category: "sales",
+        label: "Convention tickets",
+        ref: `con-tix-w${state.week}`,
+      });
+      next.notifications = pushNote(
+        next,
         `Studio Con: ${out.attendance.toLocaleString()} guests · net ${formatCash(net)} · +${out.fansGained.toLocaleString()} fans · +${out.hypeGained} hype.`,
         "good",
-      ),
-      ledger: applyLedger(
-        applyLedger(state.ledger, {
-          week: state.week,
-          amount: -out.cost,
-          category: "marketing",
-          label: "Studio convention ops",
-          ref: `con-cost-w${state.week}`,
-        }),
-        {
-          week: state.week,
-          amount: out.ticketRevenue,
-          category: "sales",
-          label: "Convention tickets",
-          ref: `con-tix-w${state.week}`,
-        },
-      ),
-    });
+      );
+      set(next);
+    }
     return null;
   },
 
@@ -4741,96 +5429,136 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     if (state.cash < cat.setupCost) return `Need ${formatCash(cat.setupCost)}.`;
     if (state.researchPoints < cat.rpCost) return `Need ${cat.rpCost} RP.`;
     const product = createWorkbenchProduct({
-      id: uid("hwb"),
+      id: uid("hwb", state.campaignSeed, state.week, name, categoryId),
       name,
       categoryId: categoryId as BenchCategoryId,
       retailPrice,
       fans: state.fans,
     });
-    set({
-      cash: state.cash - cat.setupCost,
-      researchPoints: state.researchPoints - cat.rpCost,
-      hardwareProducts: [product, ...(state.hardwareProducts ?? [])],
-      dirty: true,
-      notifications: pushNote(
-        state,
-        `Workbench fab: "${product.name}" — ${HIGH_DENSITY.fabWeeks}w hand assembly · +${formatCash(HIGH_DENSITY.clutterTaxPerLine)}/mo clutter.`,
-        "info",
-      ),
-      ledger: applyLedger(state.ledger, {
+    {
+      let next: GameState = {
+        ...state,
+        researchPoints: state.researchPoints - cat.rpCost,
+        hardwareProducts: [product, ...(state.hardwareProducts ?? [])],
+        dirty: true,
+      };
+      next = commitTxn(next, {
         week: state.week,
         amount: -cat.setupCost,
         category: "research",
         label: `Workbench setup: ${cat.label}`,
         ref: `bench-${product.id}`,
-      }),
-    });
+      });
+      next.notifications = pushNote(
+        next,
+        `Workbench fab: "${product.name}" — ${HIGH_DENSITY.fabWeeks}w hand assembly · +${formatCash(HIGH_DENSITY.clutterTaxPerLine)}/mo clutter.`,
+        "info",
+      );
+      set(next);
+    }
     return null;
   },
 
   runRecruitCampaign: (tier) => {
     const state = get();
+    if (isGaragePhaseOne(state) || state.office < 2) {
+      return "Recruitment locked during Garage Phase One.";
+    }
     const cfg = tier === "headhunter" ? RECRUIT.headhunter : RECRUIT.local;
     if (tier === "headhunter" && state.office === 2 && !isHighDensity(state.officeSubTier)) {
       return "Headhunter requires High-Density Bay (L2.5).";
     }
     if (tier === "headhunter" && state.office < 2) return "Headhunter needs Tech Park+.";
     if (state.cash < cfg.cost) return `Need ${formatCash(cfg.cost)}.`;
-    const refresh = get().refreshCandidates;
-    if (typeof refresh === "function") refresh();
-    set({
-      cash: get().cash - cfg.cost,
-      dirty: true,
-      notifications: pushNote(
-        get(),
-        `${cfg.label} campaign (−${formatCash(cfg.cost)}). Check People for applicants.`,
-        "info",
-      ),
-      ledger: applyLedger(get().ledger, {
-        week: get().week,
-        amount: -cfg.cost,
-        category: "other",
-        label: cfg.label,
-        ref: `recruit-${tier}-w${get().week}`,
-      }),
+    const draft: GameState = { ...state, dirty: true };
+    const txn = commitTxnResult(draft, {
+      week: state.week,
+      amount: -cfg.cost,
+      category: "other",
+      label: cfg.label,
+      ref: `recruit-${tier}-w${state.week}`,
     });
+    if (!txn.applied) {
+      // Duplicate fee ref: change absolutely no state (board, cash, notes).
+      return "Recruitment already charged this week.";
+    }
+    // Refresh board only after successful fee — pure draft, single set
+    const y = txn.state.year;
+    const refresh = (txn.state.hiringBoardRefresh ?? 0) + 1;
+    const bias = 1 + Math.min(1.2, (y - 1979) * 0.015);
+    const board = Array.from({ length: 5 }, (_, i) =>
+      generateStaff(
+        bias + (hashSeed(txn.state.campaignSeed, "hire-bias", refresh, i) / 4294967296) * 0.35,
+        y,
+        {
+          forceStar: i === 0 && hashSeed(txn.state.campaignSeed, "hire-star", refresh) / 4294967296 < 0.2,
+          seed: hashSeed(txn.state.campaignSeed, "hire", refresh, i),
+          candidateIndex: i,
+        },
+      ),
+    );
+    if (!board.some((c) => c.level >= 3)) {
+      board[0] = generateStaff(bias + 0.5, y, {
+        forceStar: true,
+        seed: hashSeed(txn.state.campaignSeed, "hire-star-force", refresh),
+        candidateIndex: 0,
+      });
+    }
+    const next: GameState = {
+      ...txn.state,
+      hiringBoard: board,
+      hiringBoardRefresh: refresh,
+      dirty: true,
+    };
+    next.notifications = pushNote(
+      next,
+      `${cfg.label} campaign (−${formatCash(cfg.cost)}). Check People for applicants.`,
+      "info",
+    );
+    set(next);
     return null;
   },
 
   launchAccessory: (categoryId, name, retailPrice) => {
     const state = get();
+    if (!lateSystemAllowed(state, "hardwareMerch")) {
+      return "Hardware accessories locked during Garage Phase One.";
+    }
     if (!(categoryId in ACCESSORY_CATEGORIES)) return "Unknown accessory category.";
     if (!Number.isFinite(retailPrice) || retailPrice <= 0) return "Retail price must be > 0.";
     const err = setupCostCheck(categoryId, state.cash, state.researchPoints);
     if (err) return err;
     const cat = ACCESSORY_CATEGORIES[categoryId];
     const product = createHardwareProduct({
-      id: uid("hw"),
+      id: uid("hw", state.campaignSeed, state.week, name, categoryId),
       name,
       categoryId,
       retailPrice,
       fans: state.fans,
     });
-    set({
-      cash: state.cash - cat.setupCost,
-      researchPoints: state.researchPoints - cat.rpCost,
-      hardwareProducts: [product, ...(state.hardwareProducts ?? [])],
-      dirty: true,
-      notifications: pushNote(
-        state,
-        product.lossLeader
-          ? `Factory: "${product.name}" loss-leader shipping 16w. −${formatCash(cat.setupCost)}.`
-          : `Factory: "${product.name}" shipping 16w. −${formatCash(cat.setupCost)}.`,
-        product.lossLeader ? "warn" : "good",
-      ),
-      ledger: applyLedger(state.ledger, {
+    {
+      let next: GameState = {
+        ...state,
+        researchPoints: state.researchPoints - cat.rpCost,
+        hardwareProducts: [product, ...(state.hardwareProducts ?? [])],
+        dirty: true,
+      };
+      next = commitTxn(next, {
         week: state.week,
         amount: -cat.setupCost,
         category: "research",
         label: `Accessory setup: ${cat.label}`,
         ref: `hw-setup-${product.id}`,
-      }),
-    });
+      });
+      next.notifications = pushNote(
+        next,
+        product.lossLeader
+          ? `Factory: "${product.name}" loss-leader shipping 16w. −${formatCash(cat.setupCost)}.`
+          : `Factory: "${product.name}" shipping 16w. −${formatCash(cat.setupCost)}.`,
+        product.lossLeader ? "warn" : "good",
+      );
+      set(next);
+    }
     return null;
   },
 
@@ -4841,33 +5569,36 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     if (eng.tEngineFramework) return "T-Engine already attached.";
     if (state.cash < T_ENGINE.cashCost) return `Need ${formatCash(T_ENGINE.cashCost)}.`;
     if (state.researchPoints < T_ENGINE.rpCost) return `Need ${T_ENGINE.rpCost} RP.`;
-    set({
-      cash: state.cash - T_ENGINE.cashCost,
-      researchPoints: state.researchPoints - T_ENGINE.rpCost,
-      engines: state.engines.map((e) =>
-        e.id === engineId
-          ? {
-              ...e,
-              tEngineFramework: true,
-              name: e.name.includes("T-Engine") ? e.name : `${e.name} · T-Engine`,
-              techBonus: e.techBonus + 5,
-            }
-          : e,
-      ),
-      dirty: true,
-      notifications: pushNote(
-        state,
-        `T-Engine Modular Framework on "${eng.name}" (−${formatCash(T_ENGINE.cashCost)}, −${T_ENGINE.rpCost} RP).`,
-        "good",
-      ),
-      ledger: applyLedger(state.ledger, {
+    {
+      let next: GameState = {
+        ...state,
+        researchPoints: state.researchPoints - T_ENGINE.rpCost,
+        engines: state.engines.map((e) =>
+          e.id === engineId
+            ? {
+                ...e,
+                tEngineFramework: true,
+                name: e.name.includes("T-Engine") ? e.name : `${e.name} · T-Engine`,
+                techBonus: e.techBonus + 5,
+              }
+            : e,
+        ),
+        dirty: true,
+      };
+      next = commitTxn(next, {
         week: state.week,
         amount: -T_ENGINE.cashCost,
         category: "research",
         label: "T-Engine Modular Framework",
         ref: `tengine-${engineId}`,
-      }),
-    });
+      });
+      next.notifications = pushNote(
+        next,
+        `T-Engine Modular Framework on "${eng.name}" (−${formatCash(T_ENGINE.cashCost)}, −${T_ENGINE.rpCost} RP).`,
+        "good",
+      );
+      set(next);
+    }
     return null;
   },
 
@@ -4914,28 +5645,31 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       mediaDrive: media,
       gpuPart: gpu,
     };
-    set({
-      cash: state.cash - rd.cash,
-      researchPoints: state.researchPoints - rd.rp,
-      playerConsoles: [...(state.playerConsoles ?? []), console],
-      unlockedPlatforms: state.unlockedPlatforms.includes(id)
-        ? state.unlockedPlatforms
-        : [...state.unlockedPlatforms, id],
-      flags: { ...state.flags, hardwareLab: true },
-      dirty: true,
-      notifications: pushNote(
-        state,
-        `Console R&D: ${console.name} · unit cost $${mfg.toFixed(2)} · ${console.weeksLeft}w · −${formatCash(rd.cash)}.`,
-        "info",
-      ),
-      ledger: applyLedger(state.ledger, {
+    {
+      let next: GameState = {
+        ...state,
+        researchPoints: state.researchPoints - rd.rp,
+        playerConsoles: [...(state.playerConsoles ?? []), console],
+        unlockedPlatforms: state.unlockedPlatforms.includes(id)
+          ? state.unlockedPlatforms
+          : [...state.unlockedPlatforms, id],
+        flags: { ...state.flags, hardwareLab: true },
+        dirty: true,
+      };
+      next = commitTxn(next, {
         week: state.week,
         amount: -rd.cash,
         category: "other",
         label: `Console components: ${console.name}`,
         ref: `cfg-${id}`,
-      }),
-    });
+      });
+      next.notifications = pushNote(
+        next,
+        `Console R&D: ${console.name} · unit cost $${mfg.toFixed(2)} · ${console.weeksLeft}w · −${formatCash(rd.cash)}.`,
+        "info",
+      );
+      set(next);
+    }
     return null;
   },
 
@@ -4988,6 +5722,37 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     );
   },
 
+  resolveMarketingChoice: (opportunityId, choiceId) => {
+    const state = get();
+    const mkt0 = state.marketingOpportunities ?? emptyMarketingOpportunityState();
+    const res = resolveMarketingOpportunity(mkt0, opportunityId, choiceId);
+    if ("error" in res) return res.error;
+    if (state.cash < res.choice.cost) return `Need $${res.choice.cost.toLocaleString()}.`;
+    const txn = applyCashTransaction(state.cash, state.ledger, {
+      week: state.week,
+      amount: -res.choice.cost,
+      category: "marketing",
+      label: res.choice.label,
+      ref: `mkt-opp-${opportunityId}-${choiceId}`,
+    });
+    if (!txn.applied) return "Already resolved.";
+    set({
+      cash: txn.cash,
+      ledger: txn.ledger,
+      hype: Math.min(150, state.hype + res.choice.hypeGain),
+      marketingOpportunities: res.state,
+      pendingEvent: null,
+      modal: null,
+      dirty: true,
+      notifications: pushNote(
+        state,
+        `${res.choice.label}: +${res.choice.hypeGain} hype, +${res.choice.marketingPoints} marketing points.`,
+        "good",
+      ),
+    });
+    return null;
+  },
+
   runStudioMarketing: (campaignId) => {
     const state = get();
     const unlocked =
@@ -4998,6 +5763,15 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       state.currentProject != null;
     if (!unlocked) {
       return "Marketing opens after you start or ship a game (or research Marketing 101).";
+    }
+    const cap = canPurchaseMarketing(state);
+    if (cap) return cap;
+    // Streamer / convention-style advanced spam blocked in Garage
+    if (
+      isGaragePhaseOne(state) &&
+      (campaignId === "g3_booth" || campaignId === "influencer_blitz")
+    ) {
+      return "Advanced marketing locked during Garage Phase One.";
     }
     const seed = hashSeed(state.campaignSeed, "studio-mkt", campaignId, state.week);
     const pack = studioCampaignHype(campaignId, seed);
@@ -5013,9 +5787,18 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       return "Advanced campaigns need more studio presence.";
     }
     if (state.cash < pack.cost) return `Need ${pack.cost.toLocaleString()} cash.`;
-    let next: GameState = {
+    const txn = applyCashTransaction(state.cash, state.ledger, {
+      week: state.week,
+      amount: -pack.cost,
+      category: "marketing",
+      label: pack.name,
+      ref: `studio-mkt-${campaignId}-w${state.week}-${countMarketingInYear(state, marketingYearIndex(state.week))}`,
+    });
+    if (!txn.applied) return "Marketing purchase already recorded this week.";
+    const next: GameState = {
       ...state,
-      cash: state.cash - pack.cost,
+      cash: txn.cash,
+      ledger: txn.ledger,
       hype: Math.min(150, state.hype + pack.hypeGain),
       dirty: true,
       notifications: pushNote(
@@ -5024,13 +5807,6 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         "good",
       ),
     };
-    next.ledger = applyLedger(next.ledger, {
-      week: next.week,
-      amount: -pack.cost,
-      category: "marketing",
-      label: pack.name,
-      ref: `studio-mkt-${campaignId}-w${next.week}`,
-    });
     // Fold into active project spend so release sales see it
     if (next.currentProject) {
       next.currentProject = {
@@ -5048,6 +5824,8 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     const g = state.releasedGames.find((x) => x.id === gameId);
     if (!g) return "Game not found.";
     if (g.delisted || g.dormant) return "Title is not actively marketable.";
+    const mcap = canPurchaseMarketing(state);
+    if (mcap) return mcap;
     const spec = getCampaignSpec(campaignId);
     if (!spec) return "Unknown campaign.";
     const unlocked =
@@ -5075,35 +5853,36 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         cashAvailable: state.cash,
         unlocked: true,
       });
-      const cash = state.cash + result.cashDelta;
-      const ledger = applyLedger(state.ledger, {
-        week: state.week,
-        amount: result.cashDelta,
-        category: "marketing",
-        label: `${spec.name} on ${g.title}`,
-        gameId: g.id,
-        ref: `mkt-${result.event.campaignInstanceId}`,
-      });
-      const patch = {
-        marketingState: result.state,
-        marketingSpend: g.marketingSpend + spec.cost,
-      };
-      set({
-        cash,
-        ledger,
-        releasedGames: state.releasedGames.map((x) =>
-          x.id === gameId ? { ...x, ...patch } : x,
-        ),
-        activeSales: state.activeSales.map((x) =>
-          x.id === gameId ? { ...x, ...patch } : x,
-        ),
-        dirty: true,
-        notifications: pushNote(
-          state,
-          `Started ${spec.name} on "${g.title}" (−$${spec.cost.toLocaleString()}).`,
-          "info",
-        ),
-      });
+      if (result.cashDelta !== 0) {
+        const txn = commitTxnResult(state, {
+          week: state.week,
+          amount: result.cashDelta,
+          category: "marketing",
+          label: `${spec.name} on ${g.title}`,
+          gameId: g.id,
+          ref: `mkt-${result.event.campaignInstanceId}`,
+        });
+        if (!txn.applied) return "Campaign fee already applied.";
+        const patch = {
+          marketingState: result.state,
+          marketingSpend: g.marketingSpend + spec.cost,
+        };
+        set({
+          ...txn.state,
+          releasedGames: txn.state.releasedGames.map((x) =>
+            x.id === gameId ? { ...x, ...patch } : x,
+          ),
+          activeSales: txn.state.activeSales.map((x) =>
+            x.id === gameId ? { ...x, ...patch } : x,
+          ),
+          dirty: true,
+          notifications: pushNote(
+            txn.state,
+            `Started ${spec.name} on "${g.title}" (−$${spec.cost.toLocaleString()}).`,
+            "info",
+          ),
+        });
+      }
       return null;
     } catch (e) {
       return e instanceof Error ? e.message : "Could not start campaign.";
@@ -5153,16 +5932,26 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     });
     const cost = proj.bomCost * 400 + 50000;
     if (state.cash < cost) return `Needs $${cost.toLocaleString()} to fund architecture.`;
-    set({
-      cash: state.cash - cost,
-      hardwareProjects: [...(state.hardwareProjects ?? []), proj],
-      dirty: true,
-      notifications: pushNote(
-        state,
+    {
+      let next: GameState = {
+        ...state,
+        hardwareProjects: [...(state.hardwareProjects ?? []), proj],
+        dirty: true,
+      };
+      next = commitTxn(next, {
+        week: state.week,
+        amount: -cost,
+        category: "other",
+        label: `Hardware project: ${proj.name}`,
+        ref: `hw-proj-${proj.id}-w${state.week}`,
+      });
+      next.notifications = pushNote(
+        next,
         `Hardware project "${proj.name}" started. Performance is bottlenecked — not averaged.`,
         "info",
-      ),
-    });
+      );
+      set(next);
+    }
     return null;
   },
 
@@ -5193,13 +5982,12 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     };
 
     const ledgerCash = (amount: number, label: string) => {
-      next.cash += amount;
-      next.ledger = applyLedger(next.ledger, {
+      next = commitTxn(next, {
         week: next.week,
         amount,
         category: "cheat",
         label,
-        ref: `cheat-${label}-${next.week}-${Date.now()}`,
+        ref: `cheat-${label}-w${next.week}-n${(next.cheatLog ?? []).length}`,
       });
     };
 
@@ -5219,7 +6007,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       while (next.staff.length < cap) {
         const name = DREAM[next.staff.length % DREAM.length]!;
         next.staff.push({
-          id: uid("staff"),
+          id: uid("staff", next.campaignSeed, "cheat", tier, next.staff.length, name),
           name: tier === "dream" ? `${name} ★` : name,
           design,
           tech,
@@ -5246,7 +6034,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       );
       next.notifications = [
         {
-          id: uid("note"),
+          id: uid("note", next.campaignSeed, next.week, "cheat-hire", tier, added),
           text: added
             ? `CheatMod: hired ${added} ${tier === "dream" ? "1337" : "B-Team"} staff.`
             : `CheatMod: team full (cap ${cap}); stats boosted.`,
@@ -5473,7 +6261,6 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       case "office_ready":
         // Bible garage gate: 5 releases, 1k fans, profitable title, Y3+, $1M liquid
         next.fans = Math.max(next.fans, 1_000);
-        next.cash = Math.max(next.cash, 1_200_000);
         next.gamesPublished = Math.max(next.gamesPublished, 5);
         next.totalRevenue = Math.max(next.totalRevenue ?? 0, 250_000);
         next.week = Math.max(next.week, 96); // campaign year 3
@@ -5482,9 +6269,22 @@ export const useGame = create<GameState & Actions>((set, get) => ({
           next.year = d.year;
           next.month = d.month;
         }
+        {
+          const target = 1_200_000;
+          const delta = Math.max(0, target - next.cash);
+          if (delta > 0) {
+            next = commitTxn(next, {
+              week: next.week,
+              amount: delta,
+              category: "cheat",
+              label: "Office-ready cash pack",
+              ref: `cheat-office-ready-cash-w${next.week}`,
+            });
+          }
+        }
         // Seed a profitable released title if none exist (for proof evaluation)
         if (!(next.releasedGames ?? []).some((g) => (g.revenue ?? 0) > 5_000)) {
-          const stubId = uid("rel");
+          const stubId = uid("rel", next.campaignSeed, "office-ready-stub", next.week);
           const stub: ReleasedGame = {
             id: stubId,
             title: "Garage Hit",
@@ -5517,8 +6317,8 @@ export const useGame = create<GameState & Actions>((set, get) => ({
           };
           next.releasedGames = [stub, ...next.releasedGames];
         }
-        // Positive trailing OCF via ledger sales
-        next.ledger = applyLedger(next.ledger, {
+        // Positive trailing OCF via atomic sales seed (cash+ledger together)
+        next = commitTxn(next, {
           week: next.week - 2,
           amount: 40_000,
           category: "sales",
@@ -5539,7 +6339,19 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         break;
       case "move_to_final_level":
         next.office = 4 as typeof next.office;
-        next.cash = Math.max(next.cash, 5_000_000);
+        {
+          const target = 5_000_000;
+          const delta = Math.max(0, target - next.cash);
+          if (delta > 0) {
+            next = commitTxn(next, {
+              week: next.week,
+              amount: delta,
+              category: "cheat",
+              label: "Final-level cash pack",
+              ref: `cheat-final-level-cash-w${next.week}`,
+            });
+          }
+        }
         next.fans = Math.max(next.fans, 250_000);
         next.gamesPublished = Math.max(next.gamesPublished, 12);
         next.researchPoints = Math.max(next.researchPoints, 200);
@@ -5654,14 +6466,15 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         return;
       }
       case "random_trend": {
+        // Cheat-only: isolated from normal campaign determinism via cheat log week salt
         const g = (["action", "adventure", "rpg", "simulation", "strategy", "casual"] as const)[
-          Math.floor(Math.random() * 6)
+          Math.floor((hashSeed(next.campaignSeed, "cheat-trend-g", next.week, next.cheatLog?.length ?? 0) / 4294967296) * 6)
         ]!;
-        const topic = TOPICS[Math.floor(Math.random() * TOPICS.length)];
+        const topic = TOPICS[Math.floor((hashSeed(next.campaignSeed, "cheat-trend-t", next.week, next.cheatLog?.length ?? 0) / 4294967296) * TOPICS.length)];
         next.hype = Math.min(200, next.hype + 25);
         next.notifications = [
           {
-            id: uid("note"),
+            id: uid("note", next.campaignSeed, next.week, "cheat-trend", g, topic?.id ?? "?", (next.cheatLog ?? []).length),
             text: `CheatMod trend: ${topic?.name ?? "?"} ${g} is surging.`,
             tone: "warn" as const,
             week: next.week,
@@ -5693,7 +6506,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       case "reveal_seed":
         next.notifications = [
           {
-            id: uid("note"),
+            id: uid("note", next.campaignSeed, next.week, "reveal-seed", (next.cheatLog ?? []).length),
             text: `Campaign seed: ${next.campaignSeed}`,
             tone: "info" as const,
             week: next.week,
@@ -5746,7 +6559,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
           dirty: false,
           notifications: [
             {
-              id: uid("note"),
+              id: uid("note", st.campaignSeed, st.week, "import-save"),
               text: "Campaign loaded from JSON save.",
               tone: "good" as const,
               week: st.week,

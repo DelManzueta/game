@@ -86,7 +86,7 @@ export function evaluateEngineSuitability(opts: {
 
   // Tools
   const hasTools = modules.some((id) => moduleById(id)?.category === "tools");
-  let tools = clamp01(v.toolQuality * (hasTools ? 1 : 0.55));
+  const tools = clamp01(v.toolQuality * (hasTools ? 1 : 0.55));
   if (!hasTools && (opts.size === "large" || opts.size === "aaa")) {
     notes.push("Weak content tools for this scale — iteration will suffer.");
   }
@@ -121,7 +121,7 @@ export function evaluateEngineSuitability(opts: {
     deprecated: 0.3,
     sunset: 0.15,
   };
-  let longTermSupport = clamp01(
+  const longTermSupport = clamp01(
     (statusBoost[v.status] ?? 0.5) * 0.7 + v.maintainability * 0.3 - v.technicalDebt / 200,
   );
   if (v.status === "legacy" || v.status === "deprecated") {

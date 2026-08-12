@@ -718,7 +718,29 @@ export const PLATFORMS: PlatformDef[] = [
     },
     audienceAffinity: { young: "good", everyone: "great", mature: "great" },
   },
-  {
+
+];
+
+export const CUSTOM_CONSOLE: PlatformDef = {
+  id: "custom_console",
+  name: "Custom Console",
+  short: "CUS",
+  year: 9999,
+  era: "Custom",
+  licenseCost: 0,
+  marketSize: 0.8,
+  techCeiling: 1.4,
+  startUnlocked: false,
+  isCustom: true,
+  genreAffinity: { action: "good", adventure: "good", rpg: "good", simulation: "good", strategy: "good", casual: "good" },
+  audienceAffinity: { young: "good", everyone: "great", mature: "good" },
+};
+
+export const PLATFORM_COUNT = PLATFORMS.length;
+
+/** Post-2024 / speculative hardware — not Phase One canon (locked 50 platforms). */
+export const QUARANTINED_PLATFORMS: PlatformDef[] = [
+{
     id: "vena_flux",
     name: "Vena Flux",
     short: "VFlux",
@@ -824,22 +846,6 @@ export const PLATFORMS: PlatformDef[] = [
 
 ];
 
-export const CUSTOM_CONSOLE: PlatformDef = {
-  id: "custom_console",
-  name: "Custom Console",
-  short: "CUS",
-  year: 9999,
-  era: "Custom",
-  licenseCost: 0,
-  marketSize: 0.8,
-  techCeiling: 1.4,
-  startUnlocked: false,
-  isCustom: true,
-  genreAffinity: { action: "good", adventure: "good", rpg: "good", simulation: "good", strategy: "good", casual: "good" },
-  audienceAffinity: { young: "good", everyone: "great", mature: "good" },
-};
-
-export const PLATFORM_COUNT = PLATFORMS.length;
 
 export function getPlatformDef(id: string): PlatformDef | undefined {
   if (id === CUSTOM_CONSOLE.id) return CUSTOM_CONSOLE;

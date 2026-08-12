@@ -1,16 +1,12 @@
 import { z } from "zod";
 
-import { SAVE_KEY } from "./data";
+import { ALL_SAVE_KEYS, SAVE_KEY_V6 } from "./contracts";
+
+/** Current key — must match data.SAVE_KEY / SCHEMA_VERSION 6. */
+export const SAVE_KEY = SAVE_KEY_V6;
 
 /** Current key first, followed by every save key shipped by an earlier build. */
-export const SAVE_KEYS = [
-  SAVE_KEY,
-  "studio-empire-save-v5",
-  "studio-empire-save-v4",
-  "studio-empire-save-v3",
-  "studio-empire-save-v2",
-  "studio-empire-save-v1",
-] as const;
+export const SAVE_KEYS = ALL_SAVE_KEYS;
 
 /** Multi-slot campaign keys (3 slots to match glass board art). */
 export const SAVE_SLOT_COUNT = 3;

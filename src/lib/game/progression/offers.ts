@@ -31,6 +31,8 @@ export function emptyOffer(offerId: OfferId, gate: TransitionGate): OfficeOfferR
     minRunwayWeeks: gate.minRunwayWeeks,
     discoveredWeek: null,
     offeredWeek: null,
+    reminderWeeks: [],
+    reminderDueWeeks: [],
     acceptedWeek: null,
     completedWeek: null,
   };
@@ -216,24 +218,18 @@ export function tickOfficeOffers(
     offer = setOfferState(offer, "eligible", state.week);
   }
 
-  // Auto-surface as offered when eligible (player can defer)
-  if (offer.state === "eligible" || offer.state === "deferred") {
-    // stay offered; do not interrupt atomic release
-    if (!state.currentProject || state.currentProject.devPhase === "READY_TO_RELEASE") {
-      const midDev =
-        state.currentProject &&
-        (state.currentProject.devPhase.includes("RUNNING") ||
-          state.currentProject.devPhase.includes("CONFIG") ||
-          state.currentProject.devPhase === "POLISHING");
-      if (!midDev) {
-        offer = setOfferState(offer, "offered", state.week);
-      } else if (offer.state === "eligible") {
-        offer = setOfferState(offer, "offered", state.week);
-      }
-    } else if (offer.state === "eligible") {
+  // Auto-surface as offered when eligible. Deferred stays deferred (reminders separate).
+  if (offer.state === "eligible") {
+    const midDev =
+      state.currentProject &&
+      (state.currentProject.devPhase.includes("RUNNING") ||
+        state.currentProject.devPhase.includes("CONFIG") ||
+        state.currentProject.devPhase === "POLISHING");
+    if (!midDev) {
       offer = setOfferState(offer, "offered", state.week);
     }
   }
+  // deferred: keep deferred; store tick fires ≤2 reminders/year
 
   return { ...prog, offers: { ...prog.offers, first_office: offer } };
 }

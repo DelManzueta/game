@@ -225,7 +225,7 @@ export function classicReviewScore(opts: {
     maxScore,
   });
   // Soft slider damp only (never inflate above canon)
-  const sliderFit = clamp(1 - (opts.sliderMiss ?? 0) * 0.2, 0.85, 1);
+  const sliderFit = clamp(1 - (opts.sliderMiss ?? 0) * 0.45, 0.55, 1);
   const hidden = clamp(Math.round(gdt.final * sliderFit * 10) / 10, 1, maxScore);
   const seed = Math.floor(totalPoints * 17 + opts.bugs * 3 + gdt.nextHistorical * 5);
   const scores = [0, 1, 2, 3].map((i) => {

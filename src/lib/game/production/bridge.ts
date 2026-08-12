@@ -29,6 +29,8 @@ import {
 } from "./algorithm";
 import { DEFAULT_PRODUCTION_BALANCE } from "./algorithm";
 
+export { openBugsCount, openBugsSeveritySum };
+
 export function ensureProduction(
   project: GameProject,
   campaignSeed: string | number,
@@ -157,7 +159,11 @@ export function advanceProductionWeek(
         prod = r.state;
         cashCost += r.tick.cashCost;
         ticks.push(r.tick);
-        if (r.tick.completedStage != null) stageJustFinished = true;
+        if (r.tick.completedStage != null) {
+          stageJustFinished = true;
+          // Stop the week here so polish is player-controlled (no auto ship-clean).
+          break;
+        }
       } else if (prod.phase === PHASE_POLISH) {
         const r = advancePolishDay(prod, { day, founder });
         prod = r.state;

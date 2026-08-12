@@ -156,7 +156,7 @@ function profitableGame(id = "hit"): ReleasedGame {
 }
 
 function readyState(over: Partial<GameState> = {}): GameState {
-  let s = baseState({
+  const s = baseState({
     week: 100,
     year: 1984,
     month: 2,
@@ -266,7 +266,7 @@ describe("§36.2 Garage → First Office", () => {
       gamesPublished: 1,
       progression: createStudioProgression("classic_35"),
     });
-    let prog = tickOfficeOffers(s, s.progression!);
+    const prog = tickOfficeOffers(s, s.progression!);
     const offer = prog.offers.first_office;
     assert.ok(!offer || offer.state === "hidden" || offer.state === "discovered");
     // Force offer state and try accept — still fail on proofs path via eligible check
@@ -278,7 +278,7 @@ describe("§36.2 Garage → First Office", () => {
   });
 
   it("full proofs without liquid cash may offer but cannot accept", () => {
-    let s = readyState({ cash: 80_000 }); // below $1M liquid
+    const s = readyState({ cash: 80_000 }); // below $1M liquid
     let prog = tickOfficeOffers(s, s.progression!);
     prog = tickOfficeOffers(s, prog);
     const v = firstOfficeOfferView(s, prog);
@@ -300,7 +300,7 @@ describe("§36.2 Garage → First Office", () => {
   });
 
   it("defer freezes economics and remains available", () => {
-    let s = readyState();
+    const s = readyState();
     let prog = tickOfficeOffers(s, s.progression!);
     // advance until offered
     for (let i = 0; i < 3; i++) prog = tickOfficeOffers(s, prog);
@@ -324,7 +324,7 @@ describe("§36.2 Garage → First Office", () => {
   });
 
   it("accept reserves funds once and starts construction", () => {
-    let s = readyState();
+    const s = readyState();
     let prog = tickOfficeOffers(s, s.progression!);
     prog = {
       ...prog,
@@ -350,7 +350,7 @@ describe("§36.2 Garage → First Office", () => {
   });
 
   it("move completion grants 4 seats, no free employee, preserves games", () => {
-    let s = readyState();
+    const s = readyState();
     let prog = tickOfficeOffers(s, s.progression!);
     prog = {
       ...prog,
@@ -366,7 +366,7 @@ describe("§36.2 Garage → First Office", () => {
     assert.equal(acc.ok, true);
     if (!acc.ok) return;
     let state = acc.state;
-    let p = acc.progression;
+    const p = acc.progression;
     // week before complete
     state = { ...state, week: state.week + 1 };
     let ticked = tickActiveMove(state, p);
@@ -385,7 +385,7 @@ describe("§36.2 Garage → First Office", () => {
   });
 
   it("date alone never grants office tier", () => {
-    let s = baseState({ week: 500, year: 1992, month: 6, cash: 50_000 });
+    const s = baseState({ week: 500, year: 1992, month: 6, cash: 50_000 });
     let prog = createStudioProgression("classic_35");
     for (let i = 0; i < 10; i++) {
       prog = tickTenure(prog);

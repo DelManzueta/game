@@ -121,7 +121,14 @@ describe("finalize systems — duration", () => {
 
 describe("finalize systems — training", () => {
   it("Bug Squashing permanently raises stats and bugFixBonus", () => {
-    const member = generateStaff(1.3, 1985);
+    const member = {
+      ...generateStaff(1.0, 1985, { seed: 42, candidateIndex: 3 }),
+      design: 40,
+      tech: 40,
+      speed: 40,
+      level: 2,
+      bugFixBonus: 0,
+    };
     const course = getTrainingCourse("bug_squashing")!;
     const before = {
       d: member.design,
@@ -169,6 +176,8 @@ describe("finalize systems — staff & hire budget", () => {
     for (let i = 0; i < 50; i++) {
       const m = generateStaff(1.1 + (i % 5) * 0.05, 1979 + (i % 10), {
         forceStar: i % 9 === 0,
+        candidateIndex: i,
+        seed: 9000 + i,
       });
       names.add(m.name);
       designs.push(m.design);

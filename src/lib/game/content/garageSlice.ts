@@ -26,7 +26,7 @@ export const GARAGE_TOPIC_IDS = [
  * Early platforms the garage can eventually reach (not all day-one unlocked).
  * Availability still requires year + license (except PC + Itara start kit).
  */
-export const GARAGE_PLATFORM_IDS = ["pc", "commodore", "arcade", "tes", "master_v"] as const;
+export const GARAGE_PLATFORM_IDS = ["pc", "itara_5200", "commodore", "arcade", "tes", "master_v"] as const;
 
 export const GARAGE_GENRE_IDS: GenreId[] = [
   "action",

@@ -22,10 +22,10 @@ const VALS = new Set([100, 85, 70, 55, 35, 15]);
 
 describe("content catalog validation", () => {
   it("has exactly 132 unique topics", () => {
-    assert.equal(TOPICS.length, 132);
-    assert.equal(TOPIC_COUNT, 132);
     const ids = TOPICS.map((t) => t.id);
     const names = TOPICS.map((t) => t.name);
+    assert.equal(TOPICS.length, 132);
+    assert.equal(TOPIC_COUNT, 132);
     assert.equal(new Set(ids).size, 132);
     assert.equal(new Set(names).size, 132);
   });
@@ -59,17 +59,19 @@ describe("content catalog validation", () => {
     }
   });
 
-  it("50 fixed platforms include PC, Itara, and Commodore; Custom Console separate", () => {
+  it("exactly 50 fixed platforms include PC, Itara, and Commodore; Custom Console separate", () => {
     assert.equal(PLATFORMS.length, 50);
     assert.equal(PLATFORM_COUNT, 50);
-    assert.ok(PLATFORMS.some((p) => p.id === "pc"));
-    assert.ok(PLATFORMS.some((p) => p.id === "itara"));
-    assert.ok(PLATFORMS.some((p) => p.id === "intelli"));
-    assert.ok(PLATFORMS.some((p) => p.id === "odyssey"));
-    assert.ok(PLATFORMS.some((p) => p.id === "commodore"));
+    const ids = PLATFORMS.map((p) => p.id);
+    assert.equal(new Set(ids).size, 50);
+    assert.ok(ids.includes("pc"));
+    assert.ok(ids.includes("itara_5200"));
+    assert.ok(ids.includes("commodore"));
+    assert.ok(ids.includes("playsystem"));
+    assert.ok(ids.includes("mbox"));
+    assert.ok(CUSTOM_CONSOLE);
     assert.equal(CUSTOM_CONSOLE.id, "custom_console");
-    assert.ok(CUSTOM_CONSOLE.isCustom);
-    assert.ok(!PLATFORMS.some((p) => p.id === "custom_console"));
+    assert.ok(!ids.includes("custom_console"));
   });
 
   it("27 engine components: 1 starting Basic 2D V1 + 26 researchable", () => {

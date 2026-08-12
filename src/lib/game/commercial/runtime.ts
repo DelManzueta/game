@@ -135,29 +135,30 @@ export function initReleasedCommercial(opts: {
     marketCapacityRate: 0.012,
   };
 
-  const planTotal = planUnits.reduce((a, b) => a + b, 0);
-  const fansDelta = launchFanDelta({
-    avgReview,
-    awareness: released.awarenessAtLaunch,
-    fansAtLaunch: state.fans,
-    totalUnits: planTotal,
-    productQuality,
-  });
+  // Foundation Lock: NO projected lifetime fan award from plan units.
+  // Bounded review reaction only; weekly fans still come from actual sales.
+  const fansDelta =
+    avgReview >= 8.5 ? 25 : avgReview >= 7 ? 10 : avgReview >= 5.5 ? 0 : -5;
   released.fansGained = fansDelta;
-  released.fanHistory = [
-    { week: state.week, delta: fansDelta, reason: "launch_reaction" },
-  ];
+  released.fanHistory = fansDelta
+    ? [{ week: state.week, delta: fansDelta, reason: "review_reaction" as const }]
+    : [];
 
   let notification: { text: string; tone: "good" | "bad" | "info" } | undefined;
-  if (fansDelta > 120) {
+  if (fansDelta > 0) {
     notification = {
-      text: `Fans love it — +${fansDelta.toLocaleString()} followers after reviews.`,
+      text: `Reviews land — +${fansDelta} fans (sales convert later).`,
       tone: "good",
     };
-  } else if (fansDelta < -5) {
+  } else if (fansDelta < 0) {
     notification = {
-      text: `Reviews hurt the brand — ${fansDelta.toLocaleString()} fans.`,
+      text: `Soft reviews — ${fansDelta} fans.`,
       tone: "bad",
+    };
+  } else {
+    notification = {
+      text: "Reviews landed. Sales start next week.",
+      tone: "info",
     };
   }
 
@@ -376,34 +377,36 @@ export function tickReleasedSales(
       fanHistory,
     };
 
-    // Netflix Edition — 15% ongoing royalty on licensed titles
+    // Net sale only (IP royalty already netted). Cash + ledger stay locked.
+    // Garage: ip royalty rates should be zero when system quarantined.
     const royaltyRate =
       (g as { ipRoyaltyRate?: number }).ipRoyaltyRate ??
       ((next.ipRoyaltyGameIds ?? []).includes(g.id) ? 0.15 : 0);
     let netRev = rev;
     if (royaltyRate > 0 && rev > 0) {
       netRev = applyIpRoyalty(rev, royaltyRate);
-      const cut = rev - netRev;
-      next.ledger = applyLedger(next.ledger, {
-        week: next.week,
-        amount: -cut,
-        category: "other",
-        label: `IP royalty (${Math.round(royaltyRate * 100)}%): ${g.title}`,
-        gameId: g.id,
-        ref: `ip-royalty-${g.id}-w${g.weeksOnMarket}`,
-      });
     }
-    next.cash += netRev;
-    next.totalRevenue += netRev;
+    netRev = Math.round(netRev * 100) / 100;
+    next.cash = Math.round((next.cash + netRev) * 100) / 100;
+    next.totalRevenue = Math.round((next.totalRevenue + netRev) * 100) / 100;
     if (netRev !== 0) {
+      const before = next.ledger;
       next.ledger = applyLedger(next.ledger, {
         week: next.week,
         amount: netRev,
         category: "sales",
-        label: `Sales: ${g.title}`,
+        label:
+          royaltyRate > 0
+            ? `Sales (net after IP royalty): ${g.title}`
+            : `Sales: ${g.title}`,
         gameId: g.id,
         ref: `sales-${g.id}-w${g.weeksOnMarket}`,
       });
+      // if ledger rejected duplicate, roll back cash
+      if (before && next.ledger.balance === before.balance && netRev !== 0) {
+        next.cash = Math.round((next.cash - netRev) * 100) / 100;
+        next.totalRevenue = Math.round((next.totalRevenue - netRev) * 100) / 100;
+      }
     }
     still.push(updated);
     next.releasedGames = next.releasedGames.map((rg) =>

@@ -132,7 +132,7 @@ export const DEFAULT_PRODUCTION_BALANCE: ProductionBalance = {
   polishWorkPerDay: 200,
   polishDailyCost: 55,
   // Linear size: 1× / 2× / 3× / 4× → 4 / 8 / 12 / 16 weeks.
-  sizeSwuFactor: { small: 1, medium: 2, large: 3, aaa: 4 },
+  sizeSwuFactor: { small: 1, medium: 2.2, large: 4, aaa: 7.5 },
   sizeBugFactor: { small: 0.62, medium: 1, large: 1.15, aaa: 1.35 },
 };
 

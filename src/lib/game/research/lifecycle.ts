@@ -1,3 +1,4 @@
+import { hashSeed } from "../scoring/rng";
 /**
  * Research pipeline state machine — observe → research → prototype → integrate → use → mature.
  */
@@ -153,7 +154,7 @@ export function tryMarkResearchable(
   techId: string,
   opts: Parameters<typeof canBecomeResearchable>[1],
 ): ResearchPipelineState {
-  let next = ensureCompanyTech(pipe, techId);
+  const next = ensureCompanyTech(pipe, techId);
   const cur = next.knowledge[techId]!;
   if (cur.state !== "observed" && cur.state !== "unknown") return next;
   const check = canBecomeResearchable(techId, opts);
@@ -235,7 +236,7 @@ export function tickResearchPipeline(
   week: number,
 ): { pipe: ResearchPipelineState; notes: string[] } {
   const notes: string[] = [];
-  let knowledge = { ...pipe.knowledge };
+  const knowledge = { ...pipe.knowledge };
   const jobs: ResearchPipelineState["activePipelineJobs"] = [];
 
   for (const job of pipe.activePipelineJobs) {
@@ -257,7 +258,7 @@ export function tickResearchPipeline(
     if (job.phase === "researching") {
       // Partial success still advances to prototype
       const risk = def?.prototypeRisk ?? 0.15;
-      const limited = Math.random() < risk * 0.35;
+      const limited = (hashSeed("research-risk", risk, "limited") / 4294967296) < risk * 0.35;
       knowledge[job.techId] = {
         ...cur,
         state: "prototype",
@@ -327,7 +328,7 @@ export function recordCommercialUse(
   featureKeys: string[],
   week: number,
 ): ResearchPipelineState {
-  let knowledge = { ...pipe.knowledge };
+  const knowledge = { ...pipe.knowledge };
   for (const t of TECH_CATALOG) {
     if (!t.featureKey || !featureKeys.includes(t.featureKey)) continue;
     const cur = knowledge[t.id];

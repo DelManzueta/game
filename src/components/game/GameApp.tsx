@@ -18,6 +18,7 @@ import {
   getTopic,
 } from "@/lib/game/data";
 import { isGarageTopic } from "@/lib/game/content/garageSlice";
+import { isGaragePhaseOne } from "@/lib/game/phaseOne";
 import { ENGINE_COMPONENTS } from "@/lib/game/content/engines";
 import {
   SELECTABLE_MODULES,
@@ -98,15 +99,14 @@ const BAR_COLORS = ["#e86a4a", "#3aaa6a", "#3aa0d8", "#e8941a", "#9b6ad8", "#4ec
 export function GameApp() {
   const phase = useGame((s) => s.phase);
   const speed = useGame((s) => s.speed);
-  const tick = useGame((s) => s.tick);
 
   useEffect(() => {
     if (phase !== "playing" || speed === 0) return;
-    // Tuned so a small (~8 in-game weeks) lands near ~1–1.5 min at 1× with stage pauses
+    // Stable interval: only phase/speed restart the timer (not store action identity).
     const ms = speed === 1 ? 1100 : speed === 2 ? 520 : 260;
     const id = window.setInterval(() => useGame.getState().tick(), ms);
     return () => window.clearInterval(id);
-  }, [phase, speed, tick]);
+  }, [phase, speed]);
 
   if (phase === "menu") return <MainMenu />;
   if (phase === "gameover") return <GameOverScreen />;
@@ -223,6 +223,12 @@ function MainMenu() {
                 setErr("Name your studio.");
                 return;
               }
+              if (has) {
+                const ok = window.confirm(
+                  "A saved campaign already exists. Start a new campaign and overwrite it?",
+                );
+                if (!ok) return;
+              }
               newGame(name, pirate, difficulty);
             }}
           >
@@ -242,6 +248,7 @@ function MainMenu() {
               <Button
                 variant="ghost"
                 onClick={() => {
+                  if (!window.confirm("Delete the browser save permanently?")) return;
                   deleteSave();
                   setHas(false);
                 }}
@@ -250,62 +257,6 @@ function MainMenu() {
               </Button>
             </div>
           )}
-          <a
-            href="/neoncore-os.html"
-            target="_blank"
-            rel="noreferrer"
-            className="block w-full rounded-lg border border-border bg-elevated px-3 py-2.5 text-center text-xs font-bold uppercase tracking-wide text-muted transition hover:border-accent hover:text-accent"
-          >
-            NEONCORE OS · experimental IDE sim
-          </a>
-          <a
-            href="/studio-os-v34.html"
-            target="_blank"
-            rel="noreferrer"
-            className="block w-full rounded-lg border border-border bg-elevated px-3 py-2.5 text-center text-xs font-bold uppercase tracking-wide text-muted transition hover:border-accent hover:text-accent"
-          >
-            Studio OS v3.4 · burnout / deals / tech debt
-          </a>
-          <a
-            href="/studio-os-v35.html"
-            target="_blank"
-            rel="noreferrer"
-            className="block w-full rounded-lg border border-border bg-elevated px-3 py-2.5 text-center text-xs font-bold uppercase tracking-wide text-muted transition hover:border-accent hover:text-accent"
-          >
-            Studio OS v3.5 · accessory factory
-          </a>
-          <a
-            href="/studio-os-v37.html"
-            target="_blank"
-            rel="noreferrer"
-            className="block w-full rounded-lg border border-border bg-elevated px-3 py-2.5 text-center text-xs font-bold uppercase tracking-wide text-muted transition hover:border-accent hover:text-accent"
-          >
-            Studio OS v3.7 · High-Density workbench
-          </a>
-          <a
-            href="/studio-os-v38.html"
-            target="_blank"
-            rel="noreferrer"
-            className="block w-full rounded-lg border border-border bg-elevated px-3 py-2.5 text-center text-xs font-bold uppercase tracking-wide text-muted transition hover:border-accent hover:text-accent"
-          >
-            Studio OS v3.8 · Netflix IDE
-          </a>
-          <a
-            href="/neoncore-v40.html"
-            target="_blank"
-            rel="noreferrer"
-            className="block w-full rounded-lg border border-border bg-elevated px-3 py-2.5 text-center text-xs font-bold uppercase tracking-wide text-muted transition hover:border-accent hover:text-accent"
-          >
-            NEONCORE v4.0 · Definitive IDE
-          </a>
-          <a
-            href="/neoncore-v48.html"
-            target="_blank"
-            rel="noreferrer"
-            className="block w-full rounded-lg border border-border bg-elevated px-3 py-2.5 text-center text-xs font-bold uppercase tracking-wide text-muted transition hover:border-accent hover:text-accent"
-          >
-            NEONCORE v4.8 · Platform Monolith
-          </a>
         </div>
       </div>
     </div>
@@ -400,6 +351,7 @@ function StudioTopBar({ forcePause }: { forcePause: boolean }) {
   const month = useGame((s) => s.month);
   const cash = useGame((s) => s.cash);
   const fans = useGame((s) => s.fans);
+  const researchPoints = useGame((s) => s.researchPoints);
   const speed = useGame((s) => s.speed);
   const setSpeed = useGame((s) => s.setSpeed);
   const setModal = useGame((s) => s.setModal);
@@ -442,7 +394,17 @@ function StudioTopBar({ forcePause }: { forcePause: boolean }) {
 
       <div className="ml-auto flex items-center gap-2 sm:gap-3">
         <span className="se-metric se-metric-fans hidden sm:inline">{formatFans(fans)} fans</span>
-        <span className="se-metric se-metric-cash">{formatCash(cash)}</span>
+        <span
+          className={cnJoin(
+            "se-metric se-metric-cash",
+            cash < 0 ? "text-[#ff7a6a]" : "text-[#6fd39a]",
+          )}
+        >
+          {formatCash(cash)}
+        </span>
+        <span className="se-metric hidden text-[#9bb7ff] sm:inline" title="Research points">
+          {Math.floor(researchPoints)} RP
+        </span>
         <div className="se-speed" role="group" aria-label="Game speed">
           {(
             [
@@ -491,15 +453,18 @@ function StudioDock() {
   const screen = useGame((s) => s.screen);
   const setScreen = useGame((s) => s.setScreen);
   const office = useGame((s) => s.office);
+  const gamesPublished = useGame((s) => s.gamesPublished);
+  const garage = isGaragePhaseOne({ office });
   const items: { id: typeof screen; label: string; icon: typeof Home }[] = [
-    { id: "studio", label: "Studio", icon: Home },
-    { id: "games", label: "Games", icon: Gamepad2 },
-    { id: "market", label: "Market", icon: TrendingUp },
-    { id: "platforms", label: "Systems", icon: Cpu },
-    { id: "research", label: "Lab", icon: FlaskConical },
-    { id: "settings", label: "More", icon: Settings },
+    { id: "studio", label: "Garage", icon: Home },
   ];
-  void office;
+  if (gamesPublished > 0) items.push({ id: "games", label: "Library", icon: Gamepad2 });
+  if (!garage) {
+    items.push({ id: "market", label: "Market", icon: TrendingUp });
+    items.push({ id: "platforms", label: "Systems", icon: Cpu });
+  }
+  items.push({ id: "research", label: "Lab", icon: FlaskConical });
+  items.push({ id: "settings", label: "More", icon: Settings });
   void Users;
   void Wallet;
 
@@ -523,15 +488,34 @@ function StudioDock() {
 /* ═══════════════════════════ Garage room ═══════════════════════════ */
 
 function GarageRoomView({ immersive = false }: { immersive?: boolean }) {
-  const state = useGame();
-  const ov = studioOverview(state);
+  const companyName = useGame((s) => s.companyName);
+  const office = useGame((s) => s.office);
+  const currentProject = useGame((s) => s.currentProject);
+  const hype = useGame((s) => s.hype);
+  const researchPoints = useGame((s) => s.researchPoints);
+  const gamesPublished = useGame((s) => s.gamesPublished);
+  // Primitive deps only — never return fresh objects from the selector (infinite loop).
+  const phase = projectPhaseLabel(currentProject);
   const setModal = useGame((s) => s.setModal);
   const setScreen = useGame((s) => s.setScreen);
-  const busy = !!state.currentProject?.devPhase.includes("RUNNING");
-  const art = roomArtDefForOffice(state.office);
+  const busy = !!currentProject?.devPhase.includes("RUNNING");
+  const art = roomArtDefForOffice(office);
   const screen = useGame((s) => s.screen);
+  const garage = isGaragePhaseOne({ office });
+  // Read-only overview snapshot on this render (subs above drive re-renders).
+  const officeGoal = studioOverview(useGame.getState()).officeGoal;
   // Room is always the world under chrome; hide action chrome on pure secondary screens
-  const showChrome = screen === "studio" || screen === "develop";
+  const showChrome = screen === "studio";
+
+  const primaryLabel = !currentProject
+    ? "Develop a game"
+    : currentProject.devPhase === "READY_TO_RELEASE"
+      ? "Finish & release"
+      : currentProject.devPhase.includes("CONFIG")
+        ? "Allocate stage"
+        : currentProject.devPhase === "POLISHING"
+          ? "Polish build"
+          : `Open desk · ${phase.title}`;
 
   return (
     <div className={immersive ? "se-room" : "relative mx-auto w-full max-w-5xl"}>
@@ -548,101 +532,76 @@ function GarageRoomView({ immersive = false }: { immersive?: boolean }) {
         <>
           <div className="se-room-caption pointer-events-none">
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#f0b24a]/95">
-              {state.currentProject
-                ? busy
-                  ? art.hotspotBusy
-                  : art.hotspotOpen
-                : art.hotspotIdle}
+              {currentProject ? (busy ? art.hotspotBusy : art.hotspotOpen) : art.hotspotIdle}
             </p>
             <div className="mt-1 flex flex-wrap items-end justify-between gap-3">
               <div>
                 <h1 className="text-lg font-semibold tracking-tight text-white/90 sm:text-xl">
-                  {state.companyName}
+                  {companyName}
                 </h1>
-                <p className="text-xs text-white/40">
-                  {state.office === 1
-                    ? "Garage · Phase One"
-                    : state.office === 2
-                      ? "Small office"
-                      : state.office >= 4
-                        ? "Global campus"
-                        : "Studio floor"}
+                <p className="text-xs text-white/45">
+                  {garage ? "Garage loft · Phase One" : office === 2 ? "Small office" : "Studio floor"}
                 </p>
               </div>
-              {ov.officeGoal && !ov.officeGoal.activeMove && (
+              {officeGoal && !officeGoal.activeMove && (
                 <p className="max-w-[18rem] text-right text-[12px] leading-snug text-white/50">
                   <span className="text-[#f0b24a]/90">
-                    L{ov.officeGoal.stageLevel ?? state.office} {ov.officeGoal.stageName ?? "Studio"} ·{" "}
+                    L{officeGoal.stageLevel ?? office} {officeGoal.stageName ?? "Studio"} ·{" "}
                   </span>
-                  {ov.officeGoal.nextName
-                    ? `Next ${ov.officeGoal.nextName}: hold ${formatCash(ov.officeGoal.cashNeed)}`
+                  {officeGoal.nextName
+                    ? `Next ${officeGoal.nextName}: hold ${formatCash(officeGoal.cashNeed)}`
                     : "Max campus"}
-                  {ov.officeGoal.nextHint ? ` — ${ov.officeGoal.nextHint}` : ""}
+                  {officeGoal.nextHint ? ` — ${officeGoal.nextHint}` : ""}
                 </p>
               )}
             </div>
           </div>
 
-          {/* Master loop command strip (Module 6) */}
+          {/* Contextual hotspots — no ops keypad */}
           <div className="se-float-actions">
-            {!state.currentProject ? (
-              <button type="button" className="se-cta" onClick={() => setModal("newGame")}>
-                1 · Develop game
-              </button>
-            ) : state.currentProject.devPhase === "READY_TO_RELEASE" ? (
-              <button type="button" className="se-cta" onClick={() => setScreen("develop")}>
-                1 · Finish · Release
-              </button>
-            ) : state.currentProject.devPhase.includes("CONFIG") ? (
-              <button type="button" className="se-cta" onClick={() => setScreen("develop")}>
-                1 · Configure stage
-              </button>
-            ) : state.currentProject.devPhase === "POLISHING" ? (
-              <button type="button" className="se-cta" onClick={() => setScreen("develop")}>
-                1 · Polish build
-              </button>
-            ) : (
-              <button type="button" className="se-cta" onClick={() => setScreen("develop")}>
-                1 · Desk · {ov.phase.title}
+            <button
+              type="button"
+              className="se-cta"
+              onClick={() => {
+                if (!currentProject) setModal("newGame");
+                else setScreen("develop");
+              }}
+            >
+              {primaryLabel}
+            </button>
+            <button type="button" className="se-cta-secondary" onClick={() => setScreen("research")}>
+              Research
+            </button>
+            {gamesPublished > 0 && (
+              <button type="button" className="se-cta-secondary" onClick={() => setScreen("games")}>
+                Library
               </button>
             )}
-            <button type="button" className="se-cta-secondary" onClick={() => setScreen("market")}>
-              2 · Marketing
-            </button>
-            <button type="button" className="se-cta-secondary" onClick={() => setScreen("finances")}>
-              3 · Contracts
-            </button>
-            <button type="button" className="se-cta-secondary" onClick={() => setScreen("platforms")}>
-              4 · Systems
-            </button>
-            <button type="button" className="se-cta-secondary" onClick={() => setScreen("engines")}>
-              5 · Engines
-            </button>
-            <button type="button" className="se-cta-secondary" onClick={() => setScreen("staff")}>
-              6 · People
-            </button>
+            {!garage && (
+              <button type="button" className="se-cta-secondary" onClick={() => setScreen("market")}>
+                Marketing
+              </button>
+            )}
             <button type="button" className="se-cta-secondary" onClick={() => setModal("loopGuide")}>
               How it works
             </button>
-            {(ov.officeGoal?.offerState === "offered" ||
-              ov.officeGoal?.offerState === "deferred") && (
+            {(officeGoal?.offerState === "offered" || officeGoal?.offerState === "deferred") && (
               <button type="button" className="se-cta-secondary" onClick={() => setModal("officeOffer")}>
                 Office offer
               </button>
             )}
-            {ov.officeGoal?.canMove && (
+            {officeGoal?.canMove && (
               <button
                 type="button"
                 className="se-cta"
                 onClick={() => useGame.getState().upgradeOffice()}
               >
-                Move · {ov.officeGoal.nextName ?? "Next office"}
+                Move · {officeGoal.nextName ?? "Next office"}
               </button>
             )}
           </div>
-          <p className="mt-2 text-center text-[10px] font-semibold tabular text-white/55">
-            Hype {Math.round(state.hype)} · RP {Math.floor(state.researchPoints)} · Staff{" "}
-            {state.staff.length}
+          <p className="pointer-events-none absolute bottom-[4.6rem] left-0 right-0 text-center text-[10px] font-semibold tabular text-white/50 sm:bottom-[5.1rem]">
+            Hype {Math.round(hype)} · {Math.floor(researchPoints)} RP · {gamesPublished} shipped
           </p>
         </>
       )}
@@ -793,9 +752,12 @@ function ProjectModsBar() {
   const setProjectDrm = useGame((s) => s.setProjectDrm);
   const unlockDrm = useGame((s) => s.unlockDrm);
   const toggleIllicitAssets = useGame((s) => s.toggleIllicitAssets);
+  const office = useGame((s) => s.office);
   const knownCombos = useGame((s) => s.knownCombos) ?? {};
   const rp = useGame((s) => s.researchPoints);
   const [msg, setMsg] = useState("");
+  // Foundation Lock / Phase One: hide late production mods in the Garage.
+  if (isGaragePhaseOne({ office })) return null;
   if (!project) return null;
   const secs = project.secondaryPlatformIds ?? [];
   const candidates = unlocked.filter((id) => id !== project.platformId).slice(0, 8);
@@ -816,6 +778,7 @@ function ProjectModsBar() {
         >
           {project.crunchMode ? "Crunch ON · 1.45×" : "Crunch OFF"}
         </Button>
+        {(office ?? 1) > 1 && (
         <Button
           size="sm"
           variant={project.usedIllicitAssets ? "danger" : "secondary"}
@@ -823,6 +786,7 @@ function ProjectModsBar() {
         >
           {project.usedIllicitAssets ? "Illicit assets ON" : "Clean assets"}
         </Button>
+        )}
         {(project.crisisReviewPenalty ?? 0) > 0 && (
           <span className="rounded-full border border-red-400/40 px-2 py-1 text-[10px] font-bold text-red-300">
             Review pen −{project.crisisReviewPenalty}
@@ -933,15 +897,13 @@ function DevelopOverlay({ sheet = false }: { sheet?: boolean }) {
             Close
           </button>
         </div>
-        <div className="shrink-0 px-3 pt-2">
-          <ProjectModsBar />
-        </div>
-        <div className="relative h-20 shrink-0 overflow-hidden sm:h-24">
+        <div className="relative h-14 shrink-0 overflow-hidden sm:h-16">
           <img src={deskArt} alt="" className="h-full w-full object-cover object-center" draggable={false} />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/75 to-transparent" />
         </div>
         <div className="se-desk-scroll">
           <DevelopPanel />
+          <ProjectModsBar />
         </div>
       </div>
     );
@@ -1001,6 +963,17 @@ function DevelopPanel() {
       <p className="text-center text-xs text-muted">
         {getTopic(project.topicId)?.name}/{getGenre(project.genreId).name} · {getPlatform(project.platformId)?.name}
       </p>
+      <div className="mt-2 flex flex-wrap items-center justify-center gap-2 text-[11px] font-bold tabular">
+        <span className="rounded-full border border-[#e8941a]/35 bg-[#e8941a]/15 px-2.5 py-0.5 text-[#f0b24a]">
+          Design {Math.round(project.designPoints ?? 0)}
+        </span>
+        <span className="rounded-full border border-[#3aa0d8]/35 bg-[#3aa0d8]/15 px-2.5 py-0.5 text-[#7ec8f0]">
+          Tech {Math.round(project.techPoints ?? 0)}
+        </span>
+        <span className="rounded-full border border-[#e86a4a]/35 bg-[#e86a4a]/12 px-2.5 py-0.5 text-[#ff9a86]">
+          Bugs {project.bugs ?? 0}
+        </span>
+      </div>
 
       {isConfig && (
         <>
@@ -1241,7 +1214,28 @@ function VerticalAllocBar({
     <div className="flex w-16 flex-col items-center sm:w-20">
       <div
         ref={trackRef}
-        className="alloc-bar-track cursor-ns-resize"
+        role="slider"
+        tabIndex={0}
+        aria-label={label}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={value}
+        className="alloc-bar-track cursor-ns-resize touch-none"
+        onKeyDown={(e) => {
+          if (e.key === "ArrowUp" || e.key === "ArrowRight") {
+            e.preventDefault();
+            onChange(Math.min(100, value + 5));
+          } else if (e.key === "ArrowDown" || e.key === "ArrowLeft") {
+            e.preventDefault();
+            onChange(Math.max(0, value - 5));
+          } else if (e.key === "Home") {
+            e.preventDefault();
+            onChange(0);
+          } else if (e.key === "End") {
+            e.preventDefault();
+            onChange(100);
+          }
+        }}
         onPointerDown={(e) => {
           (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
           setFromPointer(e.clientY);
@@ -1251,21 +1245,27 @@ function VerticalAllocBar({
           setFromPointer(e.clientY);
         }}
       >
-        <div className="alloc-bar-fill" style={{ height: `${value}%`, background: color }} />
+        <div
+          className="alloc-bar-fill"
+          style={{
+            height: `${value}%`,
+            background: color,
+          }}
+        />
       </div>
-      <div className="mt-2 text-center text-[10px] font-bold leading-tight text-fg sm:text-[11px]">
-        {label}
-      </div>
-      <div className="tabular text-xs font-bold text-muted">{value}</div>
       <input
         type="range"
         min={0}
         max={100}
         value={value}
-        aria-label={label}
-        className="mt-1 w-full sm:hidden"
+        aria-label={`${label} allocation`}
+        className="mt-2 w-full accent-[var(--color-accent)]"
         onChange={(e) => onChange(Number(e.target.value))}
       />
+      <div className="mt-1 text-center text-[10px] font-bold uppercase tracking-wide text-white/70">
+        {label}
+      </div>
+      <div className="text-sm font-bold tabular text-white/90">{value}</div>
     </div>
   );
 }
@@ -1350,13 +1350,18 @@ function MarketingPanel() {
 function GamesScreen() {
   const games = useGame((s) => s.releasedGames);
   const selectGame = useGame((s) => s.selectGame);
+  const selectedGameId = useGame((s) => s.selectedGameId);
   const setModal = useGame((s) => s.setModal);
+  const completeReport = useGame((s) => s.completeReport);
   const startTitleCampaign = useGame((s) => s.startTitleCampaign);
   const year = useGame((s) => s.year);
-  const [sel, setSel] = useState<string | null>(null);
+  const office = useGame((s) => s.office);
+  const garage = isGaragePhaseOne({ office });
+  const [sel, setSel] = useState<string | null>(selectedGameId);
   const [campMsg, setCampMsg] = useState("");
   const rows = libraryRows(games);
-  const selected = games.find((g) => g.id === (sel ?? games[0]?.id));
+  const activeId = sel ?? selectedGameId ?? games[0]?.id ?? null;
+  const selected = games.find((g) => g.id === activeId) ?? null;
   const chartPts = selected ? salesPointsFromGame(selected) : [];
   const isPlan =
     !!selected &&
@@ -1367,7 +1372,7 @@ function GamesScreen() {
     <ScreenBackdrop screen="games">
       <div className="game-panel px-4 py-3 text-center">
         <h2 className="text-2xl font-bold text-fg">Library</h2>
-        <p className="mt-0.5 text-sm text-muted">Sales graphs · reviews · campaigns</p>
+        <p className="mt-0.5 text-sm text-muted">Sales · reviews · reports</p>
       </div>
       {!rows.length && (
         <p className="mt-6 text-center text-muted">
@@ -1378,12 +1383,15 @@ function GamesScreen() {
         {rows.map((r) => {
           const g = games.find((x) => x.id === r.id);
           const thumb = g ? platformThumb(g.platformId, g.yearReleased ?? year) : undefined;
-          const on = (sel ?? games[0]?.id) === r.id;
+          const on = activeId === r.id;
           return (
             <li key={r.id}>
               <button
                 type="button"
-                onClick={() => setSel(r.id)}
+                onClick={() => {
+                  setSel(r.id);
+                  selectGame(r.id);
+                }}
                 className={cnJoin(
                   "flex w-full items-center gap-3 rounded-xl border p-3 text-left",
                   on ? "border-accent bg-accent/15" : "border-border bg-paper",
@@ -1470,14 +1478,25 @@ function GamesScreen() {
             </Button>
             <Button
               size="sm"
-              variant="secondary"
-              onClick={() =>
-                setCampMsg(startTitleCampaign(selected.id, "flyer_run") ?? "Flyer started.")
-              }
+              onClick={() => {
+                selectGame(selected.id);
+                completeReport(selected.id);
+              }}
             >
-              Flyer campaign
+              {selected.reportDone ? "View report" : "Game report"}
             </Button>
-            <PatchDlcButtons gameId={selected.id} onMsg={setCampMsg} />
+            {!garage && (
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() =>
+                  setCampMsg(startTitleCampaign(selected.id, "flyer_run") ?? "Flyer started.")
+                }
+              >
+                Flyer campaign
+              </Button>
+            )}
+            {!garage && <PatchDlcButtons gameId={selected.id} onMsg={setCampMsg} />}
             {campMsg && <p className="w-full text-xs text-muted">{campMsg}</p>}
           </div>
         </div>
@@ -1514,11 +1533,22 @@ function ResearchScreen() {
   const active = useGame((s) => s.activeResearch);
   const pipeline = useGame((s) => s.researchPipeline);
   const year = useGame((s) => s.year);
+  const office = useGame((s) => s.office);
+  const garage = isGaragePhaseOne({ office });
   const startResearch = useGame((s) => s.startResearch);
   const [msg, setMsg] = useState("");
   const [tab, setTab] = useState<"studio" | "pipeline">("pipeline");
-  const available = RESEARCH.filter((r) => !researched.includes(r.id)).slice(0, 24);
-  const pipeRows = TECH_CATALOG.filter((t) => year >= t.earliestYear - 2).map((def) => {
+  const available = RESEARCH.filter((r) => {
+    if (researched.includes(r.id)) return false;
+    if (garage && "minYear" in r && typeof (r as { minYear?: number }).minYear === "number") {
+      return ((r as { minYear?: number }).minYear ?? 0) <= year + 2;
+    }
+    return true;
+  }).slice(0, garage ? 12 : 24);
+  const pipeRows = TECH_CATALOG.filter((t) => {
+    if (garage) return year >= t.earliestYear - 1 && t.earliestYear <= year + 8;
+    return year >= t.earliestYear - 2;
+  }).map((def) => {
     const st = pipeline?.knowledge[def.id];
     return {
       def,
@@ -3251,11 +3281,11 @@ function SaveLoadPanel() {
   };
 
   return (
-    <div className="space-y-2 rounded-xl border border-border bg-paper p-3">
+    <div className="space-y-3 rounded-xl border border-border bg-paper p-3">
       <div>
-        <h3 className="text-sm font-bold text-fg">Save / Load JSON</h3>
+        <h3 className="text-sm font-bold text-fg">Save & backup</h3>
         <p className="text-[11px] text-muted">
-          Browser autosave slot + portable full-campaign JSON files.
+          Keep your campaign safe. Autosave also runs while you play.
         </p>
       </div>
       {msg && (
@@ -3267,69 +3297,78 @@ function SaveLoadPanel() {
           onClick={() => {
             saveGame();
             setBrowserHasSave(true);
-            setMsg("Saved to browser slot.");
+            setMsg("Campaign saved.");
           }}
         >
-          Save to browser
+          Save
         </Button>
         <Button
           className="w-full"
           variant="secondary"
           disabled={!browserHasSave}
           onClick={() => {
+            if (!window.confirm("Load the browser save? Unsaved progress will be lost.")) return;
             const ok = loadGame();
             setBrowserHasSave(hasSave());
-            setMsg(ok ? "Loaded browser slot." : "No browser save found.");
+            setMsg(ok ? "Campaign loaded." : "No browser save found.");
           }}
         >
-          Load browser slot
+          Load
         </Button>
         <Button className="w-full" variant="secondary" onClick={downloadJson}>
-          Download .json
+          Export backup
         </Button>
-        <Button className="w-full" variant="secondary" onClick={() => void copyJson()}>
-          Copy full JSON
-        </Button>
+        <label className="block w-full">
+          <span className="sr-only">Import backup file</span>
+          <span className="inline-flex h-10 w-full cursor-pointer items-center justify-center rounded-lg border border-border bg-elevated px-3 text-sm font-semibold text-fg">
+            Import backup
+          </span>
+          <input
+            type="file"
+            accept="application/json,.json"
+            className="sr-only"
+            onChange={(e) => onFile(e.target.files?.[0] ?? null)}
+          />
+        </label>
       </div>
-      <label className="block">
-        <span className="mb-1 block text-[10px] font-bold uppercase text-muted">Import file</span>
-        <input
-          type="file"
-          accept="application/json,.json"
-          className="block w-full text-xs text-muted file:mr-2 file:rounded-md file:border-0 file:bg-accent file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-white"
-          onChange={(e) => onFile(e.target.files?.[0] ?? null)}
-        />
-      </label>
-      <label className="block">
-        <span className="mb-1 block text-[10px] font-bold uppercase text-muted">Paste JSON</span>
-        <textarea
-          value={paste}
-          onChange={(e) => setPaste(e.target.value)}
-          rows={4}
-          placeholder='{"version":…,"companyName":…}'
-          className="w-full resize-y rounded-lg border border-border bg-elevated px-2 py-1.5 font-mono text-[10px] text-fg"
-        />
-      </label>
-      <Button className="w-full" variant="secondary" disabled={!paste.trim()} onClick={doImport}>
-        Load pasted JSON
-      </Button>
-      <Button
-        className="w-full"
-        variant="ghost"
-        onClick={() => {
-          const j = exportSaveMatrix();
-          setPreview(j);
-          void navigator.clipboard?.writeText(j);
-          setMsg("Compact save matrix copied (telemetry-style snapshot).");
-        }}
-      >
-        Copy compact matrix
-      </Button>
-      {preview && (
-        <pre className="max-h-28 overflow-auto rounded-lg border border-border bg-panel p-2 text-[10px] text-muted">
-          {preview}
-        </pre>
-      )}
+      <details className="rounded-lg border border-dashed border-border/80 bg-elevated/40 p-2">
+        <summary className="cursor-pointer text-[11px] font-bold uppercase tracking-wide text-muted">
+          Developer tools
+        </summary>
+        <div className="mt-2 space-y-2">
+          <Button className="w-full" size="sm" variant="ghost" onClick={() => void copyJson()}>
+            Copy full JSON
+          </Button>
+          <textarea
+            value={paste}
+            onChange={(e) => setPaste(e.target.value)}
+            rows={3}
+            placeholder="Paste raw save JSON…"
+            className="w-full resize-y rounded-lg border border-border bg-paper px-2 py-1.5 font-mono text-[10px] text-fg"
+          />
+          <Button className="w-full" size="sm" variant="secondary" disabled={!paste.trim()} onClick={doImport}>
+            Load pasted JSON
+          </Button>
+          <Button
+            className="w-full"
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              const j = exportSaveMatrix();
+              setPreview(j);
+              void navigator.clipboard?.writeText(j);
+              setMsg("Compact matrix copied.");
+            }}
+          >
+            Copy compact matrix
+          </Button>
+          {preview && (
+            <pre className="max-h-24 overflow-auto rounded-lg border border-border bg-panel p-2 text-[10px] text-muted">
+              {preview}
+            </pre>
+          )}
+        </div>
+      </details>
     </div>
   );
 }
@@ -3337,58 +3376,45 @@ function SaveLoadPanel() {
 function SettingsScreen() {
   const setModal = useGame((s) => s.setModal);
   const returnToMenu = useGame((s) => s.returnToMenu);
-  const setScreen = useGame((s) => s.setScreen);
-  const [panel, setPanel] = useState<"unlocks" | "contracts" | "hardware" | "netflix" | "platform" | "engines" | "none">("unlocks");
+  const office = useGame((s) => s.office);
+  const garage = isGaragePhaseOne({ office });
+  const [panel, setPanel] = useState<"unlocks" | "none">("unlocks");
   return (
     <div className="mx-auto max-w-lg space-y-3 px-1 pb-4 pt-1">
       <div className="game-panel px-4 py-3 text-center">
         <h2 className="text-2xl font-bold text-fg">More</h2>
-        <p className="text-sm text-muted">Unlocks · contracts · staff · engines</p>
+        <p className="text-sm text-muted">{garage ? "Save · unlocks · pause" : "Studio tools"}</p>
       </div>
       <div className="flex flex-wrap gap-2">
         <Button size="sm" variant={panel === "unlocks" ? "primary" : "secondary"} onClick={() => setPanel("unlocks")}>
-          Unlocks
-        </Button>
-        <Button size="sm" variant={panel === "contracts" ? "primary" : "secondary"} onClick={() => setPanel("contracts")}>
-          Contracts
-        </Button>
-        <Button size="sm" variant={panel === "hardware" ? "primary" : "secondary"} onClick={() => setPanel("hardware")}>
-          Hardware
-        </Button>
-        <Button size="sm" variant={panel === "netflix" ? "primary" : "secondary"} onClick={() => setPanel("netflix")}>
-          Netflix
-        </Button>
-        <Button size="sm" variant={panel === "platform" ? "primary" : "secondary"} onClick={() => setPanel("platform")}>
-          NeonStore
-        </Button>
-        <Button size="sm" variant={panel === "engines" ? "primary" : "secondary"} onClick={() => setPanel("engines")}>
-          Engines
-        </Button>
-        <Button size="sm" variant="secondary" onClick={() => setScreen("staff")}>
-          People
-        </Button>
-        <Button size="sm" variant="secondary" onClick={() => setScreen("finances")}>
-          Books
-        </Button>
-        <Button size="sm" variant="secondary" onClick={() => setScreen("engines")}>
-          Engines
+          Progress unlocks
         </Button>
       </div>
       {panel === "unlocks" && <UnlocksScreen embedded />}
-      {panel === "contracts" && (<><OpsPublisherDeals /><ContractsScreen /></>)}
-      {panel === "hardware" && <HardwareLabScreen />}
-      {panel === "netflix" && <NetflixEditionScreen />}
-      {panel === "platform" && <PlatformScreen />}
-      {panel === "engines" && <TEngineScreen />}
       <SaveLoadPanel />
       <div className="space-y-2">
         <Button className="w-full" variant="secondary" onClick={() => setModal("pauseMenu")}>
           Pause menu
         </Button>
-        <Button className="w-full" variant="secondary" onClick={() => setModal("cheats")}>
-          CheatMod
+        <Button className="w-full" variant="secondary" onClick={() => setModal("loopGuide")}>
+          How the loop works
         </Button>
-        <Button className="w-full" variant="ghost" onClick={() => returnToMenu()}>
+        <details className="rounded-xl border border-border bg-paper p-2">
+          <summary className="cursor-pointer px-1 py-1 text-xs font-bold uppercase tracking-wide text-muted">
+            Developer / CheatMod
+          </summary>
+          <Button className="mt-2 w-full" variant="secondary" onClick={() => setModal("cheats")}>
+            Open CheatMod
+          </Button>
+        </details>
+        <Button
+          className="w-full"
+          variant="ghost"
+          onClick={() => {
+            if (!window.confirm("Save and return to the main menu?")) return;
+            returnToMenu();
+          }}
+        >
           Exit to menu
         </Button>
       </div>
@@ -3415,7 +3441,10 @@ function NewGameModal() {
   const office = useGame((s) => s.office);
   const staffCount = useGame((s) => s.staff.length);
   const year = useGame((s) => s.year);
-  const topics = TOPICS.filter((t) => unlockedTopics.includes(t.id) && (!garageSlice || isGarageTopic(t.id)));
+  // Unlocked topics always list; Garage catalog is the unlock source, not a second filter that hides research unlocks.
+  const topics = TOPICS.filter((t) => unlockedTopics.includes(t.id));
+  void garageSlice;
+  void isGarageTopic;
   const genres = GENRES.filter((g) => unlockedGenres.includes(g.id));
   const platforms = PLATFORMS.filter((p) => unlockedPlatforms.includes(p.id) && (p.year <= year || p.startUnlocked));
   const sizes = availableSizes(researched, unlocks, { office, staffCount });
@@ -3917,9 +3946,11 @@ function setScreen(id: ScreenId) {
 function ReviewsModal() {
   const modal = useGame((s) => s.modal);
   const setModal = useGame((s) => s.setModal);
-  const id = useGame((s) => s.lastReviewGameId);
+  const lastId = useGame((s) => s.lastReviewGameId);
+  const selectedId = useGame((s) => s.selectedGameId);
   const games = useGame((s) => s.releasedGames);
-  const g = games.find((x) => x.id === id) ?? games[0];
+  const id = selectedId ?? lastId;
+  const g = id ? games.find((x) => x.id === id) : undefined;
   if (!g || modal !== "reviews") return null;
   return (
     <Modal open title={`Reviews For ${g.title}`} onClose={() => setModal(null)}>
@@ -3953,20 +3984,55 @@ function ReportModal() {
   const setModal = useGame((s) => s.setModal);
   const completeReport = useGame((s) => s.completeReport);
   const knowledge = useGame((s) => s.knowledge);
+  const selectedGameId = useGame((s) => s.selectedGameId);
+  const lastReviewGameId = useGame((s) => s.lastReviewGameId);
+  const games = useGame((s) => s.releasedGames);
   if (modal !== "report") return null;
-  const entry = knowledge.entries[0];
+  const gameId =
+    selectedGameId ??
+    lastReviewGameId ??
+    games.find((g) => !g.reportDone)?.id ??
+    games[0]?.id ??
+    null;
+  const game = gameId ? games.find((g) => g.id === gameId) : undefined;
+  const entries = knowledge.entries.filter((e) => e.sourceGameId === gameId);
   return (
-    <Modal open title="Game Report" onClose={() => setModal(null)}>
-      {entry ? (
+    <Modal open title={game ? `Report · ${game.title}` : "Game Report"} onClose={() => setModal(null)}>
+      {!game ? (
+        <p className="text-sm text-muted">Pick a shipped title from the Library first.</p>
+      ) : !game.reportDone ? (
         <>
-          <h3 className="font-bold">{entry.label}</h3>
-          <p className="mt-2 text-sm text-muted">{entry.detail}</p>
-          <Button className="mt-4 w-full" onClick={() => { completeReport(entry.key); setModal(null); }}>
-            File report
+          <p className="text-sm text-muted">
+            Spend a short post-mortem on <strong>{game.title}</strong> to learn combo and market lessons.
+          </p>
+          <Button
+            className="mt-4 w-full"
+            onClick={() => {
+              completeReport(game.id);
+            }}
+          >
+            Start report
           </Button>
         </>
+      ) : entries.length ? (
+        <div className="space-y-3">
+          {entries.map((entry) => (
+            <div key={entry.key} className="rounded-lg border border-border bg-elevated p-3">
+              <h3 className="font-bold text-fg">{entry.label}</h3>
+              <p className="mt-1 text-sm text-muted">{entry.detail}</p>
+            </div>
+          ))}
+          <Button className="w-full" onClick={() => setModal(null)}>
+            Close
+          </Button>
+        </div>
       ) : (
-        <p className="text-sm text-muted">No report pending.</p>
+        <>
+          <p className="text-sm text-muted">Report filed for {game.title}. Insights are in your knowledge log.</p>
+          <Button className="mt-4 w-full" onClick={() => setModal(null)}>
+            Close
+          </Button>
+        </>
       )}
     </Modal>
   );
@@ -3992,7 +4058,7 @@ function PauseMenu() {
             setScreen("settings");
           }}
         >
-          Save / Load JSON…
+          Save & backup…
         </Button>
         <Button className="w-full" variant="secondary" onClick={() => setModal("loopGuide")}>
           How the loop works
@@ -4340,28 +4406,31 @@ function EventModal() {
   const resolveEvent = useGame((s) => s.resolveEvent);
   const open = modal === "event" && !!pending;
   if (!pending) return null;
+  const choices = pending.choices ?? [{ label: "Continue", effect: "Dismiss" }];
+  // Prefer dismiss-safe first option for soft events (Not now / Pass / Continue)
   return (
     <Modal
       open={open}
       onClose={() => {
-        /* Must choose — closing without choice defaults to first option */
         resolveEvent(0);
       }}
       title={pending.title}
     >
-      <p className="text-sm leading-relaxed text-fg">{pending.body}</p>
-      <div className="mt-4 flex flex-col gap-2">
-        {(pending.choices ?? [{ label: "Continue", effect: "Dismiss" }]).map((c, i) => (
+      <p className="max-h-[28dvh] overflow-y-auto whitespace-pre-line text-sm leading-relaxed text-fg sm:max-h-none">
+        {pending.body}
+      </p>
+      <div className="mt-4 flex max-h-[42dvh] flex-col gap-2 overflow-y-auto sm:max-h-none">
+        {choices.map((c, i) => (
           <Button
             key={`${c.label}-${i}`}
-            className="w-full justify-start text-left"
-            variant={i === 0 ? "primary" : "secondary"}
+            className="min-h-12 w-full justify-start px-3 py-3 text-left sm:min-h-11"
+            variant={i === 0 ? "secondary" : i === 1 ? "primary" : "secondary"}
             onClick={() => resolveEvent(i)}
           >
             <span className="flex w-full flex-col items-start gap-0.5">
-              <span>{c.label}</span>
+              <span className="text-[15px] font-semibold leading-snug">{c.label}</span>
               {c.effect ? (
-                <span className="text-[11px] font-medium opacity-80">{c.effect}</span>
+                <span className="text-[12px] font-medium leading-snug opacity-80">{c.effect}</span>
               ) : null}
             </span>
           </Button>

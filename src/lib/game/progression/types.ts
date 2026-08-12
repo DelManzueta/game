@@ -82,6 +82,10 @@ export interface OfficeOfferRecord {
   minRunwayWeeks: number;
   discoveredWeek: number | null;
   offeredWeek: number | null;
+  /** Weeks when a deferred reminder was shown (max 2 per campaign year). */
+  reminderWeeks?: number[];
+  /** Scheduled reminder windows that are due but not yet displayed (blocked weeks). */
+  reminderDueWeeks?: number[];
   acceptedWeek: number | null;
   completedWeek: number | null;
 }

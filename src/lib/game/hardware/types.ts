@@ -1,3 +1,4 @@
+import { hashSeed } from "../scoring/rng";
 /**
  * Proprietary hardware development scaffold (Part 2 §§12–14).
  * Bottlenecked axes — never average component tech into one score.
@@ -239,7 +240,7 @@ export function createHardwareProject(opts: {
     return s + (c?.unitCost ?? 0);
   }, 0);
   return {
-    id: `hw_${opts.week}_${Math.random().toString(36).slice(2, 7)}`,
+    id: `hw_${opts.week}_${hashSeed("hw", opts.week, opts.name ?? "", opts.purpose ?? "").toString(16).slice(0, 7)}`,
     name: opts.name,
     purpose: opts.purpose,
     phase: "architecture",
