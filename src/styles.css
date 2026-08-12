@@ -749,7 +749,7 @@
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 4.75rem;
+  bottom: 5.75rem;
   padding: 2.5rem 1rem 0.5rem;
   background: linear-gradient(180deg, transparent, rgba(10, 8, 6, 0.72));
 }
@@ -763,7 +763,7 @@
   flex-wrap: wrap;
   gap: 0.5rem;
   justify-content: center;
-  max-width: min(34rem, calc(100% - 1.25rem));
+  max-width: min(28rem, calc(100% - 1.25rem));
   padding-bottom: env(safe-area-inset-bottom);
 }
 .se-panel {
@@ -1063,4 +1063,25 @@
   background: rgba(36, 28, 20, 0.96) !important;
   border-color: rgba(255, 220, 180, 0.14) !important;
   color: #f6efe6 !important;
+}
+
+
+/* Phase One desk sheet: keep craft panel dark over the room */
+.se-desk-scroll .paper-card {
+  background: rgba(18, 14, 10, 0.55);
+  border: 1px solid rgba(255, 220, 180, 0.12);
+  color: #f6efe6;
+  box-shadow: none;
+}
+.se-desk-scroll .paper-card .text-muted,
+.se-desk-scroll .paper-card .text-subtle {
+  color: rgba(243, 235, 224, 0.62) !important;
+}
+.se-desk-scroll .paper-card h2 {
+  color: #f6efe6;
+}
+@media (min-width: 768px) {
+  .se-dock {
+    padding-inline: 1.25rem;
+  }
 }
