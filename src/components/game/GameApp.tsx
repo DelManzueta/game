@@ -174,7 +174,11 @@ function MainMenu() {
             </label>
             <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={32} />
           </div>
-          <label className="flex items-center justify-center gap-2 text-sm text-fg">
+          <details className="rounded-lg border border-border bg-elevated/50 px-3 py-2">
+            <summary className="cursor-pointer text-center text-xs font-bold uppercase tracking-wide text-muted">
+              Options
+            </summary>
+          <label className="mt-2 flex items-center justify-center gap-2 text-sm text-fg">
             <input
               type="checkbox"
               className="h-4 w-4 accent-[var(--color-accent)]"
@@ -183,7 +187,7 @@ function MainMenu() {
             />
             Pirate mode (harder sales)
           </label>
-          <div>
+          <div className="mt-3">
             <label className="mb-1.5 block text-center text-xs font-bold uppercase tracking-wide text-muted">
               Difficulty
             </label>
@@ -214,6 +218,7 @@ function MainMenu() {
               Adjusts cash, competition, cert strictness — not topic/genre meaning.
             </p>
           </div>
+          </details>
           {err && <p className="text-center text-sm text-bad">{err}</p>}
           <Button
             className="w-full"
@@ -230,6 +235,7 @@ function MainMenu() {
                 if (!ok) return;
               }
               newGame(name, pirate, difficulty);
+              useGame.getState().setSpeed(0);
             }}
           >
             <Sparkles className="h-4 w-4" aria-hidden="true" />
@@ -294,6 +300,10 @@ function PlayingShell() {
   const project = useGame((s) => s.currentProject);
   const phase = projectPhaseLabel(project);
   const forcePause = phase.needsPlayerInput && !!project;
+  const speed = useGame((s) => s.speed);
+  useEffect(() => {
+    if (forcePause && speed !== 0) useGame.getState().setSpeed(0);
+  }, [forcePause, speed]);
   const secondary =
     screen === "games" ||
     screen === "research" ||
@@ -411,7 +421,6 @@ function StudioTopBar({ forcePause }: { forcePause: boolean }) {
               [0, Pause, "Pause"],
               [1, Play, "Play"],
               [2, FastForward, "Fast"],
-              [4, FastForward, "Max"],
             ] as const
           ).map(([s, Icon, label]) => (
             <button
@@ -582,7 +591,7 @@ function GarageRoomView({ immersive = false }: { immersive?: boolean }) {
                 Marketing
               </button>
             )}
-            <button type="button" className="se-cta-secondary" onClick={() => setModal("loopGuide")}>
+            <button type="button" className="se-cta-quiet" onClick={() => setModal("loopGuide")}>
               How it works
             </button>
             {(officeGoal?.offerState === "offered" || officeGoal?.offerState === "deferred") && (
@@ -1019,8 +1028,16 @@ function DevelopPanel() {
             </div>
           </div>
           {msg && <p className="mt-2 text-center text-sm text-bad">{msg}</p>}
-          <Button className="mt-4 w-full" size="lg" onClick={() => setMsg(confirmStage() ?? "")}>
-            OK
+          <Button
+            className="mt-4 w-full"
+            size="lg"
+            onClick={() => {
+              const next = confirmStage();
+              setMsg(next ?? "");
+              if (!next) useGame.getState().setSpeed(1);
+            }}
+          >
+            Start this stage
           </Button>
         </>
       )}
@@ -3531,7 +3548,9 @@ function NewGameModal() {
       open={modal === "newGame"}
       onClose={() => setModal(null)}
       title={titleByStep[step]}
+      description={step === "concept" ? "Name it. Pick topic, genre, and platform. Then start." : undefined}
       wide
+      tone="studio"
     >
       {/* ── Concept hub (GDT Game Concept) ── */}
       {step === "concept" && (
@@ -3586,6 +3605,7 @@ function NewGameModal() {
                 <span>{getPlatform(platformId)?.name ?? "Pick Platform"}</span>
               </div>
             </button>
+            {(graphicOptions.length > 1 || soundOptions.length > 0) && (
             <button type="button" className={chipBtn(featureIds.length > 0)} onClick={() => setStep("tech")}>
               <div className="text-[10px] font-bold uppercase tracking-wide text-muted">Tech pack</div>
               <div className="truncate">
@@ -3595,6 +3615,7 @@ function NewGameModal() {
                   .replace("Basic 2D Graphics V1", "2D Graphics V1") || "Choose graphics"}
               </div>
             </button>
+            )}
           </div>
 
           {(unlocks.audience === "owned" || flags.audience) && (
@@ -3631,11 +3652,11 @@ function NewGameModal() {
           <p className="text-center text-xs text-muted">
             Fit {combo.topicGenre}/{combo.platformGenre} · Cash {formatCash(cash)}
           </p>
-          <div className="mt-2">
-            <p className="mb-1 text-center text-[10px] font-bold uppercase text-muted">
-              Project pillar
-            </p>
-            <div className="flex flex-wrap justify-center gap-1">
+          <details className="rounded-xl border border-white/10 bg-black/20 px-3 py-2">
+            <summary className="cursor-pointer text-center text-[11px] font-bold uppercase tracking-wide text-white/45">
+              Advanced · pillar {PILLAR_LABELS[pillar]}
+            </summary>
+            <div className="mt-2 flex flex-wrap justify-center gap-1">
               {(Object.keys(PILLAR_LABELS) as ProjectPillar[]).map((id) => (
                 <button
                   key={id}
@@ -3647,7 +3668,7 @@ function NewGameModal() {
                 </button>
               ))}
             </div>
-          </div>
+          </details>
           {err && <p className="text-center text-sm text-red-300">{err}</p>}
           <Button
             size="lg"
@@ -3953,7 +3974,7 @@ function ReviewsModal() {
   const g = id ? games.find((x) => x.id === id) : undefined;
   if (!g || modal !== "reviews") return null;
   return (
-    <Modal open title={`Reviews For ${g.title}`} onClose={() => setModal(null)}>
+    <Modal open title={`Reviews · ${g.title}`} onClose={() => setModal(null)} tone="studio">
       <div className="space-y-3">
         {g.reviewScores.map((sc, i) => (
           <div key={i} className="flex items-start gap-4">
@@ -3997,7 +4018,7 @@ function ReportModal() {
   const game = gameId ? games.find((g) => g.id === gameId) : undefined;
   const entries = knowledge.entries.filter((e) => e.sourceGameId === gameId);
   return (
-    <Modal open title={game ? `Report · ${game.title}` : "Game Report"} onClose={() => setModal(null)}>
+    <Modal open title={game ? `Report · ${game.title}` : "Game Report"} onClose={() => setModal(null)} tone="studio">
       {!game ? (
         <p className="text-sm text-muted">Pick a shipped title from the Library first.</p>
       ) : !game.reportDone ? (
@@ -4045,7 +4066,7 @@ function PauseMenu() {
   const saveGame = useGame((s) => s.saveGame);
   const returnToMenu = useGame((s) => s.returnToMenu);
   return (
-    <Modal open={modal === "pauseMenu"} onClose={() => setModal(null)} title="Paused">
+    <Modal open={modal === "pauseMenu"} onClose={() => setModal(null)} title="Paused" tone="studio">
       <div className="space-y-2">
         <Button className="w-full" onClick={() => { saveGame(); setModal(null); }}>
           Save & resume
