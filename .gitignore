@@ -1,7 +1,9 @@
 node_modules/
 .vercel/
 dist/
+.output/
 .nitro/
+.wrangler/
 node_modules/.nitro/
 *.log
 .env
@@ -14,6 +16,7 @@ artifacts/imagine_videos/
 artifacts/searched_images/
 *.pid
 *.sock
+.node_modules.lock
 
 # Agent QA screenshots (local only)
 screenshots/

@@ -10,10 +10,25 @@ export type ProductionStage = 1 | 2 | 3;
 export type GenreCapacityTier = 1 | 2 | 3 | 4;
 
 export const SCHEMA_VERSION = 6;
+export const SAVE_KEY_V1 = "studio-empire-save-v1";
+export const SAVE_KEY_V2 = "studio-empire-save-v2";
 export const SAVE_KEY_V3 = "studio-empire-save-v3";
 export const SAVE_KEY_V4 = "studio-empire-save-v4";
 export const SAVE_KEY_V5 = "studio-empire-save-v5";
 export const SAVE_KEY_V6 = "studio-empire-save-v6";
+
+/**
+ * Every localStorage key the loader has ever recognized (newest first).
+ * Keep in sync with `SAVE_KEYS` in save.ts — delete/migrate must cover all.
+ */
+export const ALL_SAVE_KEYS = [
+  SAVE_KEY_V6,
+  SAVE_KEY_V5,
+  SAVE_KEY_V4,
+  SAVE_KEY_V3,
+  SAVE_KEY_V2,
+  SAVE_KEY_V1,
+] as const;
 
 export const GENRE_CAPACITY_WEIGHTS: Record<GenreCapacityTier, readonly number[]> = {
   1: [1.0],
