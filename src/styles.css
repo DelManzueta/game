@@ -1427,6 +1427,20 @@
 .se-project-chip header strong { display: block; font-size: 0.95rem; letter-spacing: -0.02em; }
 .se-project-chip header span { display: block; margin-top: 0.1rem; font-size: 0.7rem; color: rgba(230,236,240,0.62); }
 .se-project-chip header img { width: 1.65rem; height: 1.65rem; object-fit: cover; border-radius: 0.35rem; }
+.se-project-chip--idle {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+.se-project-chip--idle img {
+  width: 4.4rem;
+  height: 3.1rem;
+  object-fit: cover;
+  border-radius: 0.5rem;
+  flex-shrink: 0;
+}
+.se-project-chip--idle strong { display: block; font-size: 0.92rem; }
+.se-project-chip--idle span { display: block; margin-top: 0.15rem; font-size: 0.72rem; color: rgba(230,236,240,0.62); }
 .se-project-phase {
   display: flex; justify-content: space-between;
   margin: 0.5rem 0 0.25rem;
