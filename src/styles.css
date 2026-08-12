@@ -1085,3 +1085,17 @@
     padding-inline: 1.25rem;
   }
 }
+
+
+.se-cta-quiet {
+  min-height: 2.1rem;
+  padding: 0.35rem 0.7rem;
+  border: 0;
+  background: transparent;
+  color: rgba(243, 235, 224, 0.62);
+  font-size: 0.72rem;
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.se-cta-quiet:hover { color: rgba(243, 235, 224, 0.92); }

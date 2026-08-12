@@ -130,6 +130,7 @@ export function Modal({
   description,
   children,
   wide,
+  tone = "paper",
 }: {
   open: boolean;
   onClose: () => void;
@@ -137,33 +138,59 @@ export function Modal({
   description?: string;
   children: ReactNode;
   wide?: boolean;
+  tone?: "paper" | "studio";
 }) {
+  const studio = tone === "studio";
   return (
     <DialogPrimitive.Root open={open} onOpenChange={(next) => !next && onClose()}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-overlay backdrop-blur-[2px] data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out data-[state=open]:fade-in" />
         <DialogPrimitive.Content
           className={cnJoin(
-            "fixed inset-x-0 bottom-0 z-50 flex max-h-[min(90dvh,100%)] flex-col overflow-hidden rounded-t-2xl border-2 border-border-strong bg-paper text-fg shadow-[var(--shadow-soft)] outline-none data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:slide-out-to-bottom-4 data-[state=open]:slide-in-from-bottom-4 max-sm:left-0 max-sm:right-0 max-sm:w-full sm:bottom-auto sm:left-1/2 sm:top-1/2 sm:w-[calc(100%-2rem)] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:data-[state=closed]:zoom-out-95 sm:data-[state=open]:zoom-in-95",
+            "fixed inset-x-0 bottom-0 z-50 flex max-h-[min(90dvh,100%)] flex-col overflow-hidden rounded-t-2xl border-2 outline-none data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:slide-out-to-bottom-4 data-[state=open]:slide-in-from-bottom-4 max-sm:left-0 max-sm:right-0 max-sm:w-full sm:bottom-auto sm:left-1/2 sm:top-1/2 sm:w-[calc(100%-2rem)] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:data-[state=closed]:zoom-out-95 sm:data-[state=open]:zoom-in-95",
+            studio
+              ? "border-white/12 bg-[#1c1610] text-[#f6efe6] shadow-[0_-18px_50px_rgba(0,0,0,0.5)]"
+              : "border-border-strong bg-paper text-fg shadow-[var(--shadow-soft)]",
             wide ? "sm:max-w-3xl" : "sm:max-w-lg",
           )}
         >
-          <header className="relative shrink-0 border-b border-border px-11 pb-2.5 pt-3 text-center sm:px-12 sm:pb-3 sm:pt-4">
-            <DialogPrimitive.Title className="text-base font-bold tracking-tight text-fg sm:text-xl">
+          <header
+            className={cnJoin(
+              "relative shrink-0 border-b px-11 pb-2.5 pt-3 text-center sm:px-12 sm:pb-3 sm:pt-4",
+              studio ? "border-white/10" : "border-border",
+            )}
+          >
+            <DialogPrimitive.Title
+              className={cnJoin(
+                "text-base font-bold tracking-tight sm:text-xl",
+                studio ? "text-[#f6efe6]" : "text-fg",
+              )}
+            >
               {title}
             </DialogPrimitive.Title>
             {description ? (
-              <DialogPrimitive.Description className="mt-1 text-sm text-muted">
+              <DialogPrimitive.Description className={cnJoin("mt-1 text-sm", studio ? "text-white/55" : "text-muted")}>
                 {description}
               </DialogPrimitive.Description>
             ) : null}
             <DialogPrimitive.Close asChild>
-              <IconButton label="Close" className="absolute right-3 top-3 text-muted hover:text-fg">
+              <IconButton
+                label="Close"
+                className={cnJoin(
+                  "absolute right-3 top-3",
+                  studio ? "text-white/50 hover:text-white" : "text-muted hover:text-fg",
+                )}
+              >
                 <X aria-hidden="true" className="h-5 w-5" />
               </IconButton>
             </DialogPrimitive.Close>
           </header>
-          <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-2.5 text-fg sm:px-5 sm:pt-3">
+          <div
+            className={cnJoin(
+              "min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-2.5 sm:px-5 sm:pt-3",
+              studio ? "text-[#f6efe6]" : "text-fg",
+            )}
+          >
             {children}
           </div>
         </DialogPrimitive.Content>
